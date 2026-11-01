@@ -44,9 +44,17 @@ coverage.xml
 # Antigravity / AI Agent artifacts
 .agents/
 
-# Benchmark output data (can be regenerated with run_phase1.py)
+# Rust / Cargo build artifacts
+/target/
+
+# Benchmark output data & downloaded SIFT corpora (regenerated via Cargo / run_phase1.py)
 data/*.fvecs
 data/*.ivecs
+data/**/*.fvecs
+data/**/*.ivecs
+data/**/*.tar.gz
+data/**/*.part
+data/**/*.json
 
 # Operating System files
 .DS_Store

@@ -7,6 +7,25 @@ on:
     branches: [ main ]
 
 jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy linter
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run Rust test suite (release)
+        run: cargo test --release
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -15,6 +34,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust Phase 1 release binary
+        run: cargo build --release --bin phase1
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -30,6 +55,10 @@ jobs:
         run: |
           ruff check .
 
-      - name: Run Pytest & Coverage
+      - name: Run Mypy Type Checker
+        run: |
+          mypy src tests
+
+      - name: Run Pytest & Cross-Language Parity Suite
         run: |
           python -m pytest tests/ --cov=src --cov-report=term-missing
