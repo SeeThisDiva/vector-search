@@ -58,15 +58,15 @@ Layer L_0   :   [Node A] -> [D] -> [C] -> [E] -> [Node B] -> ...   (All N vector
 
 ## Phase 2 Results (`siftsmall` 10,000 $\times$ 128-d, `M=16`, `efConstruction=100`, $k=10$)
 
-Recall is deterministic (seed 42). Latencies are single-threaded and hardware-dependent; this table was produced on a 1-core Linux Xeon sandbox, so regenerate it on your own machine with the command below before quoting latency or speedup.
+Recall is deterministic (seed 42). Latencies are single-threaded and measured on `12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)`.
 
 | efSearch | Recall@10 | Mean latency (ms) | p99 (ms) | Speedup vs brute force |
 |---------:|----------:|------------------:|---------:|-----------------------:|
-| 10  | 95.1%  | 0.014 | 0.021 | 16.3x |
-| 20  | 98.6%  | 0.023 | 0.032 | 10.1x |
-| 50  | 100.0% | 0.047 | 0.094 | 4.9x  |
-| 100 | 100.0% | 0.081 | 0.137 | 2.8x  |
-| 200 | 100.0% | 0.137 | 0.197 | 1.7x  |
+| 10  | 95.1%  | 0.024 | 0.035 | 10.3x |
+| 20  | 98.6%  | 0.042 | 0.060 | 5.9x  |
+| 50  | 100.0% | 0.066 | 0.100 | 3.7x  |
+| 100 | 100.0% | 0.108 | 0.147 | 2.3x  |
+| 200 | 100.0% | 0.186 | 0.254 | 1.3x  |
 
 Acceptance target: some efSearch reaches Recall@10 >= 0.98 at < 0.05 ms mean latency (met at efSearch=20). `siftsmall` is easy (recall saturates by efSearch=50), so treat these as a correctness check; Phase 3 on `SIFT1M` is the real test.
 
