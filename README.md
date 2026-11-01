@@ -25,14 +25,16 @@ Layer L_1   :   [Node A] -----> [Node C] -----> [Node B]           (Intermediate
 Layer L_0   :   [Node A] -> [D] -> [C] -> [E] -> [Node B] -> ...   (All N vectors, beam search ef=efSearch)
 ```
 
-- [x] **Phase 1: Brute-Force Exact $k$-NN Ground Truth & Recall Measurement Harness** *(Current — Halted for Review)*
+- [x] **Phase 1: Brute-Force Exact $k$-NN Ground Truth & Recall Measurement Harness**
   - From-scratch Rust `ExactKnn` engine (`L2` squared, Euclidean, Inner Product) with canonical `(distance, id)` deterministic tie-breaking
   - Standard Texmex `.fvecs` / `.ivecs` little-endian readers & writers with full per-record header integrity checks
   - Public SIFT downloader/loader (`siftsmall` 10k $\times$ 128-d and `SIFT1M` 1M $\times$ 128-d) + deterministic seeded `Xoshiro256**` synthetic offline fallback + custom `.fvecs` support
   - Automated `Recall@k` (`Recall@1`, `Recall@5`, `Recall@10`, `Recall@100`) and `Recall@k(GT, GT) == 1.0` self-verification invariant
   - Per-query latency percentile profiler (`min`, `mean`, `p50`, `p95`, `p99`, `max`, `QPS`) & host hardware detector
   - Python + `faiss.IndexFlatL2` cross-language parity verification suite
-- [ ] **Phase 2: HNSW Insert + Search, Correctness-Checked on 10k Vectors**
+- [x] **Phase 2: HNSW Insert + Search, Correctness-Checked on 10k Vectors**
+  - From-scratch `HnswIndex` (Algorithms 1-5: insert, search-layer, heuristic neighbor selection, k-NN search) with deterministic seeded layer sampling, `Recall@10` vs `efSearch` sweep and bit-exact reproducibility check
+  - `m_max`, `m_max0` and `m_l` are derived from `M` unless explicitly overridden; vector ids must be inserted in order `0..n`
 - [ ] **Phase 3: Scale to 1M Vectors (`SIFT1M`), Profile Memory & Build Time**
 - [ ] **Phase 4: Parameter Sweep (`M`, `efConstruction`, `efSearch`), Plot `Recall@10` vs `p99` Latency**
 - [ ] **Phase 5: Filtered Search with Metadata Predicates (Including High-Selectivity Filters)**
@@ -54,15 +56,37 @@ Layer L_0   :   [Node A] -> [D] -> [C] -> [E] -> [Node B] -> ...   (All N vector
 
 ---
 
+## Phase 2 Results (`siftsmall` 10,000 $\times$ 128-d, `M=16`, `efConstruction=100`, $k=10$)
+
+Recall is deterministic (seed 42). Latencies are single-threaded and hardware-dependent; this table was produced on a 1-core Linux Xeon sandbox, so regenerate it on your own machine with the command below before quoting latency or speedup.
+
+| efSearch | Recall@10 | Mean latency (ms) | p99 (ms) | Speedup vs brute force |
+|---------:|----------:|------------------:|---------:|-----------------------:|
+| 10  | 95.1%  | 0.014 | 0.021 | 16.3x |
+| 20  | 98.6%  | 0.023 | 0.032 | 10.1x |
+| 50  | 100.0% | 0.047 | 0.094 | 4.9x  |
+| 100 | 100.0% | 0.081 | 0.137 | 2.8x  |
+| 200 | 100.0% | 0.137 | 0.197 | 1.7x  |
+
+Acceptance target: some efSearch reaches Recall@10 >= 0.98 at < 0.05 ms mean latency (met at efSearch=20). `siftsmall` is easy (recall saturates by efSearch=50), so treat these as a correctness check; Phase 3 on `SIFT1M` is the real test.
+
+```bash
+cargo run --release --bin phase2 -- --dataset siftsmall --json-out data/phase2_report.json
+```
+
+---
+
 ## Repository Structure
 
 ```text
-├── Cargo.toml                 # Rust crate manifest (vector_search lib + phase1 CLI)
+├── Cargo.toml                 # Rust crate manifest (vector_search lib + phase1/phase2 CLIs)
 ├── docs/
 │   └── HNSW_ALGORITHM.md      # HNSW mathematical derivations, layer theory & pseudocode
 ├── src/
 │   ├── lib.rs                 # Rust crate root (#![forbid(unsafe_code)])
 │   ├── main.rs                # Rust Phase 1 CLI runner (`phase1`)
+│   ├── hnsw.rs                # HNSW index (insert, search-layer, heuristic selection, k-NN)
+│   ├── bin/phase2.rs          # Rust Phase 2 CLI runner (`phase2`)
 │   ├── matrix.rs              # Contiguous row-major RowMatrix<T> storage
 │   ├── distance.rs            # 8-way unrolled L2^2, Euclidean, and Inner Product kernels
 │   ├── rng.rs                 # Deterministic SplitMix64 + Xoshiro256** PRNG
@@ -74,6 +98,8 @@ Layer L_0   :   [Node A] -> [D] -> [C] -> [E] -> [Node B] -> ...   (All N vector
 │   └── hnsw_phase1/           # Python reference implementation & FAISS comparison helpers
 ├── tests/
 │   ├── rust_phase1_tests.rs   # Rust integration & edge-case test suite
+│   ├── rust_phase2_tests.rs   # HNSW correctness, topology & recall tests
+│   ├── adversarial_hnsw_tests.rs # HNSW stress / boundary / reproducibility tests
 │   ├── test_phase1.py         # Python reference unit tests
 │   └── test_rust_parity.py    # Cross-language Rust <-> Python <-> FAISS parity tests
 └── run_phase1.py              # Python reference runner
@@ -100,6 +126,8 @@ cargo run --release --bin phase1 -- --base-fvecs path/to/base.fvecs --query-fvec
 ```
 
 ### 2. Run Rust Tests & Lints
+
+Requires Rust >= 1.88. Tests that need the real `siftsmall` corpus skip themselves when `data/siftsmall/*.fvecs` is missing (run the Phase 1 command above once to download it).
 
 ```bash
 cargo test --release

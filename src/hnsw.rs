@@ -14,18 +14,22 @@ use crate::recall::{compute_latency_stats, LatencyStats};
 use crate::rng::DeterministicRng;
 
 /// Hyperparameters governing HNSW graph construction and query routing.
+///
+/// `m_max`, `m_max0` and `m_l` are optional overrides. When left as `None` they are derived
+/// from `m` (see [`HnswConfig::effective_m_max`] and friends), so changing `m` alone keeps the
+/// whole configuration consistent. An explicit `Some(..)` is always respected as given.
 #[derive(Debug, Clone)]
 pub struct HnswConfig {
     /// Target number of bidirectional edges to establish per node during insertion (default: 16).
     pub m: usize,
-    /// Maximum allowed outgoing edges per node at upper layers l > 0 (default: 16).
-    pub m_max: usize,
-    /// Maximum allowed outgoing edges per node at ground layer l = 0 (default: 32).
-    pub m_max0: usize,
+    /// Override for the maximum outgoing edges per node at upper layers l > 0 (default: `m`).
+    pub m_max: Option<usize>,
+    /// Override for the maximum outgoing edges per node at ground layer l = 0 (default: `2 * m`).
+    pub m_max0: Option<usize>,
     /// Size of dynamic candidate beam during index construction (default: 100).
     pub ef_construction: usize,
-    /// Layer scale normalization factor: m_L = 1.0 / ln(M as f64).
-    pub m_l: f64,
+    /// Override for the layer scale factor (default: `1.0 / ln(m)`).
+    pub m_l: Option<f64>,
     /// Whether to extend candidate set with 1-hop neighbors during heuristic selection (default: false).
     pub extend_candidates: bool,
     /// Whether to retain diverse pruned candidates to guarantee degree M (default: true).
@@ -36,13 +40,12 @@ pub struct HnswConfig {
 
 impl Default for HnswConfig {
     fn default() -> Self {
-        let m = 16;
         Self {
-            m,
-            m_max: m,
-            m_max0: 2 * m,
+            m: 16,
+            m_max: None,
+            m_max0: None,
             ef_construction: 100,
-            m_l: 1.0 / (m as f64).ln(),
+            m_l: None,
             extend_candidates: false,
             keep_pruned: true,
             seed: 42,
@@ -57,53 +60,42 @@ impl HnswConfig {
         let m = m.max(2);
         Self {
             m,
-            m_max: m,
-            m_max0: 2 * m,
             ef_construction: ef_construction.max(m),
-            m_l: 1.0 / (m as f64).ln(),
-            extend_candidates: false,
-            keep_pruned: true,
-            seed: 42,
+            ..Self::default()
         }
     }
 
-    /// Normalizes dependent configuration parameters if left at default values.
-    pub fn normalize(&mut self) {
-        if self.m != 16 && (self.m_l - 1.0 / (16.0_f64).ln()).abs() < 1e-7 {
-            self.m_l = 1.0 / (self.m as f64).ln();
-        }
-        if self.m_max == 0 || (self.m_max == 16 && self.m != 16) {
-            self.m_max = self.m;
-        }
-        if self.m_max0 == 0 || (self.m_max0 == 32 && self.m != 16) {
-            self.m_max0 = 2 * self.m;
-        }
+    /// Maximum outgoing edges per node at layers l > 0.
+    #[must_use]
+    pub fn effective_m_max(&self) -> usize {
+        self.m_max.unwrap_or(self.m)
+    }
+
+    /// Maximum outgoing edges per node at layer 0.
+    #[must_use]
+    pub fn effective_m_max0(&self) -> usize {
+        self.m_max0.unwrap_or(2 * self.m)
+    }
+
+    /// Layer scale factor used for level sampling.
+    #[must_use]
+    pub fn effective_m_l(&self) -> f64 {
+        self.m_l.unwrap_or_else(|| 1.0 / (self.m as f64).ln())
     }
 
     /// Validates configuration invariants before building the index.
     pub fn validate(&self) -> Result<()> {
-        let m_max = if self.m_max == 16 && self.m != 16 {
-            self.m
-        } else {
-            self.m_max
-        };
-        let m_max0 = if self.m_max0 == 32 && self.m != 16 {
-            2 * self.m
-        } else {
-            self.m_max0
-        };
-
         if self.m < 2 {
             return Err(VectorSearchError::InvalidArgument(
                 "m must be at least 2".to_string(),
             ));
         }
-        if m_max < self.m {
+        if self.effective_m_max() < self.m {
             return Err(VectorSearchError::InvalidArgument(
                 "m_max must be >= m".to_string(),
             ));
         }
-        if m_max0 < self.m {
+        if self.effective_m_max0() < self.m {
             return Err(VectorSearchError::InvalidArgument(
                 "m_max0 must be >= m".to_string(),
             ));
@@ -113,7 +105,8 @@ impl HnswConfig {
                 "ef_construction must be >= m".to_string(),
             ));
         }
-        if !self.m_l.is_finite() || self.m_l <= 0.0 {
+        let m_l = self.effective_m_l();
+        if !m_l.is_finite() || m_l <= 0.0 {
             return Err(VectorSearchError::InvalidArgument(
                 "m_l must be positive and finite".to_string(),
             ));
@@ -251,17 +244,7 @@ pub struct HnswIndex<'a> {
 
 impl<'a> HnswIndex<'a> {
     /// Initializes an empty HNSW index over `matrix`.
-    pub fn new(matrix: &'a RowMatrix<f32>, metric: Metric, mut config: HnswConfig) -> Self {
-        if config.m != 16 && (config.m_l - 1.0 / (16.0_f64).ln()).abs() < 1e-7 {
-            config.m_l = 1.0 / (config.m as f64).ln();
-        }
-        if config.m_max == 0 || (config.m_max == 16 && config.m != 16) {
-            config.m_max = config.m;
-        }
-        if config.m_max0 == 0 || (config.m_max0 == 32 && config.m != 16) {
-            config.m_max0 = 2 * config.m;
-        }
-
+    pub fn new(matrix: &'a RowMatrix<f32>, metric: Metric, config: HnswConfig) -> Self {
         let rng = DeterministicRng::new(config.seed);
         let visited_tracker = VisitedTracker::new(matrix.rows());
 
@@ -373,7 +356,7 @@ impl<'a> HnswIndex<'a> {
     #[inline]
     pub fn sample_layer(&mut self) -> usize {
         let u = self.rng.next_f64_open01();
-        let l = (-u.ln() * self.config.m_l).floor();
+        let l = (-u.ln() * self.config.effective_m_l()).floor();
         if l <= 0.0 || l.is_nan() {
             0
         } else {
@@ -464,7 +447,7 @@ impl<'a> HnswIndex<'a> {
             id: ep,
         };
 
-        let cap = ef + self.config.m_max0;
+        let cap = ef + self.config.effective_m_max0();
         let mut c = BinaryHeap::<Reverse<Candidate>>::with_capacity(cap);
         let mut w = BinaryHeap::<Candidate>::with_capacity(cap);
 
@@ -592,6 +575,11 @@ impl<'a> HnswIndex<'a> {
     }
 
     /// Inserts a new vector by its row `id` into the HNSW graph (Algorithm 1: INSERT).
+    ///
+    /// Ids must be inserted densely in order (`0, 1, 2, ...`): node `i` is stored at slot `i`,
+    /// so `q_id` must equal the current [`HnswIndex::num_vectors`]. Out-of-order ids would create
+    /// unreachable placeholder nodes and re-inserting an id would leave dangling edges, so both
+    /// are rejected with `InvalidArgument` instead of silently corrupting the graph.
     pub fn insert(&mut self, q_id: usize) -> Result<()> {
         if q_id >= self.matrix.rows() {
             return Err(VectorSearchError::InvalidArgument(format!(
@@ -599,21 +587,23 @@ impl<'a> HnswIndex<'a> {
                 self.matrix.rows()
             )));
         }
+        if q_id != self.nodes.len() {
+            return Err(VectorSearchError::InvalidArgument(format!(
+                "Vector id {q_id} must be inserted in order; next expected id is {}",
+                self.nodes.len()
+            )));
+        }
 
         let q_vec = self.matrix.row(q_id);
         let l = self.sample_layer();
 
-        let new_node = HnswNode::new(q_id, l, self.config.m_max0, self.config.m_max);
-        if q_id == self.nodes.len() {
-            self.nodes.push(new_node);
-        } else if q_id < self.nodes.len() {
-            self.nodes[q_id] = new_node;
-        } else {
-            self.nodes.resize_with(q_id + 1, || {
-                HnswNode::new(0, 0, self.config.m_max0, self.config.m_max)
-            });
-            self.nodes[q_id] = new_node;
-        }
+        let new_node = HnswNode::new(
+            q_id,
+            l,
+            self.config.effective_m_max0(),
+            self.config.effective_m_max(),
+        );
+        self.nodes.push(new_node);
 
         // Case 1: First node insertion (empty graph)
         let Some(mut curr_ep) = self.enter_point else {
@@ -639,9 +629,9 @@ impl<'a> HnswIndex<'a> {
         let start_layer = l_top.min(l);
         for lc in (0..=start_layer).rev() {
             let m_layer = if lc == 0 {
-                self.config.m_max0
+                self.config.effective_m_max0()
             } else {
-                self.config.m_max
+                self.config.effective_m_max()
             };
 
             let w = self.search_layer(

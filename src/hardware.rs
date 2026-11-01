@@ -2,6 +2,7 @@
 
 use std::env;
 use std::fmt;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use std::process::Command;
 use std::sync::OnceLock;
 use std::thread;

@@ -6,12 +6,12 @@
 //! - Tier 3: Cross-feature interactions & graph topology invariants
 //! - Tier 4: Parity, monotonic recall scaling, and latency benchmarking vs ExactKnn
 
-use std::path::Path;
+mod common;
 
 use vector_search::benchmark::{
     run_phase2_benchmark, HnswEfEvaluation, Phase1DatasetMode, Phase2Config,
 };
-use vector_search::dataset::{generate_synthetic_sift, load_or_download_sift, SiftPreset};
+use vector_search::dataset::generate_synthetic_sift;
 use vector_search::distance::Metric;
 use vector_search::error::VectorSearchError;
 use vector_search::exact_knn::ExactKnn;
@@ -313,7 +313,7 @@ fn test_tier2_extreme_m_values() {
     for &m in &[2_usize, 4, 32, 64] {
         let config = HnswConfig {
             m,
-            m_max0: 2 * m,
+            m_max0: Some(2 * m),
             ef_construction: 100,
             ..Default::default()
         };
@@ -343,7 +343,7 @@ fn test_tier3_multi_layer_graph_hierarchy() {
     let (base, _) = generate_synthetic_sift(1_500, 10, 16, 8, 42).unwrap();
     let config = HnswConfig {
         m: 4,
-        m_max0: 8,
+        m_max0: Some(8),
         ef_construction: 50,
         ..Default::default()
     };
@@ -380,7 +380,7 @@ fn test_tier3_heuristic_neighbor_pruning_keep_pruned() {
 
     let config_pruned_false = HnswConfig {
         m: 4,
-        m_max0: 8,
+        m_max0: Some(8),
         keep_pruned: false,
         ..Default::default()
     };
@@ -388,7 +388,7 @@ fn test_tier3_heuristic_neighbor_pruning_keep_pruned() {
 
     let config_pruned_true = HnswConfig {
         m: 4,
-        m_max0: 8,
+        m_max0: Some(8),
         keep_pruned: true,
         ..Default::default()
     };
@@ -401,32 +401,97 @@ fn test_tier3_heuristic_neighbor_pruning_keep_pruned() {
     );
 }
 
-#[test]
-fn test_tier3_bidirectional_edge_consistency_and_degree_bounds() {
-    let (base, _) = generate_synthetic_sift(300, 10, 16, 4, 999).unwrap();
-    let m = 16;
-    let m_max0 = 32;
-    let config = HnswConfig {
-        m,
-        m_max0,
-        ef_construction: 100,
-        ..Default::default()
+/// Counts nodes reachable from the global entry point by following directed layer-0 edges.
+fn count_reachable_layer0(index: &HnswIndex<'_>) -> usize {
+    let n = index.num_vectors();
+    let Some(entry) = index.entry_point() else {
+        return 0;
     };
-    let index = HnswIndex::build(&base, Metric::L2Squared, config).unwrap();
-
-    for u in 0..300 {
-        // No self loops
-        assert!(!index.neighbors(0, u).contains(&u));
-
-        // Strict degree caps
-        assert!(index.neighbors(0, u).len() <= m_max0);
-        for l in 1..=index.max_layer() {
-            if index.node_exists_at_layer(l, u) {
-                assert!(!index.neighbors(l, u).contains(&u));
-                assert!(index.neighbors(l, u).len() <= m);
+    let mut seen = vec![false; n];
+    let mut stack = vec![entry];
+    seen[entry] = true;
+    let mut count = 1;
+    while let Some(u) = stack.pop() {
+        for &v in index.neighbors(0, u) {
+            if !seen[v] {
+                seen[v] = true;
+                count += 1;
+                stack.push(v);
             }
         }
     }
+    count
+}
+
+#[test]
+fn test_tier3_degree_bounds_and_layer0_reachability() {
+    // Pruning makes edges directed, so mutual-edge symmetry is not an invariant. What search
+    // correctness actually needs is that every node can be reached from the entry point.
+    let (base, _) = generate_synthetic_sift(300, 10, 16, 4, 999).unwrap();
+
+    for (m, m_max0) in [(16_usize, 32_usize), (4, 8)] {
+        let config = HnswConfig {
+            m,
+            m_max0: Some(m_max0),
+            ef_construction: 100,
+            ..Default::default()
+        };
+        let index = HnswIndex::build(&base, Metric::L2Squared, config).unwrap();
+
+        for u in 0..300 {
+            // No self loops, no duplicate edges, strict degree caps
+            let n0 = index.neighbors(0, u);
+            assert!(!n0.contains(&u));
+            assert!(n0.len() <= m_max0);
+            let mut sorted = n0.to_vec();
+            sorted.sort_unstable();
+            sorted.dedup();
+            assert_eq!(
+                sorted.len(),
+                n0.len(),
+                "duplicate edge at layer 0 of node {u}"
+            );
+
+            for l in 1..=index.max_layer() {
+                if index.node_exists_at_layer(l, u) {
+                    let nl = index.neighbors(l, u);
+                    assert!(!nl.contains(&u));
+                    assert!(nl.len() <= m);
+                    // Edges at layer l may only point to nodes that exist at layer l
+                    assert!(nl.iter().all(|&v| index.node_exists_at_layer(l, v)));
+                }
+            }
+        }
+
+        assert_eq!(
+            count_reachable_layer0(&index),
+            300,
+            "m={m}: every node must be reachable from the entry point at layer 0"
+        );
+    }
+}
+
+#[test]
+fn test_tier2_insert_rejects_out_of_order_and_duplicate_ids() {
+    let (base, _) = generate_synthetic_sift(20, 2, 8, 2, 5).unwrap();
+    let mut index = HnswIndex::new(&base, Metric::L2Squared, HnswConfig::default());
+
+    // Skipping id 0 would create a phantom node at slot 0.
+    assert!(matches!(
+        index.insert(1),
+        Err(VectorSearchError::InvalidArgument(_))
+    ));
+    assert_eq!(index.num_vectors(), 0);
+
+    index.insert(0).unwrap();
+    index.insert(1).unwrap();
+
+    // Re-inserting an existing id would leave dangling edges.
+    assert!(matches!(
+        index.insert(1),
+        Err(VectorSearchError::InvalidArgument(_))
+    ));
+    assert_eq!(index.num_vectors(), 2);
 }
 
 #[test]
@@ -463,7 +528,7 @@ fn test_tier4_synthetic_clusters_recall_scaling() {
 
     let config = HnswConfig {
         m: 16,
-        m_max0: 32,
+        m_max0: Some(32),
         ef_construction: 100,
         ..Default::default()
     };
@@ -507,8 +572,10 @@ fn test_tier4_synthetic_clusters_recall_scaling() {
 
 #[test]
 fn test_tier4_siftsmall_10k_parity_and_recall() {
-    let loaded =
-        load_or_download_sift(SiftPreset::SiftSmall, Path::new("data"), false, 42).unwrap();
+    let Some(loaded) = common::load_siftsmall_or_skip("test_tier4_siftsmall_10k_parity_and_recall")
+    else {
+        return;
+    };
     assert_eq!(loaded.base.shape(), (10_000, 128));
     assert_eq!(loaded.query.shape(), (100, 128));
 
@@ -517,7 +584,7 @@ fn test_tier4_siftsmall_10k_parity_and_recall() {
 
     let config = HnswConfig {
         m: 16,
-        m_max0: 32,
+        m_max0: Some(32),
         ef_construction: 100,
         ..Default::default()
     };
@@ -580,8 +647,10 @@ fn test_tier4_bit_exact_reproducibility() {
 
 #[test]
 fn test_tier4_hnsw_query_latency_speedup() {
-    let loaded =
-        load_or_download_sift(SiftPreset::SiftSmall, Path::new("data"), false, 42).unwrap();
+    let Some(loaded) = common::load_siftsmall_or_skip("test_tier4_hnsw_query_latency_speedup")
+    else {
+        return;
+    };
     let exact = ExactKnn::from_base(Metric::L2Squared, loaded.base.clone()).unwrap();
 
     let t_exact_start = std::time::Instant::now();
@@ -590,7 +659,7 @@ fn test_tier4_hnsw_query_latency_speedup() {
 
     let config = HnswConfig {
         m: 16,
-        m_max0: 32,
+        m_max0: Some(32),
         ef_construction: 100,
         ..Default::default()
     };
@@ -622,7 +691,7 @@ fn test_hnsw_10k_synthetic_monotonic_recall_and_speedup() {
         seed: 42,
         metric: Metric::L2Squared,
         m: 16,
-        m_max0: 32,
+        m_max0: Some(32),
         ef_construction: 100,
         ef_search_list: vec![10, 50, 100, 200],
         allow_download: false,
@@ -679,7 +748,7 @@ fn test_batch_parallel_parity() {
     let (base, queries) = generate_synthetic_sift(300, 20, 32, 4, 777).unwrap();
     let config = HnswConfig {
         m: 16,
-        m_max0: 32,
+        m_max0: Some(32),
         ef_construction: 100,
         ..Default::default()
     };

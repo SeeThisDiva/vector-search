@@ -3,8 +3,9 @@
 //! Evaluates failure modes, boundary inputs, metric variations, extreme hyperparameters,
 //! sparse/disconnected topologies, duplicate/collinear inputs, and bit-exact reproducibility.
 
-use std::path::Path;
-use vector_search::dataset::{generate_synthetic_sift, load_or_download_sift, SiftPreset};
+mod common;
+
+use vector_search::dataset::generate_synthetic_sift;
 use vector_search::distance::Metric;
 use vector_search::error::VectorSearchError;
 use vector_search::exact_knn::ExactKnn;
@@ -139,7 +140,7 @@ fn test_adv_massive_identical_duplicates() {
     // Test A: When k <= M_max0 + 1 (here 32 + 1 = 33), all 25 identical duplicates are reachable
     let config_default = HnswConfig {
         m: 16,
-        m_max0: 32,
+        m_max0: Some(32),
         ef_construction: 50,
         seed: 42,
         ..Default::default()
@@ -158,7 +159,7 @@ fn test_adv_massive_identical_duplicates() {
     // exactly 17 nodes (IDs 0..16) are reachable from the entry point.
     let config_saturated = HnswConfig {
         m: 8,
-        m_max0: 16,
+        m_max0: Some(16),
         ef_construction: 50,
         seed: 42,
         ..Default::default()
@@ -193,7 +194,7 @@ fn test_adv_clustered_duplicates_ranking() {
 
     let config = HnswConfig {
         m: 4,
-        m_max0: 8,
+        m_max0: Some(8),
         ef_construction: 20,
         ..Default::default()
     };
@@ -230,8 +231,8 @@ fn test_adv_sparse_graph_tiny_m_high_dim() {
 
     let config = HnswConfig {
         m: 2,
-        m_max: 2,
-        m_max0: 4,
+        m_max: Some(2),
+        m_max0: Some(4),
         ef_construction: 50,
         keep_pruned: true,
         seed: 777,
@@ -279,7 +280,7 @@ fn test_adv_heuristic_keep_pruned_false_collinear() {
 
     let config = HnswConfig {
         m: 4,
-        m_max0: 8,
+        m_max0: Some(8),
         ef_construction: 30,
         keep_pruned: false,
         extend_candidates: true,
@@ -461,14 +462,17 @@ fn test_adv_multi_instance_bit_exact_reproducibility() {
 
 #[test]
 fn test_adv_extended_ef_search_ladder_monotonicity() {
-    let loaded =
-        load_or_download_sift(SiftPreset::SiftSmall, Path::new("data"), false, 42).unwrap();
+    let Some(loaded) =
+        common::load_siftsmall_or_skip("test_adv_extended_ef_search_ladder_monotonicity")
+    else {
+        return;
+    };
     let exact = ExactKnn::from_base(Metric::L2Squared, loaded.base.clone()).unwrap();
     let gt = exact.search(&loaded.query, 10).unwrap();
 
     let config = HnswConfig {
         m: 16,
-        m_max0: 32,
+        m_max0: Some(32),
         ef_construction: 100,
         seed: 42,
         ..Default::default()

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "From-scratch HNSW Approximate Nearest Neighbor Search and Brute-Force Ground Truth Benchmark Harness"
 license = "MIT"
+rust-version = "1.88"
 readme = "README.md"
 
 [lib]

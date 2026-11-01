@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Phase 1 Execution Script: HNSW Algorithm Foundations, Brute-Force Ground Truth & Recall Harness.
 

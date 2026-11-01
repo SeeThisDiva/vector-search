@@ -452,7 +452,8 @@ pub struct Phase2Config {
     pub seed: u64,
     pub metric: Metric,
     pub m: usize,
-    pub m_max0: usize,
+    /// Layer-0 degree cap; `None` derives `2 * m`.
+    pub m_max0: Option<usize>,
     pub ef_construction: usize,
     pub ef_search_list: Vec<usize>,
     pub allow_download: bool,
@@ -471,9 +472,9 @@ impl Default for Phase2Config {
             seed: 42,
             metric: Metric::L2Squared,
             m: 16,
-            m_max0: 32,
+            m_max0: None,
             ef_construction: 100,
-            ef_search_list: vec![10, 50, 100, 200],
+            ef_search_list: vec![10, 20, 50, 100, 200],
             allow_download: true,
             save_files: true,
             max_queries: None,
@@ -481,6 +482,11 @@ impl Default for Phase2Config {
         }
     }
 }
+
+/// Phase 2 acceptance target: minimum Recall@k at the operating point.
+pub const PHASE2_TARGET_MIN_RECALL: f64 = 0.98;
+/// Phase 2 acceptance target: maximum mean latency per query (milliseconds).
+pub const PHASE2_TARGET_MAX_LATENCY_MS: f64 = 0.05;
 
 /// Evaluation metrics for a single efSearch setting in Phase 2.
 #[derive(Debug, Clone)]
@@ -514,7 +520,13 @@ pub struct Phase2Report {
     pub exact_official_gt_match: bool,
     pub ef_evaluations: Vec<HnswEfEvaluation>,
     pub monotonic_scaling_verified: bool,
-    pub speedup_target_met: bool,
+    /// True when some efSearch point meets the Phase 2 targets simultaneously:
+    /// recall >= `PHASE2_TARGET_MIN_RECALL` and mean latency < `PHASE2_TARGET_MAX_LATENCY_MS`.
+    /// Speedup vs brute force is reported per point but not gated: the spec's "10x" was
+    /// derived from a ~0.25 ms/query baseline and is machine-dependent.
+    pub performance_target_met: bool,
+    /// Smallest efSearch that satisfies the performance target, if any.
+    pub performance_target_ef: Option<usize>,
     pub reproducibility_verified: bool,
 }
 
@@ -552,6 +564,18 @@ impl Phase2Report {
         out.push_str("  },\n");
 
         out.push_str("  \"dataset\": {\n");
+        out.push_str(&format!(
+            "    \"source_kind\": \"{}\",\n",
+            self.dataset_source.kind_tag()
+        ));
+        out.push_str(&format!(
+            "    \"source_description\": \"{}\",\n",
+            escape_json(&self.dataset_source.to_string())
+        ));
+        out.push_str(&format!(
+            "    \"is_authentic_sift\": {},\n",
+            self.dataset_source.is_authentic_sift()
+        ));
         out.push_str(&format!("    \"num_base\": {},\n", self.num_base));
         out.push_str(&format!("    \"num_query\": {},\n", self.num_query));
         out.push_str(&format!("    \"dim\": {},\n", self.dim));
@@ -661,14 +685,25 @@ impl Phase2Report {
             self.monotonic_scaling_verified
         ));
         out.push_str(&format!(
-            "    \"speedup_target_met\": {},\n",
-            self.speedup_target_met
+            "    \"performance_target_met\": {},\n",
+            self.performance_target_met
+        ));
+        out.push_str(&format!(
+            "    \"performance_target_ef\": {},\n",
+            self.performance_target_ef
+                .map_or_else(|| "null".to_string(), |ef| ef.to_string())
+        ));
+        out.push_str(&format!(
+            "    \"performance_target\": {{ \"min_recall\": {}, \"max_mean_latency_ms\": {} }},\n",
+            PHASE2_TARGET_MIN_RECALL, PHASE2_TARGET_MAX_LATENCY_MS
         ));
         out.push_str(&format!(
             "    \"reproducibility_verified\": {},\n",
             self.reproducibility_verified
         ));
-        let overall = self.monotonic_scaling_verified && self.reproducibility_verified;
+        let overall = self.monotonic_scaling_verified
+            && self.reproducibility_verified
+            && self.performance_target_met;
         out.push_str(&format!("    \"overall_phase2_passed\": {}\n", overall));
         out.push_str("  }\n");
         out.push_str("}\n");
@@ -807,10 +842,10 @@ pub fn run_phase2_benchmark(config: &Phase2Config) -> Result<Phase2Report> {
     // 3. Construct HNSW Index
     let hnsw_cfg = HnswConfig {
         m: config.m,
-        m_max: config.m,
+        m_max: None,
         m_max0: config.m_max0,
         ef_construction: config.ef_construction,
-        m_l: 1.0 / (config.m as f64).ln(),
+        m_l: None,
         extend_candidates: false,
         keep_pruned: true,
         seed: config.seed,
@@ -830,7 +865,17 @@ pub fn run_phase2_benchmark(config: &Phase2Config) -> Result<Phase2Report> {
     let mut previous_recall = 0.0;
     let mut monotonic_scaling_verified = true;
 
+    // The index clamps efSearch up to k, so ef < k would silently duplicate the ef == k point.
+    // Report the effective value once instead of plotting identical results as separate points.
+    let mut effective_efs: Vec<usize> = Vec::new();
     for &ef in &config.ef_search_list {
+        let effective = ef.max(config.k);
+        if !effective_efs.contains(&effective) {
+            effective_efs.push(effective);
+        }
+    }
+
+    for &ef in &effective_efs {
         let timed = hnsw.search_batch_timed(&loaded.query, config.k, ef)?;
         let recall = compute_recall_at_k(&timed.result.indices, gt_indices, config.k)?;
 
@@ -863,14 +908,16 @@ pub fn run_phase2_benchmark(config: &Phase2Config) -> Result<Phase2Report> {
         true
     };
 
-    // 7. Verify Speedup Target
-    let speedup_target_met = ef_evaluations
+    // 7. Verify performance target: one operating point must satisfy recall and latency together.
+    let performance_target_ef = ef_evaluations
         .iter()
-        .find(|e| e.ef_search == 50)
-        .map_or_else(
-            || ef_evaluations.iter().any(|e| e.speedup_vs_exact >= 2.0),
-            |e| e.speedup_vs_exact >= 2.0,
-        );
+        .filter(|e| {
+            e.recall_at_k >= PHASE2_TARGET_MIN_RECALL
+                && e.latency.mean_ms < PHASE2_TARGET_MAX_LATENCY_MS
+        })
+        .map(|e| e.ef_search)
+        .min();
+    let performance_target_met = performance_target_ef.is_some();
 
     Ok(Phase2Report {
         hardware,
@@ -882,7 +929,7 @@ pub fn run_phase2_benchmark(config: &Phase2Config) -> Result<Phase2Report> {
         seed: config.seed,
         metric: config.metric,
         hnsw_m: config.m,
-        hnsw_m_max0: config.m_max0,
+        hnsw_m_max0: hnsw_cfg.effective_m_max0(),
         hnsw_ef_construction: config.ef_construction,
         build_time_s,
         max_layer: hnsw.max_layer(),
@@ -892,7 +939,8 @@ pub fn run_phase2_benchmark(config: &Phase2Config) -> Result<Phase2Report> {
         exact_official_gt_match,
         ef_evaluations,
         monotonic_scaling_verified,
-        speedup_target_met,
+        performance_target_met,
+        performance_target_ef,
         reproducibility_verified,
     })
 }
@@ -986,11 +1034,12 @@ pub fn print_phase2_report(r: &Phase2Report) {
         }
     );
     println!(
-        "  - Speedup Target Met:         {}",
-        if r.speedup_target_met {
-            "PASSED"
-        } else {
-            "FAILED"
+        "  - Perf Target (recall>={:.2}, <{} ms): {}",
+        PHASE2_TARGET_MIN_RECALL,
+        PHASE2_TARGET_MAX_LATENCY_MS,
+        match r.performance_target_ef {
+            Some(ef) => format!("PASSED (efSearch={ef})"),
+            None => "FAILED (no efSearch meets both)".to_string(),
         }
     );
     println!(
@@ -1018,9 +1067,9 @@ pub fn run_phase2_cli(args: &[String]) -> Result<()> {
     let mut seed: u64 = 42;
     let mut metric = Metric::L2Squared;
     let mut m: usize = 16;
-    let mut m_max0: usize = 32;
+    let mut m_max0: Option<usize> = None;
     let mut ef_construction: usize = 100;
-    let mut ef_search_list = vec![10_usize, 50, 100, 200];
+    let mut ef_search_list = vec![10_usize, 20, 50, 100, 200];
     let mut data_cache_dir = PathBuf::from("data");
     let mut output_dir = PathBuf::from("data");
     let mut base_fvecs: Option<PathBuf> = None;
@@ -1152,9 +1201,9 @@ pub fn run_phase2_cli(args: &[String]) -> Result<()> {
                         "Missing value after --m-max0".to_string(),
                     ));
                 }
-                m_max0 = args[i + 1].parse().map_err(|_| {
+                m_max0 = Some(args[i + 1].parse().map_err(|_| {
                     VectorSearchError::InvalidArgument("Invalid --m-max0".to_string())
-                })?;
+                })?);
                 i += 2;
             }
             "--ef-construction" => {
@@ -1293,9 +1342,9 @@ OPTIONS:
     --seed <SEED>               Deterministic PRNG seed (default: 42)
     --metric <l2|euclidean|ip>  Distance metric (default: l2)
     --m <M>                     Max outgoing edges per node at layers > 0 (default: 16)
-    --m-max0 <M0>               Max outgoing edges per node at layer 0 (default: 32)
+    --m-max0 <M0>               Max outgoing edges per node at layer 0 (default: 2*M)
     --ef-construction <EFC>     Candidate beam width during index build (default: 100)
-    --ef-search <LIST>          Comma-separated efSearch values to sweep (default: 10,50,100,200)
+    --ef-search <LIST>          Comma-separated efSearch values to sweep (default: 10,20,50,100,200)
     --json-out <PATH>           Write structured JSON benchmark report to PATH
     --offline                   Disable internet downloads; use local cache or synthetic
     --no-save                   Skip writing intermediate artifacts to disk
