@@ -18,6 +18,7 @@ pub mod distance;
 pub mod error;
 pub mod exact_knn;
 pub mod hardware;
+pub mod hnsw;
 pub mod matrix;
 pub mod recall;
 pub mod rng;

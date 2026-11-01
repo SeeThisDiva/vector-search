@@ -33,6 +33,13 @@ fn main() -> ExitCode {
 
 fn try_main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
+
+    for (idx, arg) in args.iter().enumerate() {
+        if arg == "--phase" && idx + 1 < args.len() && args[idx + 1] == "2" {
+            return vector_search::benchmark::run_phase2_cli(&args);
+        }
+    }
+
     let opts = parse_cli_args(&args)?;
 
     if opts.show_help {
@@ -139,6 +146,9 @@ fn parse_cli_args(args: &[String]) -> Result<CliOptions> {
             "--no-save" => {
                 save_files = false;
                 i += 1;
+            }
+            "--phase" => {
+                let _ = next_arg(args, &mut i, "--phase")?;
             }
             unknown => {
                 return Err(VectorSearchError::InvalidArgument(format!(

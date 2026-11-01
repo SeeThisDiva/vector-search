@@ -20,6 +20,8 @@ pub enum VectorSearchError {
     SelfVerificationFailed { k: usize, actual_recall: f64 },
     /// Remote dataset download or archive extraction failed.
     DownloadFailed(String),
+    /// Algorithmic verification or invariant check failed.
+    VerificationFailed(String),
 }
 
 impl fmt::Display for VectorSearchError {
@@ -38,6 +40,7 @@ impl fmt::Display for VectorSearchError {
                 "Self-verification failed: Recall@{k}(GroundTruth, GroundTruth) = {actual_recall:.6} (expected 1.0)"
             ),
             Self::DownloadFailed(msg) => write!(f, "Dataset download failed: {msg}"),
+            Self::VerificationFailed(msg) => write!(f, "Verification failed: {msg}"),
         }
     }
 }
