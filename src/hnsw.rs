@@ -216,7 +216,7 @@ impl Default for VisitedTracker {
 ///
 /// Pre-allocated during index initialization to completely eliminate dynamic heap allocations
 /// in the triangular diversity heuristic during vector insertion.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct HeuristicScratch {
     /// Candidate buffer holding input candidates and optional 1-hop expansions.
     pub w_set: Vec<Candidate>,
@@ -232,20 +232,6 @@ pub struct HeuristicScratch {
     pub outer_neighbors: Vec<usize>,
     /// Visited/seen set for candidate deduplication.
     pub seen: HashSet<usize>,
-}
-
-impl Default for HeuristicScratch {
-    fn default() -> Self {
-        Self {
-            w_set: Vec::new(),
-            w_d: BinaryHeap::new(),
-            r: Vec::new(),
-            w_pruned: Vec::new(),
-            e_cands: Vec::new(),
-            outer_neighbors: Vec::new(),
-            seen: HashSet::new(),
-        }
-    }
 }
 
 impl HeuristicScratch {
@@ -273,6 +259,30 @@ impl HeuristicScratch {
             + self.e_cands.capacity() * std::mem::size_of::<Candidate>()
             + self.outer_neighbors.capacity() * std::mem::size_of::<usize>()
             + self.seen.capacity() * (std::mem::size_of::<usize>() + 1)
+    }
+}
+
+/// Detailed memory footprint breakdown for HNSW graph components.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HnswGraphComponents {
+    pub node_structs_bytes: usize,
+    pub layer0_edges_bytes: usize,
+    pub upper_layers_edges_bytes: usize,
+    pub outer_neighbors_headers_bytes: usize,
+    pub visited_tracker_tags_bytes: usize,
+    pub heuristic_scratch_bytes: usize,
+}
+
+impl HnswGraphComponents {
+    /// Total bytes allocated by all graph components.
+    #[must_use]
+    pub const fn total_graph_bytes(&self) -> usize {
+        self.node_structs_bytes
+            + self.layer0_edges_bytes
+            + self.upper_layers_edges_bytes
+            + self.outer_neighbors_headers_bytes
+            + self.visited_tracker_tags_bytes
+            + self.heuristic_scratch_bytes
     }
 }
 
@@ -394,6 +404,40 @@ impl<'a> HnswIndex<'a> {
             0.0
         } else {
             self.memory_bytes() as f64 / self.nodes.len() as f64
+        }
+    }
+
+    /// Detailed breakdown of memory allocated across individual graph components.
+    #[must_use]
+    pub fn graph_components(&self) -> HnswGraphComponents {
+        let node_structs_bytes = self.nodes.capacity() * std::mem::size_of::<HnswNode>();
+        let mut layer0_edges_bytes = 0;
+        let mut upper_layers_edges_bytes = 0;
+        let mut outer_neighbors_headers_bytes = 0;
+
+        for node in &self.nodes {
+            outer_neighbors_headers_bytes +=
+                node.neighbors.capacity() * std::mem::size_of::<Vec<usize>>();
+            for (lc, layer_edges) in node.neighbors.iter().enumerate() {
+                let bytes = layer_edges.capacity() * std::mem::size_of::<usize>();
+                if lc == 0 {
+                    layer0_edges_bytes += bytes;
+                } else {
+                    upper_layers_edges_bytes += bytes;
+                }
+            }
+        }
+
+        let visited_tracker_tags_bytes = self.visited_tracker.memory_bytes();
+        let heuristic_scratch_bytes = self.heuristic_scratch.memory_bytes();
+
+        HnswGraphComponents {
+            node_structs_bytes,
+            layer0_edges_bytes,
+            upper_layers_edges_bytes,
+            outer_neighbors_headers_bytes,
+            visited_tracker_tags_bytes,
+            heuristic_scratch_bytes,
         }
     }
 
@@ -598,6 +642,7 @@ impl<'a> HnswIndex<'a> {
     }
 
     /// Internal implementation of Algorithm 4 (SELECT-NEIGHBORS-HEURISTIC) reusing preallocated buffers in `scratch`.
+    #[allow(clippy::too_many_arguments)]
     pub fn select_neighbors_heuristic_with_scratch(
         &self,
         base_id: usize,
@@ -992,6 +1037,26 @@ impl<'a> HnswIndex<'a> {
             return Ok(KnnSearchResult {
                 indices: RowMatrix::empty(),
                 distances: RowMatrix::empty(),
+            });
+        }
+
+        if k == 0 {
+            return Err(VectorSearchError::InvalidArgument(
+                "k must be positive (> 0)".to_string(),
+            ));
+        }
+
+        if self.nodes.is_empty() || self.enter_point.is_none() {
+            return Ok(KnnSearchResult {
+                indices: RowMatrix::new(num_queries, 0, vec![])?,
+                distances: RowMatrix::new(num_queries, 0, vec![])?,
+            });
+        }
+
+        if self.matrix.cols() > 0 && queries.cols() != self.matrix.cols() {
+            return Err(VectorSearchError::DimensionMismatch {
+                expected: self.matrix.cols(),
+                actual: queries.cols(),
             });
         }
 

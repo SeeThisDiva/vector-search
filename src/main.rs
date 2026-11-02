@@ -35,8 +35,12 @@ fn try_main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
 
     for (idx, arg) in args.iter().enumerate() {
-        if arg == "--phase" && idx + 1 < args.len() && args[idx + 1] == "2" {
-            return vector_search::benchmark::run_phase2_cli(&args);
+        if arg == "--phase" && idx + 1 < args.len() {
+            if args[idx + 1] == "2" {
+                return vector_search::benchmark::run_phase2_cli(&args);
+            } else if args[idx + 1] == "3" {
+                return vector_search::benchmark::run_phase3_cli(&args);
+            }
         }
     }
 
