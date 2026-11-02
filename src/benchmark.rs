@@ -712,6 +712,435 @@ impl Phase2Report {
     }
 }
 
+/// Profile measurement for an individual scale in the baseline multi-scale profile.
+#[derive(Debug, Clone)]
+pub struct BaselineScaleProfile {
+    pub scale_vectors: usize,
+    pub build_time_s: f64,
+    pub build_qps: f64,
+    pub peak_rss_mb: f64,
+    pub bytes_per_vector: f64,
+    pub raw_vector_bytes_per_vector: f64,
+    pub graph_bytes_per_vector: f64,
+    pub total_bytes_per_vector: f64,
+    pub graph_memory_bytes: usize,
+    pub graph_memory_mb: f64,
+    pub query_latency_ms: f64,
+    pub query_qps: f64,
+    pub k: usize,
+    pub ef_search: usize,
+    pub recall_at_10: f64,
+    pub max_layer: usize,
+    pub entry_point: usize,
+    pub latency_min_ms: f64,
+    pub latency_p50_ms: f64,
+    pub latency_p95_ms: f64,
+    pub latency_p99_ms: f64,
+    pub latency_max_ms: f64,
+}
+
+/// Structured multi-scale baseline profiling report.
+#[derive(Debug, Clone)]
+pub struct BaselineMultiScaleReport {
+    pub hardware: HardwareInfo,
+    pub dataset_source: DatasetSource,
+    pub hnsw_m: usize,
+    pub hnsw_m_max0: usize,
+    pub hnsw_ef_construction: usize,
+    pub seed: u64,
+    pub metric: Metric,
+    pub peak_rss_measurement_method: String,
+    pub scale_profiles: Vec<BaselineScaleProfile>,
+}
+
+impl BaselineMultiScaleReport {
+    #[must_use]
+    pub fn to_json_string(&self) -> String {
+        let mut out = String::with_capacity(4096);
+        out.push_str("{\n");
+        out.push_str("  \"phase\": \"2_baseline_profile\",\n");
+        out.push_str("  \"hardware\": {\n");
+        out.push_str(&format!(
+            "    \"summary\": \"{}\",\n",
+            escape_json(&self.hardware.summary_line())
+        ));
+        out.push_str(&format!(
+            "    \"cpu_model\": \"{}\",\n",
+            escape_json(&self.hardware.cpu_model)
+        ));
+        out.push_str(&format!(
+            "    \"logical_cores\": {},\n",
+            self.hardware.logical_cores
+        ));
+        out.push_str(&format!(
+            "    \"total_ram_gb\": {:.2},\n",
+            self.hardware.total_ram_gb.unwrap_or(0.0)
+        ));
+        out.push_str(&format!(
+            "    \"os\": \"{}\",\n",
+            escape_json(&self.hardware.os)
+        ));
+        out.push_str(&format!(
+            "    \"arch\": \"{}\"\n",
+            escape_json(&self.hardware.arch)
+        ));
+        out.push_str("  },\n");
+
+        out.push_str("  \"dataset\": {\n");
+        out.push_str(&format!(
+            "    \"source_kind\": \"{}\",\n",
+            self.dataset_source.kind_tag()
+        ));
+        out.push_str(&format!(
+            "    \"source_description\": \"{}\",\n",
+            escape_json(&self.dataset_source.to_string())
+        ));
+        out.push_str(&format!(
+            "    \"is_authentic_sift\": {},\n",
+            self.dataset_source.is_authentic_sift()
+        ));
+        out.push_str("    \"num_base_total\": 1000000,\n");
+        out.push_str("    \"dim\": 128,\n");
+        out.push_str(&format!("    \"metric\": \"{}\"\n", self.metric));
+        out.push_str("  },\n");
+
+        out.push_str("  \"hnsw_config\": {\n");
+        out.push_str(&format!("    \"m\": {},\n", self.hnsw_m));
+        out.push_str(&format!("    \"m_max0\": {},\n", self.hnsw_m_max0));
+        out.push_str(&format!(
+            "    \"ef_construction\": {},\n",
+            self.hnsw_ef_construction
+        ));
+        out.push_str(&format!("    \"seed\": {}\n", self.seed));
+        out.push_str("  },\n");
+
+        out.push_str(&format!(
+            "  \"peak_rss_measurement_method\": \"{}\",\n",
+            escape_json(&self.peak_rss_measurement_method)
+        ));
+
+        out.push_str("  \"scale_profiles\": [\n");
+        for (i, p) in self.scale_profiles.iter().enumerate() {
+            let comma = if i + 1 < self.scale_profiles.len() {
+                ","
+            } else {
+                ""
+            };
+            out.push_str("    {\n");
+            out.push_str(&format!("      \"scale_vectors\": {},\n", p.scale_vectors));
+            out.push_str(&format!("      \"build_time_s\": {:.6},\n", p.build_time_s));
+            out.push_str(&format!("      \"build_qps\": {:.2},\n", p.build_qps));
+            out.push_str(&format!("      \"peak_rss_mb\": {:.2},\n", p.peak_rss_mb));
+            out.push_str(&format!(
+                "      \"bytes_per_vector\": {:.2},\n",
+                p.bytes_per_vector
+            ));
+            out.push_str(&format!(
+                "      \"raw_vector_bytes_per_vector\": {:.2},\n",
+                p.raw_vector_bytes_per_vector
+            ));
+            out.push_str(&format!(
+                "      \"graph_bytes_per_vector\": {:.2},\n",
+                p.graph_bytes_per_vector
+            ));
+            out.push_str(&format!(
+                "      \"total_bytes_per_vector\": {:.2},\n",
+                p.total_bytes_per_vector
+            ));
+            out.push_str(&format!(
+                "      \"graph_memory_bytes\": {},\n",
+                p.graph_memory_bytes
+            ));
+            out.push_str(&format!(
+                "      \"graph_memory_mb\": {:.2},\n",
+                p.graph_memory_mb
+            ));
+            out.push_str(&format!(
+                "      \"query_latency_ms\": {:.6},\n",
+                p.query_latency_ms
+            ));
+            out.push_str(&format!("      \"query_qps\": {:.2},\n", p.query_qps));
+            out.push_str(&format!("      \"k\": {},\n", p.k));
+            out.push_str(&format!("      \"ef_search\": {},\n", p.ef_search));
+            out.push_str(&format!("      \"recall_at_10\": {:.6},\n", p.recall_at_10));
+            out.push_str(&format!("      \"max_layer\": {},\n", p.max_layer));
+            out.push_str(&format!("      \"entry_point\": {},\n", p.entry_point));
+            out.push_str(&format!(
+                "      \"latency_min_ms\": {:.6},\n",
+                p.latency_min_ms
+            ));
+            out.push_str(&format!(
+                "      \"latency_p50_ms\": {:.6},\n",
+                p.latency_p50_ms
+            ));
+            out.push_str(&format!(
+                "      \"latency_p95_ms\": {:.6},\n",
+                p.latency_p95_ms
+            ));
+            out.push_str(&format!(
+                "      \"latency_p99_ms\": {:.6},\n",
+                p.latency_p99_ms
+            ));
+            out.push_str(&format!(
+                "      \"latency_max_ms\": {:.6}\n",
+                p.latency_max_ms
+            ));
+            out.push_str(&format!("    }}{comma}\n"));
+        }
+        out.push_str("  ]\n");
+        out.push_str("}\n");
+        out
+    }
+}
+
+/// Executes multi-scale baseline HNSW profiling across the provided vector scales.
+pub fn run_baseline_multi_scale_profile(
+    data_cache_dir: &Path,
+    scales: &[usize],
+    seed: u64,
+    allow_download: bool,
+) -> Result<BaselineMultiScaleReport> {
+    println!("{}", "=".repeat(80));
+    println!(" HNSW MULTI-SCALE BASELINE PROFILING (10k, 100k, 1M) ");
+    println!("{}", "=".repeat(80));
+
+    let hw = detect_hardware();
+    println!("Hardware: {hw}");
+
+    // 1. Load SIFT1M corpus
+    println!(
+        "\n[1/4] Loading SIFT1M corpus from {}...",
+        data_cache_dir.display()
+    );
+    let loaded = load_or_download_sift(SiftPreset::Sift1M, data_cache_dir, allow_download, seed)?;
+    println!(
+        "  - Loaded base matrix: {} x {} ({:.2} MiB)",
+        loaded.base.rows(),
+        loaded.base.cols(),
+        loaded.base.memory_mb()
+    );
+    println!(
+        "  - Loaded query matrix: {} x {} ({:.2} MiB)",
+        loaded.query.rows(),
+        loaded.query.cols(),
+        loaded.query.memory_mb()
+    );
+    println!("  - Dataset Provenance: {}", loaded.source);
+
+    let hnsw_cfg = HnswConfig {
+        m: 16,
+        m_max: None,
+        m_max0: Some(32),
+        ef_construction: 100,
+        m_l: None,
+        extend_candidates: false,
+        keep_pruned: true,
+        seed,
+    };
+
+    let eval_scales = if scales.is_empty() {
+        &[10_000, 100_000, 1_000_000][..]
+    } else {
+        scales
+    };
+
+    let mut profiles = Vec::with_capacity(eval_scales.len());
+
+    for (idx, &scale) in eval_scales.iter().enumerate() {
+        println!("\n[{}/4] Profiling Scale: {} vectors...", idx + 2, scale);
+
+        let (base_matrix_slice, is_full) = if scale == loaded.base.rows() {
+            (None, true)
+        } else {
+            (Some(loaded.base.slice_first_rows(scale)), false)
+        };
+        let base_ref = if is_full {
+            &loaded.base
+        } else {
+            base_matrix_slice.as_ref().unwrap()
+        };
+
+        println!("  - Constructing HNSW index (M=16, M0=32, efConstruction=100)...");
+        let t_build_start = Instant::now();
+        let mut index = HnswIndex::build(base_ref, Metric::L2Squared, hnsw_cfg.clone())?;
+        let build_time_s = t_build_start.elapsed().as_secs_f64();
+        let build_qps = (scale as f64) / build_time_s;
+
+        let graph_memory_bytes = index.memory_bytes();
+        let graph_memory_mb = index.memory_mb();
+        let bytes_per_vector = index.bytes_per_vector();
+        let peak_rss_mb = crate::hardware::get_peak_rss_mb().unwrap_or(0.0);
+        let max_layer = index.max_layer();
+        let entry_point = index.entry_point().unwrap_or(0);
+
+        println!(
+            "  - Build finished in {:.3} s ({:.1} vectors/s)",
+            build_time_s, build_qps
+        );
+        println!(
+            "  - Graph memory: {:.2} MiB ({:.2} bytes/vector)",
+            graph_memory_mb, bytes_per_vector
+        );
+        println!("  - Process Peak RSS: {:.2} MiB", peak_rss_mb);
+
+        // Warmup
+        if loaded.query.rows() > 0 {
+            index.warmup(loaded.query.row(0), 10, 50)?;
+        }
+
+        // Evaluate search performance
+        let num_eval_queries = if scale == 1_000_000 {
+            loaded.query.rows()
+        } else {
+            1_000.min(loaded.query.rows())
+        };
+
+        let query_slice = if num_eval_queries == loaded.query.rows() {
+            None
+        } else {
+            Some(loaded.query.slice_first_rows(num_eval_queries))
+        };
+        let query_ref = if let Some(ref q) = query_slice {
+            q
+        } else {
+            &loaded.query
+        };
+
+        println!(
+            "  - Evaluating search performance on {} queries (k=10, efSearch=50)...",
+            num_eval_queries
+        );
+        let timed = index.search_batch_timed(query_ref, 10, 50)?;
+
+        let recall_at_10 = if scale == 1_000_000 {
+            if let Some(ref gt) = loaded.official_ground_truth {
+                compute_recall_at_k(&timed.result.indices, gt, 10)?
+            } else {
+                let exact_queries = loaded.query.slice_first_rows(100);
+                let mut exact = ExactKnn::new(Metric::L2Squared);
+                exact.fit(base_ref.clone())?;
+                let exact_res = exact.search_timed(&exact_queries, 10, false)?;
+                let cand_slice = timed.result.indices.slice_first_rows(100);
+                compute_recall_at_k(&cand_slice, &exact_res.result.indices, 10)?
+            }
+        } else {
+            println!(
+                "  - Computing exact reference ground truth for {} queries...",
+                num_eval_queries
+            );
+            let mut exact = ExactKnn::new(Metric::L2Squared);
+            exact.fit(base_ref.clone())?;
+            let exact_res = exact.search_timed(query_ref, 10, false)?;
+            compute_recall_at_k(&timed.result.indices, &exact_res.result.indices, 10)?
+        };
+
+        println!("  - Recall@10: {:.2}%", recall_at_10 * 100.0);
+        println!(
+            "  - Query latency (mean): {:.3} ms ({:.1} QPS)",
+            timed.latency.mean_ms, timed.latency.qps
+        );
+
+        let raw_vector_bytes_per_vector = (loaded.base.cols() * std::mem::size_of::<f32>()) as f64;
+        let graph_bytes_per_vector = bytes_per_vector;
+        let total_bytes_per_vector = raw_vector_bytes_per_vector + graph_bytes_per_vector;
+
+        profiles.push(BaselineScaleProfile {
+            scale_vectors: scale,
+            build_time_s,
+            build_qps,
+            peak_rss_mb,
+            bytes_per_vector,
+            raw_vector_bytes_per_vector,
+            graph_bytes_per_vector,
+            total_bytes_per_vector,
+            graph_memory_bytes,
+            graph_memory_mb,
+            query_latency_ms: timed.latency.mean_ms,
+            query_qps: timed.latency.qps,
+            k: 10,
+            ef_search: 50,
+            recall_at_10,
+            max_layer,
+            entry_point,
+            latency_min_ms: timed.latency.min_ms,
+            latency_p50_ms: timed.latency.p50_ms,
+            latency_p95_ms: timed.latency.p95_ms,
+            latency_p99_ms: timed.latency.p99_ms,
+            latency_max_ms: timed.latency.max_ms,
+        });
+
+        // Drop current scale index and matrix slice to free heap memory
+        drop(index);
+        drop(base_matrix_slice);
+    }
+
+    #[cfg(target_os = "windows")]
+    let peak_rss_measurement_method = "windows_powershell_peak_working_set_64: powershell -NoProfile -NonInteractive -Command (Get-Process -Id $PID).PeakWorkingSet64".to_string();
+    #[cfg(target_os = "linux")]
+    let peak_rss_measurement_method =
+        "linux_proc_status_vm_hwm: /proc/self/status VmHWM".to_string();
+    #[cfg(target_os = "macos")]
+    let peak_rss_measurement_method = "macos_ps_rss: ps -o rss= -p <pid>".to_string();
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    let peak_rss_measurement_method = "unknown_platform".to_string();
+
+    Ok(BaselineMultiScaleReport {
+        hardware: hw,
+        dataset_source: loaded.source,
+        hnsw_m: 16,
+        hnsw_m_max0: 32,
+        hnsw_ef_construction: 100,
+        seed,
+        metric: Metric::L2Squared,
+        peak_rss_measurement_method,
+        scale_profiles: profiles,
+    })
+}
+
+/// Formats and prints a multi-scale baseline profiling summary table to stdout.
+pub fn print_baseline_profile_report(r: &BaselineMultiScaleReport) {
+    println!("\n{}", "=".repeat(80));
+    println!(" MULTI-SCALE BASELINE HNSW PROFILING SUMMARY ");
+    println!("{}", "=".repeat(80));
+    println!("Hardware: {}", r.hardware.summary_line());
+    println!("Dataset:  Authentic SIFT1M (1,000,000 base vectors, 128-d, L2 metric)");
+    println!("Config:   M=16, M0=32, efConstruction=100, seed={}", r.seed);
+    println!("Peak RSS: {}", r.peak_rss_measurement_method);
+    println!(
+        "\n+---------+------------+-----------+-------------+------------+-------------+-------------+--------------------+-----------+------------+"
+    );
+    println!(
+        "|  Scale  | Build Time | Build QPS | Peak RSS MB | Raw B/Vec  | Graph B/Vec | Total B/Vec | Query Latency (ms) | Query QPS | Recall@10  |"
+    );
+    println!(
+        "+---------+------------+-----------+-------------+------------+-------------+-------------+--------------------+-----------+------------+"
+    );
+
+    for p in &r.scale_profiles {
+        let scale_label = if p.scale_vectors == 1_000_000 {
+            "1M".to_string()
+        } else {
+            format!("{}k", p.scale_vectors / 1000)
+        };
+        println!(
+            "| {:^7} | {:^8.2} s | {:^9.1} | {:^11.2} | {:^10.1} | {:^11.2} | {:^11.2} | {:^18.3} | {:^9.1} | {:^9.2}% |",
+            scale_label,
+            p.build_time_s,
+            p.build_qps,
+            p.peak_rss_mb,
+            p.raw_vector_bytes_per_vector,
+            p.graph_bytes_per_vector,
+            p.total_bytes_per_vector,
+            p.query_latency_ms,
+            p.query_qps,
+            p.recall_at_10 * 100.0,
+        );
+    }
+    println!(
+        "+---------+------------+-----------+-------------+------------+-------------+-------------+--------------------+-----------+------------+"
+    );
+}
+
 /// Verifies bit-exact reproducibility across two independent index builds and query executions.
 pub fn verify_reproducibility(
     base: &RowMatrix<f32>,
@@ -1080,6 +1509,8 @@ pub fn run_phase2_cli(args: &[String]) -> Result<()> {
     let mut save_files = true;
     let mut run_repro_check = true;
     let mut json_out: Option<PathBuf> = None;
+    let mut profile_baseline = false;
+    let mut profile_scales: Vec<usize> = Vec::new();
     let mut show_help = false;
 
     let mut i = 0;
@@ -1313,6 +1744,29 @@ pub fn run_phase2_cli(args: &[String]) -> Result<()> {
                 }
                 i += 2;
             }
+            "--profile-baseline" | "--baseline-profile" => {
+                profile_baseline = true;
+                i += 1;
+            }
+            "--profile-scales" => {
+                if i + 1 >= args.len() {
+                    return Err(VectorSearchError::InvalidArgument(
+                        "Missing value after --profile-scales".to_string(),
+                    ));
+                }
+                profile_scales = args[i + 1]
+                    .split(',')
+                    .map(|s| {
+                        s.trim().parse::<usize>().map_err(|_| {
+                            VectorSearchError::InvalidArgument(format!(
+                                "Invalid profile scale value '{s}'"
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<usize>>>()?;
+                profile_baseline = true;
+                i += 2;
+            }
             unknown => {
                 return Err(VectorSearchError::InvalidArgument(format!(
                     "Unrecognized CLI flag '{unknown}'"
@@ -1345,12 +1799,35 @@ OPTIONS:
     --m-max0 <M0>               Max outgoing edges per node at layer 0 (default: 2*M)
     --ef-construction <EFC>     Candidate beam width during index build (default: 100)
     --ef-search <LIST>          Comma-separated efSearch values to sweep (default: 10,20,50,100,200)
+    --profile-baseline          Profile HNSW across multiple scales (10k, 100k, 1M)
+    --profile-scales <SCALES>   Comma-separated vector scales to profile (default: 10000,100000,1000000)
     --json-out <PATH>           Write structured JSON benchmark report to PATH
     --offline                   Disable internet downloads; use local cache or synthetic
     --no-save                   Skip writing intermediate artifacts to disk
     --repro-check               Verify bit-exact reproducibility across independent runs
     -h, --help                  Print this help message"
         );
+        return Ok(());
+    }
+
+    if profile_baseline {
+        let report = run_baseline_multi_scale_profile(
+            &data_cache_dir,
+            &profile_scales,
+            seed,
+            allow_download,
+        )?;
+        print_baseline_profile_report(&report);
+
+        let target_json =
+            json_out.unwrap_or_else(|| PathBuf::from("data/baseline_profile_report.json"));
+        if let Some(parent) = target_json.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+        fs::write(&target_json, report.to_json_string())?;
+        println!("  - JSON Baseline Report:  {}", target_json.display());
         return Ok(());
     }
 

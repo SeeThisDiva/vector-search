@@ -197,11 +197,82 @@ impl VisitedTracker {
         }
         self.tags[id] = self.curr_tag;
     }
+
+    /// Heap memory footprint allocated by visited tracking tags in bytes.
+    #[inline]
+    #[must_use]
+    pub fn memory_bytes(&self) -> usize {
+        self.tags.capacity() * std::mem::size_of::<u32>()
+    }
 }
 
 impl Default for VisitedTracker {
     fn default() -> Self {
         Self::new(0)
+    }
+}
+
+/// Reusable scratch buffers for [`HnswIndex::select_neighbors_heuristic`] and neighbor pruning.
+///
+/// Pre-allocated during index initialization to completely eliminate dynamic heap allocations
+/// in the triangular diversity heuristic during vector insertion.
+#[derive(Debug, Clone)]
+pub struct HeuristicScratch {
+    /// Candidate buffer holding input candidates and optional 1-hop expansions.
+    pub w_set: Vec<Candidate>,
+    /// Min-heap sorting candidates in ascending canonical order `(distance, id)`.
+    pub w_d: BinaryHeap<Reverse<Candidate>>,
+    /// Selected diverse neighbor IDs for the target node.
+    pub r: Vec<usize>,
+    /// Rejected candidate buffer for step 5 keep-pruned backfilling.
+    pub w_pruned: Vec<Candidate>,
+    /// Scratch buffer for gathering candidates during degree pruning.
+    pub e_cands: Vec<Candidate>,
+    /// Scratch buffer storing outer neighbor IDs to prevent nested slice aliasing during degree pruning.
+    pub outer_neighbors: Vec<usize>,
+    /// Visited/seen set for candidate deduplication.
+    pub seen: HashSet<usize>,
+}
+
+impl Default for HeuristicScratch {
+    fn default() -> Self {
+        Self {
+            w_set: Vec::new(),
+            w_d: BinaryHeap::new(),
+            r: Vec::new(),
+            w_pruned: Vec::new(),
+            e_cands: Vec::new(),
+            outer_neighbors: Vec::new(),
+            seen: HashSet::new(),
+        }
+    }
+}
+
+impl HeuristicScratch {
+    /// Creates a new `HeuristicScratch` with preallocated capacities.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            w_set: Vec::with_capacity(256),
+            w_d: BinaryHeap::with_capacity(256),
+            r: Vec::with_capacity(64),
+            w_pruned: Vec::with_capacity(256),
+            e_cands: Vec::with_capacity(64),
+            outer_neighbors: Vec::with_capacity(64),
+            seen: HashSet::with_capacity(256),
+        }
+    }
+
+    /// Estimated memory footprint allocated by scratch buffers in bytes.
+    #[must_use]
+    pub fn memory_bytes(&self) -> usize {
+        self.w_set.capacity() * std::mem::size_of::<Candidate>()
+            + self.w_d.capacity() * std::mem::size_of::<Reverse<Candidate>>()
+            + self.r.capacity() * std::mem::size_of::<usize>()
+            + self.w_pruned.capacity() * std::mem::size_of::<Candidate>()
+            + self.e_cands.capacity() * std::mem::size_of::<Candidate>()
+            + self.outer_neighbors.capacity() * std::mem::size_of::<usize>()
+            + self.seen.capacity() * (std::mem::size_of::<usize>() + 1)
     }
 }
 
@@ -240,6 +311,7 @@ pub struct HnswIndex<'a> {
     top_layer: usize,
     rng: DeterministicRng,
     visited_tracker: VisitedTracker,
+    heuristic_scratch: HeuristicScratch,
 }
 
 impl<'a> HnswIndex<'a> {
@@ -247,6 +319,7 @@ impl<'a> HnswIndex<'a> {
     pub fn new(matrix: &'a RowMatrix<f32>, metric: Metric, config: HnswConfig) -> Self {
         let rng = DeterministicRng::new(config.seed);
         let visited_tracker = VisitedTracker::new(matrix.rows());
+        let heuristic_scratch = HeuristicScratch::new();
 
         Self {
             matrix,
@@ -257,6 +330,7 @@ impl<'a> HnswIndex<'a> {
             top_layer: 0,
             rng,
             visited_tracker,
+            heuristic_scratch,
         }
     }
 
@@ -289,6 +363,38 @@ impl<'a> HnswIndex<'a> {
     #[must_use]
     pub fn entry_point(&self) -> Option<usize> {
         self.enter_point
+    }
+
+    /// Graph memory footprint allocated by index structures in bytes.
+    #[must_use]
+    pub fn memory_bytes(&self) -> usize {
+        let mut total = self.nodes.capacity() * std::mem::size_of::<HnswNode>();
+        for node in &self.nodes {
+            total += node.neighbors.capacity() * std::mem::size_of::<Vec<usize>>();
+            for layer_edges in &node.neighbors {
+                total += layer_edges.capacity() * std::mem::size_of::<usize>();
+            }
+        }
+        total += self.visited_tracker.memory_bytes();
+        total
+    }
+
+    /// Graph memory footprint in mebibytes (MiB).
+    #[inline]
+    #[must_use]
+    pub fn memory_mb(&self) -> f64 {
+        self.memory_bytes() as f64 / (1024.0 * 1024.0)
+    }
+
+    /// Average graph memory per indexed vector in bytes.
+    #[inline]
+    #[must_use]
+    pub fn bytes_per_vector(&self) -> f64 {
+        if self.nodes.is_empty() {
+            0.0
+        } else {
+            self.memory_bytes() as f64 / self.nodes.len() as f64
+        }
     }
 
     /// Reference to graph configuration.
@@ -491,8 +597,8 @@ impl<'a> HnswIndex<'a> {
         w
     }
 
-    /// Selects up to `m` diverse neighbors from candidate set `candidates` using triangular pruning (Algorithm 4: SELECT-NEIGHBORS-HEURISTIC).
-    pub fn select_neighbors_heuristic(
+    /// Internal implementation of Algorithm 4 (SELECT-NEIGHBORS-HEURISTIC) reusing preallocated buffers in `scratch`.
+    pub fn select_neighbors_heuristic_with_scratch(
         &self,
         base_id: usize,
         candidates: &[Candidate],
@@ -500,14 +606,15 @@ impl<'a> HnswIndex<'a> {
         lc: usize,
         extend_candidates: bool,
         keep_pruned: bool,
-    ) -> Vec<usize> {
-        let mut w_set: Vec<Candidate> = Vec::with_capacity(candidates.len() * 2);
-        let mut seen = HashSet::new();
+        scratch: &mut HeuristicScratch,
+    ) {
+        scratch.w_set.clear();
+        scratch.seen.clear();
 
         // Step 1: Add input candidates (excluding base node itself)
         for &cand in candidates {
-            if cand.id != base_id && seen.insert(cand.id) {
-                w_set.push(cand);
+            if cand.id != base_id && scratch.seen.insert(cand.id) {
+                scratch.w_set.push(cand);
             }
         }
 
@@ -517,9 +624,9 @@ impl<'a> HnswIndex<'a> {
                 if let Some(node) = self.nodes.get(cand.id) {
                     if lc <= node.max_layer {
                         for &adj_id in &node.neighbors[lc] {
-                            if adj_id != base_id && seen.insert(adj_id) {
+                            if adj_id != base_id && scratch.seen.insert(adj_id) {
                                 let d_adj = self.compute_node_distance(adj_id, base_id);
-                                w_set.push(Candidate {
+                                scratch.w_set.push(Candidate {
                                     distance: d_adj,
                                     id: adj_id,
                                 });
@@ -531,22 +638,22 @@ impl<'a> HnswIndex<'a> {
         }
 
         // Step 3: Populate Min-Heap W_d (ordered ascending by distance)
-        let mut w_d = BinaryHeap::<Reverse<Candidate>>::with_capacity(w_set.len());
-        for cand in w_set {
-            w_d.push(Reverse(cand));
+        scratch.w_d.clear();
+        for &cand in &scratch.w_set {
+            scratch.w_d.push(Reverse(cand));
         }
 
-        let mut r: Vec<usize> = Vec::with_capacity(m);
-        let mut w_pruned: Vec<Candidate> = Vec::with_capacity(w_d.len());
+        scratch.r.clear();
+        scratch.w_pruned.clear();
 
         // Step 4: Triangular diversity selection
-        while let Some(Reverse(e)) = w_d.pop() {
-            if r.len() >= m {
+        while let Some(Reverse(e)) = scratch.w_d.pop() {
+            if scratch.r.len() >= m {
                 break;
             }
 
             let mut is_diverse = true;
-            for &r_id in &r {
+            for &r_id in &scratch.r {
                 let d_e_r = self.compute_node_distance(e.id, r_id);
                 if d_e_r <= e.distance {
                     is_diverse = false;
@@ -555,23 +662,44 @@ impl<'a> HnswIndex<'a> {
             }
 
             if is_diverse {
-                r.push(e.id);
+                scratch.r.push(e.id);
             } else {
-                w_pruned.push(e);
+                scratch.w_pruned.push(e);
             }
         }
 
         // Step 5: Backfill from pruned candidates if keep_pruned is set and R is under-filled
-        if keep_pruned && r.len() < m {
-            for pruned_cand in w_pruned {
-                if r.len() >= m {
+        if keep_pruned && scratch.r.len() < m {
+            for &pruned_cand in &scratch.w_pruned {
+                if scratch.r.len() >= m {
                     break;
                 }
-                r.push(pruned_cand.id);
+                scratch.r.push(pruned_cand.id);
             }
         }
+    }
 
-        r
+    /// Selects up to `m` diverse neighbors from candidate set `candidates` using triangular pruning (Algorithm 4: SELECT-NEIGHBORS-HEURISTIC).
+    pub fn select_neighbors_heuristic(
+        &self,
+        base_id: usize,
+        candidates: &[Candidate],
+        m: usize,
+        lc: usize,
+        extend_candidates: bool,
+        keep_pruned: bool,
+    ) -> Vec<usize> {
+        let mut scratch = HeuristicScratch::new();
+        self.select_neighbors_heuristic_with_scratch(
+            base_id,
+            candidates,
+            m,
+            lc,
+            extend_candidates,
+            keep_pruned,
+            &mut scratch,
+        );
+        scratch.r
     }
 
     /// Inserts a new vector by its row `id` into the HNSW graph (Algorithm 1: INSERT).
@@ -614,6 +742,8 @@ impl<'a> HnswIndex<'a> {
 
         let l_top = self.top_layer;
         let mut tracker = std::mem::take(&mut self.visited_tracker);
+        let mut scratch = std::mem::take(&mut self.heuristic_scratch);
+        let mut e_cands = std::mem::take(&mut scratch.e_cands);
 
         // Phase A: Top-down greedy zoom-in (ef = 1) from l_top down to l + 1
         if l < l_top {
@@ -643,17 +773,22 @@ impl<'a> HnswIndex<'a> {
             );
 
             let candidates: Vec<Candidate> = w.into_sorted_vec();
-            let neighbors = self.select_neighbors_heuristic(
+            self.select_neighbors_heuristic_with_scratch(
                 q_id,
                 &candidates,
                 self.config.m,
                 lc,
                 self.config.extend_candidates,
                 self.config.keep_pruned,
+                &mut scratch,
             );
 
+            scratch.outer_neighbors.clear();
+            scratch.outer_neighbors.extend_from_slice(&scratch.r);
+
             // Add bidirectional edges
-            for &e in &neighbors {
+            for i in 0..scratch.outer_neighbors.len() {
+                let e = scratch.outer_neighbors[i];
                 if !self.nodes[q_id].neighbors[lc].contains(&e) {
                     self.nodes[q_id].neighbors[lc].push(e);
                 }
@@ -663,10 +798,9 @@ impl<'a> HnswIndex<'a> {
 
                 // Prune neighbor e if its degree exceeds layer cap
                 if self.nodes[e].neighbors[lc].len() > m_layer {
-                    let e_adj = self.nodes[e].neighbors[lc].clone();
-                    let mut e_cands = Vec::with_capacity(e_adj.len());
+                    e_cands.clear();
 
-                    for &adj_id in &e_adj {
+                    for &adj_id in &self.nodes[e].neighbors[lc] {
                         let d = self.compute_node_distance(adj_id, e);
                         e_cands.push(Candidate {
                             distance: d,
@@ -674,15 +808,17 @@ impl<'a> HnswIndex<'a> {
                         });
                     }
 
-                    let pruned_adj = self.select_neighbors_heuristic(
+                    self.select_neighbors_heuristic_with_scratch(
                         e,
                         &e_cands,
                         m_layer,
                         lc,
                         self.config.extend_candidates,
                         self.config.keep_pruned,
+                        &mut scratch,
                     );
-                    self.nodes[e].neighbors[lc] = pruned_adj;
+                    self.nodes[e].neighbors[lc].clear();
+                    self.nodes[e].neighbors[lc].extend_from_slice(&scratch.r);
                 }
             }
 
@@ -692,7 +828,9 @@ impl<'a> HnswIndex<'a> {
             }
         }
 
+        scratch.e_cands = e_cands;
         self.visited_tracker = tracker;
+        self.heuristic_scratch = scratch;
 
         // Phase C: Update global entry point if new node exceeded l_top
         if l > l_top {

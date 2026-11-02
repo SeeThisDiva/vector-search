@@ -185,3 +185,92 @@ fn probe_platform_cpu_and_ram() -> (String, Option<f64>) {
 fn probe_platform_cpu_and_ram() -> (String, Option<f64>) {
     (String::new(), None)
 }
+
+/// Returns the process peak resident set size (or peak working set on Windows) in mebibytes (MiB).
+///
+/// Completely safe: enforces `#![forbid(unsafe_code)]` with zero unsafe blocks.
+#[must_use]
+pub fn get_peak_rss_mb() -> Option<f64> {
+    #[cfg(target_os = "windows")]
+    {
+        get_windows_peak_working_set_mb()
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        get_linux_peak_rss_mb()
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        get_macos_peak_rss_mb()
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn get_windows_peak_working_set_mb() -> Option<f64> {
+    let pid = std::process::id();
+    let cmd = format!("(Get-Process -Id {pid}).PeakWorkingSet64");
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &cmd])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let bytes: u64 = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .ok()?;
+
+    Some((bytes as f64) / (1024.0 * 1024.0))
+}
+
+#[cfg(target_os = "linux")]
+fn get_linux_peak_rss_mb() -> Option<f64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("VmHWM:") {
+            let kb_str = rest.trim().trim_end_matches("kB").trim();
+            if let Ok(kb) = kb_str.parse::<u64>() {
+                return Some((kb as f64) / 1024.0);
+            }
+        }
+    }
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("VmRSS:") {
+            let kb_str = rest.trim().trim_end_matches("kB").trim();
+            if let Ok(kb) = kb_str.parse::<u64>() {
+                return Some((kb as f64) / 1024.0);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn get_macos_peak_rss_mb() -> Option<f64> {
+    let pid = std::process::id().to_string();
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let kb: u64 = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .ok()?;
+
+    Some((kb as f64) / 1024.0)
+}
