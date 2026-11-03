@@ -39,20 +39,26 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 ├── src/
 │   ├── lib.rs                  # Crate root (#![forbid(unsafe_code)])
 │   ├── main.rs                 # CLI entry point for Phase 1 runner (`phase1`)
+│   ├── hnsw.rs                 # HNSW multi-layer graph index (Algorithms 1-5)
+│   ├── bin/phase2.rs           # CLI entry point for Phase 2 runner (`phase2`)
+│   ├── bin/phase3.rs           # CLI entry point for Phase 3 SIFT1M runner (`phase3`)
 │   ├── matrix.rs               # Contiguous row-major RowMatrix<f32>
 │   ├── distance.rs             # 8-way unrolled L2^2, Euclidean, Inner Product kernels
 │   ├── rng.rs                  # Deterministic SplitMix64 + Xoshiro256** PRNG
 │   ├── dataset.rs              # Texmex .fvecs/.ivecs I/O, SIFT downloader & Gaussian generator
-│   ├── exact_knn.rs            # ExactKnn engine (single-query, parallel Rayon, timed)
+│   ├── exact_knn.rs            # ExactKnn engine (single-query, parallel, timed)
 │   ├── recall.rs               # Recall@k, verify_self_recall, latency percentiles
 │   ├── hardware.rs             # System CPU / RAM / OS hardware detection
 │   ├── benchmark.rs            # End-to-end benchmark orchestrator & JSON reporter
 │   └── hnsw_phase1/            # Python reference implementation & BLAS GEMM baseline
 ├── tests/
-│   ├── rust_phase1_tests.rs    # 16 Rust integration & edge-case tests (PASSING)
+│   ├── rust_phase1_tests.rs    # 16 Rust Phase 1 integration & edge-case tests (PASSING)
+│   ├── rust_phase2_tests.rs    # 23 Rust Phase 2 HNSW correctness & recall tests (PASSING)
+│   ├── adversarial_hnsw_tests.rs # 12 Rust HNSW stress & boundary tests (PASSING)
+│   ├── rust_phase3_tests.rs    # 4 Rust Phase 3 report semantics & query guard tests (PASSING)
 │   ├── test_phase1.py          # 23 Python reference tests (PASSING)
 │   └── test_rust_parity.py     # 4 Rust <-> Python <-> FAISS parity tests (PASSING)
-├── data/                       # Contains base.fvecs, query.fvecs, groundtruth.ivecs, groundtruth.fvecs
+├── data/                       # Contains SIFT corpora & JSON benchmark reports (gitignored)
 └── run_phase1.py               # Python reference runner
 ```
 

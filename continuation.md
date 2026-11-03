@@ -17,7 +17,7 @@ From-scratch HNSW ANN search in Rust (`#![forbid(unsafe_code)]`, std only), benc
 - `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` clean.
 - `pytest`: 27 pass (needs `faiss-cpu`, in `requirements.txt`); `ruff` and `mypy` were clean at the last Python change. The review did not touch Python and did not re-run it.
 - Needs Rust >= 1.88 (`rust-version` in `Cargo.toml`; `as_chunks` and lockfile v4). The review used rustc 1.90.
-- Git: Phase 1 to 3 are committed (`git log`). **The review changes are uncommitted** (delivered as `review_fixes.patch`; apply with `git apply review_fixes.patch`, then commit). Suggested commits: (1) `fix(bench): never report a skipped repro check or stale baseline rows as verified`, (2) `fix(hnsw): validate queries before spawning parallel search workers`, (3) `test(phase3): add report-semantics and parallel-validation tests`, (4) `docs: refresh handoff docs and add Phase 3 results`.
+- Git: Phase 1 to 3 and the Phase 3 review fixes (`review_fixes.patch`, commit `d4b6fed` + follow-up edge-case test/validation hardening) are applied and committed (`git log`).
 
 ## Review log (Phase 3 review, what happened)
 After Phase 3 was committed, Dev asked for a review of the whole repo and fixes for any flaws. The review read `hnsw.rs` and the Phase 2/3 benchmark code in full and checked them against `docs/HNSW_ALGORITHM.md`, then ran the full test suite before and after the changes. No Windows machine or SIFT1M run was available to the reviewer, so **no benchmark was re-run and none of the numbers in `data/*.json` changed**.
@@ -111,7 +111,7 @@ python -m pytest tests -q && ruff check . && mypy src tests
 Tip for quick iteration: release builds use `lto = "thin"` and `codegen-units = 1`, which is slow to compile. For test runs only, `CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 cargo test --release` compiles in about 10 s. Never use those overrides for numbers you report.
 
 ## Housekeeping checklist
-- [ ] Apply and commit the review patch.
+- [x] Apply and commit the review patch.
 - [ ] CI: confirm green on a fresh clone after pushing.
 - [ ] Dev signs off Phase 3.
 - [ ] Update `CLAUDE.md`, `CONTEXT_AND_MEMORY.md` and README test counts whenever tests are added.

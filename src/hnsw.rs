@@ -921,16 +921,16 @@ impl<'a> HnswIndex<'a> {
             ));
         }
 
-        let Some(mut curr_ep) = self.enter_point else {
-            return Ok(Vec::new());
-        };
-
         if self.matrix.cols() > 0 && query.len() != self.matrix.cols() {
             return Err(VectorSearchError::DimensionMismatch {
                 expected: self.matrix.cols(),
                 actual: query.len(),
             });
         }
+
+        let Some(mut curr_ep) = self.enter_point else {
+            return Ok(Vec::new());
+        };
 
         // Phase 1: Top-down greedy zoom-in (ef = 1) down to layer 1
         if self.top_layer >= 1 {
@@ -1046,11 +1046,12 @@ impl<'a> HnswIndex<'a> {
             ));
         }
 
-        if self.nodes.is_empty() || self.enter_point.is_none() {
-            return Ok(KnnSearchResult {
-                indices: RowMatrix::new(num_queries, 0, vec![])?,
-                distances: RowMatrix::new(num_queries, 0, vec![])?,
-            });
+        // Validate every query up front so a bad vector yields `Err` here, exactly like the
+        // sequential path, instead of panicking inside a worker thread or succeeding on an empty index.
+        if queries.as_slice().iter().any(|v| !v.is_finite()) {
+            return Err(VectorSearchError::InvalidArgument(
+                "query vector contains non-finite value (NaN/Inf)".to_string(),
+            ));
         }
 
         if self.matrix.cols() > 0 && queries.cols() != self.matrix.cols() {
@@ -1060,12 +1061,11 @@ impl<'a> HnswIndex<'a> {
             });
         }
 
-        // Validate every query up front so a bad vector yields `Err` here, exactly like the
-        // sequential path, instead of panicking inside a worker thread.
-        if queries.as_slice().iter().any(|v| !v.is_finite()) {
-            return Err(VectorSearchError::InvalidArgument(
-                "query vector contains non-finite value (NaN/Inf)".to_string(),
-            ));
+        if self.nodes.is_empty() || self.enter_point.is_none() {
+            return Ok(KnnSearchResult {
+                indices: RowMatrix::new(num_queries, 0, vec![])?,
+                distances: RowMatrix::new(num_queries, 0, vec![])?,
+            });
         }
 
         let effective_k = k.min(self.nodes.len());

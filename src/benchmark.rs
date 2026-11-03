@@ -1824,6 +1824,7 @@ OPTIONS:
     --offline                   Disable internet downloads; use local cache or synthetic
     --no-save                   Skip writing intermediate artifacts to disk
     --repro-check               Verify bit-exact reproducibility across independent runs
+    --no-repro-check            Skip reproducibility check
     -h, --help                  Print this help message"
         );
         return Ok(());
@@ -2700,10 +2701,13 @@ pub fn run_phase3_benchmark(config: &Phase3Config) -> Result<Phase3Report> {
             p1m.build_time_s = build_time_s;
             p1m.build_qps = build_qps;
             p1m.peak_rss_mb = peak_rss_mb;
+            p1m.bytes_per_vector = graph_bytes_per_vector;
+            p1m.raw_vector_bytes_per_vector = raw_vector_bytes_per_vector;
             p1m.graph_bytes_per_vector = graph_bytes_per_vector;
             p1m.total_bytes_per_vector = total_bytes_per_vector;
             p1m.graph_memory_bytes = graph_total_bytes;
             p1m.graph_memory_mb = graph_total_mb;
+            p1m.k = config.k;
             p1m.max_layer = max_layer;
             p1m.entry_point = entry_point;
             if let Some(eval50) = ef_evaluations.iter().find(|e| e.ef_search == 50) {
