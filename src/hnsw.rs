@@ -1060,6 +1060,14 @@ impl<'a> HnswIndex<'a> {
             });
         }
 
+        // Validate every query up front so a bad vector yields `Err` here, exactly like the
+        // sequential path, instead of panicking inside a worker thread.
+        if queries.as_slice().iter().any(|v| !v.is_finite()) {
+            return Err(VectorSearchError::InvalidArgument(
+                "query vector contains non-finite value (NaN/Inf)".to_string(),
+            ));
+        }
+
         let effective_k = k.min(self.nodes.len());
         let workers = if num_threads == 0 {
             std::thread::available_parallelism()

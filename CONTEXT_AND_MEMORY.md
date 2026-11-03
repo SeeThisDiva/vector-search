@@ -11,7 +11,7 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 ### Build Roadmap (7 Phases — Stop After Each)
 - [x] **Phase 1: Brute-Force Exact $k$-NN Ground Truth & Recall Harness** *(COMPLETED & VERIFIED)*
 - [x] **Phase 2: HNSW Insert + Search, Correctness-Checked on 10k Vectors** *(COMPLETED & VERIFIED)*
-- [ ] **Phase 3: Scale to 1M Vectors (`SIFT1M`), Profile Memory & Build Time** *(<-- RESUME HERE)*
+- [x] **Phase 3: Scale to 1M Vectors (`SIFT1M`), Profile Memory & Build Time** *(IMPLEMENTED, AWAITING DEV'S REVIEW; do not start Phase 4 before that)*
 - [ ] **Phase 4: Parameter Sweep ($M$, $efConstruction$, $efSearch$), Plot Recall@10 vs. p99 Latency**
 - [ ] **Phase 5: Filtered Search with Metadata Predicates (Including Selective Filters)**
 - [ ] **Phase 6: Scalar (SQ8) or Product Quantization (PQ), Measure Recall Cost**
@@ -33,7 +33,7 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 ## 3. Current Repository Architecture & File Map
 
 ```text
-├── Cargo.toml                  # Rust crate manifest: 'vector-search' v0.1.0, binary 'phase1'
+├── Cargo.toml                  # Rust crate manifest: 'vector-search' v0.1.0, binaries 'phase1', 'phase2', 'phase3'
 ├── docs/
 │   └── HNSW_ALGORITHM.md       # 513-line authoritative math & pseudocode spec (Algorithms 1-5)
 ├── src/
@@ -74,12 +74,12 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 6. **Self-Verification Invariant**: `Recall@k(GT, GT) == 1.000000` (100.0%) strictly verified.
 7. **FAISS Parity Alignment**: `1000/1000` (100.0%) exact neighbor ID match against `faiss.IndexFlatL2`.
 8. **Test Suite Status**:
-   - `cargo test`: **51/51 PASS** (16 Phase 1 + 23 Phase 2 + 12 adversarial; siftsmall tests skip if `data/*.fvecs` is absent)
+   - `cargo test`: **55/55 PASS** (16 Phase 1 + 23 Phase 2 + 12 adversarial + 4 Phase 3; siftsmall tests skip if `data/*.fvecs` is absent)
    - `pytest`: **27/27 PASS** (with `faiss-cpu` installed; the FAISS parity test skips otherwise)
 
 ---
 
-## 5. Next Step: Phase 2 Detailed Implementation Guide
+## 5. Phase 2 Implementation Guide (completed; Phase 3 results are in `continuation.md`)
 
 ### Objective
 Implement the core **HNSW index** (insert + approximate search) from scratch in Rust, and verify recall against the Phase 1 brute-force ground truth on 10,000 128-d vectors (`siftsmall` or synthetic).

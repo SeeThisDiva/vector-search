@@ -35,7 +35,8 @@ Layer L_0   :   [Node A] -> [D] -> [C] -> [E] -> [Node B] -> ...   (All N vector
 - [x] **Phase 2: HNSW Insert + Search, Correctness-Checked on 10k Vectors**
   - From-scratch `HnswIndex` (Algorithms 1-5: insert, search-layer, heuristic neighbor selection, k-NN search) with deterministic seeded layer sampling, `Recall@10` vs `efSearch` sweep and bit-exact reproducibility check
   - `m_max`, `m_max0` and `m_l` are derived from `M` unless explicitly overridden; vector ids must be inserted in order `0..n`
-- [ ] **Phase 3: Scale to 1M Vectors (`SIFT1M`), Profile Memory & Build Time**
+- [x] **Phase 3: Scale to 1M Vectors (`SIFT1M`), Profile Memory & Build Time**
+  - `phase3` CLI: SIFT1M build, official-ground-truth recall vs efSearch, per-component memory breakdown, peak RSS, bit-exact reproducibility check (see results below)
 - [ ] **Phase 4: Parameter Sweep (`M`, `efConstruction`, `efSearch`), Plot `Recall@10` vs `p99` Latency**
 - [ ] **Phase 5: Filtered Search with Metadata Predicates (Including High-Selectivity Filters)**
 - [ ] **Phase 6: Scalar or Product Quantization & Recall Cost Measurement**
@@ -76,10 +77,42 @@ cargo run --release --bin phase2 -- --dataset siftsmall --json-out data/phase2_r
 
 ---
 
+## Phase 3 Results (`SIFT1M` 1,000,000 $\times$ 128-d, `M=16`, `efConstruction=100`, $k=10$)
+
+Single run on `12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)`, official Texmex ground truth, 10,000 queries, single-threaded. Source: `data/phase3_report.json` (gitignored, regenerate with the command below).
+
+| efSearch | Recall@10 | Mean latency (ms) | p99 (ms) |
+|---------:|----------:|------------------:|---------:|
+| 10  | 73.3% | 0.124 | 0.326 |
+| 20  | 84.9% | 0.194 | 0.542 |
+| 50  | 94.7% | 0.419 | 0.961 |
+| 100 | 98.1% | 0.688 | 1.461 |
+| 200 | 99.4% | 1.192 | 2.146 |
+
+| Metric | Value |
+|--------|-------|
+| Build time | 728 s (1,373 vectors/s), top layer 5 |
+| Raw vectors | 512 B/vector |
+| Graph (incl. 4 B/vector visited tags) | ~343 B/vector |
+| Total | ~855 B/vector, 815 MiB |
+| Peak working set after build | 834 MiB |
+
+Caveats:
+- Latency comes from one run on a laptop. The same index at efSearch=50 measured 0.35 ms in the earlier baseline run and 0.42 ms here, so treat latency as +/-20% until repeated runs are recorded.
+- Peak RSS is a process-wide high-water mark that includes the 488 MiB base file loaded up front. Only the 1M row is meaningful; the 10k and 100k rows in the multi-scale baseline mostly measure the loaded dataset.
+- The 10k / 100k baseline rows in the Phase 3 JSON are constants copied from an earlier run and are marked `"measured_this_run": false`.
+- Recall at a fixed efSearch drops with scale (99.8% at 10k, 98.1% at 100k, 94.7% at 1M, all at efSearch=50), so efSearch must grow with N.
+
+```bash
+cargo run --release --bin phase3 -- --dataset sift1m --json-out data/phase3_report.json
+```
+
+---
+
 ## Repository Structure
 
 ```text
-├── Cargo.toml                 # Rust crate manifest (vector_search lib + phase1/phase2 CLIs)
+├── Cargo.toml                 # Rust crate manifest (vector_search lib + phase1/phase2/phase3 CLIs)
 ├── docs/
 │   └── HNSW_ALGORITHM.md      # HNSW mathematical derivations, layer theory & pseudocode
 ├── src/
@@ -87,6 +120,7 @@ cargo run --release --bin phase2 -- --dataset siftsmall --json-out data/phase2_r
 │   ├── main.rs                # Rust Phase 1 CLI runner (`phase1`)
 │   ├── hnsw.rs                # HNSW index (insert, search-layer, heuristic selection, k-NN)
 │   ├── bin/phase2.rs          # Rust Phase 2 CLI runner (`phase2`)
+│   ├── bin/phase3.rs          # Rust Phase 3 CLI runner (`phase3`, SIFT1M)
 │   ├── matrix.rs              # Contiguous row-major RowMatrix<T> storage
 │   ├── distance.rs            # 8-way unrolled L2^2, Euclidean, and Inner Product kernels
 │   ├── rng.rs                 # Deterministic SplitMix64 + Xoshiro256** PRNG
@@ -100,6 +134,7 @@ cargo run --release --bin phase2 -- --dataset siftsmall --json-out data/phase2_r
 │   ├── rust_phase1_tests.rs   # Rust integration & edge-case test suite
 │   ├── rust_phase2_tests.rs   # HNSW correctness, topology & recall tests
 │   ├── adversarial_hnsw_tests.rs # HNSW stress / boundary / reproducibility tests
+│   ├── rust_phase3_tests.rs   # Phase 3 report semantics + parallel-search input validation
 │   ├── test_phase1.py         # Python reference unit tests
 │   └── test_rust_parity.py    # Cross-language Rust <-> Python <-> FAISS parity tests
 └── run_phase1.py              # Python reference runner

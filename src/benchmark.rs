@@ -527,6 +527,9 @@ pub struct Phase2Report {
     pub performance_target_met: bool,
     /// Smallest efSearch that satisfies the performance target, if any.
     pub performance_target_ef: Option<usize>,
+    /// True only if the reproducibility check actually ran (it is skipped by `--no-repro-check`).
+    pub reproducibility_checked: bool,
+    /// True only if the check ran and passed. A skipped check is never reported as verified.
     pub reproducibility_verified: bool,
 }
 
@@ -698,6 +701,10 @@ impl Phase2Report {
             PHASE2_TARGET_MIN_RECALL, PHASE2_TARGET_MAX_LATENCY_MS
         ));
         out.push_str(&format!(
+            "    \"reproducibility_checked\": {},\n",
+            self.reproducibility_checked
+        ));
+        out.push_str(&format!(
             "    \"reproducibility_verified\": {},\n",
             self.reproducibility_verified
         ));
@@ -715,6 +722,9 @@ impl Phase2Report {
 /// Profile measurement for an individual scale in the baseline multi-scale profile.
 #[derive(Debug, Clone)]
 pub struct BaselineScaleProfile {
+    /// False for rows copied from an earlier recorded run (see `load_or_default_baseline_profiles`);
+    /// true only for rows measured by the run that produced the report.
+    pub measured_this_run: bool,
     pub scale_vectors: usize,
     pub build_time_s: f64,
     pub build_qps: f64,
@@ -827,6 +837,10 @@ impl BaselineMultiScaleReport {
                 ""
             };
             out.push_str("    {\n");
+            out.push_str(&format!(
+                "      \"measured_this_run\": {},\n",
+                p.measured_this_run
+            ));
             out.push_str(&format!("      \"scale_vectors\": {},\n", p.scale_vectors));
             out.push_str(&format!("      \"build_time_s\": {:.6},\n", p.build_time_s));
             out.push_str(&format!("      \"build_qps\": {:.2},\n", p.build_qps));
@@ -1045,6 +1059,7 @@ pub fn run_baseline_multi_scale_profile(
         let total_bytes_per_vector = raw_vector_bytes_per_vector + graph_bytes_per_vector;
 
         profiles.push(BaselineScaleProfile {
+            measured_this_run: true,
             scale_vectors: scale,
             build_time_s,
             build_qps,
@@ -1331,10 +1346,11 @@ pub fn run_phase2_benchmark(config: &Phase2Config) -> Result<Phase2Report> {
     }
 
     // 6. Verify Reproducibility (if enabled)
+    let reproducibility_checked = config.run_repro_check;
     let reproducibility_verified = if config.run_repro_check {
         verify_reproducibility(&loaded.base, &loaded.query, &hnsw_cfg, config.k, 50).is_ok()
     } else {
-        true
+        false
     };
 
     // 7. Verify performance target: one operating point must satisfy recall and latency together.
@@ -1370,6 +1386,7 @@ pub fn run_phase2_benchmark(config: &Phase2Config) -> Result<Phase2Report> {
         monotonic_scaling_verified,
         performance_target_met,
         performance_target_ef,
+        reproducibility_checked,
         reproducibility_verified,
     })
 }
@@ -1473,7 +1490,9 @@ pub fn print_phase2_report(r: &Phase2Report) {
     );
     println!(
         "  - Bit-Exact Reproducibility:  {}",
-        if r.reproducibility_verified {
+        if !r.reproducibility_checked {
+            "SKIPPED"
+        } else if r.reproducibility_verified {
             "PASSED"
         } else {
             "FAILED"
@@ -2004,6 +2023,9 @@ pub struct Phase3Report {
     pub multi_scale_baseline_summary: Vec<BaselineScaleProfile>,
     pub ef_evaluations: Vec<Phase3EfEvaluation>,
     pub monotonic_scaling_verified: bool,
+    /// True only if the reproducibility check actually ran (it is skipped by `--no-repro-check`).
+    pub reproducibility_checked: bool,
+    /// True only if the check ran and passed. A skipped check is never reported as verified.
     pub reproducibility_verified: bool,
     pub official_ground_truth_matched: bool,
     pub terminal_stopping_enforced: bool,
@@ -2205,6 +2227,10 @@ impl Phase3Report {
                 ""
             };
             out.push_str("    {\n");
+            out.push_str(&format!(
+                "      \"measured_this_run\": {},\n",
+                p.measured_this_run
+            ));
             out.push_str(&format!("      \"scale_vectors\": {},\n", p.scale_vectors));
             out.push_str(&format!("      \"build_time_s\": {:.6},\n", p.build_time_s));
             out.push_str(&format!("      \"build_qps\": {:.2},\n", p.build_qps));
@@ -2270,12 +2296,19 @@ impl Phase3Report {
             self.monotonic_scaling_verified
         ));
         out.push_str(&format!(
+            "    \"reproducibility_checked\": {},\n",
+            self.reproducibility_checked
+        ));
+        out.push_str(&format!(
             "    \"reproducibility_verified\": {},\n",
             self.reproducibility_verified
         ));
         out.push_str("    \"forbid_unsafe_code_enforced\": true,\n");
         out.push_str("    \"std_only_enforced\": true,\n");
-        out.push_str("    \"phase3_completed\": true,\n");
+        out.push_str(&format!(
+            "    \"phase3_completed\": {},\n",
+            self.monotonic_scaling_verified && self.reproducibility_verified
+        ));
         out.push_str(&format!(
             "    \"terminal_stopping_enforced\": {},\n",
             self.terminal_stopping_enforced
@@ -2294,6 +2327,7 @@ impl Phase3Report {
 fn load_or_default_baseline_profiles(_data_dir: &Path) -> Vec<BaselineScaleProfile> {
     vec![
         BaselineScaleProfile {
+            measured_this_run: false,
             scale_vectors: 10_000,
             build_time_s: 1.637239,
             build_qps: 6107.84,
@@ -2318,6 +2352,7 @@ fn load_or_default_baseline_profiles(_data_dir: &Path) -> Vec<BaselineScaleProfi
             latency_max_ms: 1.317500,
         },
         BaselineScaleProfile {
+            measured_this_run: false,
             scale_vectors: 100_000,
             build_time_s: 44.612567,
             build_qps: 2241.52,
@@ -2342,6 +2377,7 @@ fn load_or_default_baseline_profiles(_data_dir: &Path) -> Vec<BaselineScaleProfi
             latency_max_ms: 0.716900,
         },
         BaselineScaleProfile {
+            measured_this_run: false,
             scale_vectors: 1_000_000,
             build_time_s: 734.748843,
             build_qps: 1361.01,
@@ -2621,6 +2657,7 @@ pub fn run_phase3_benchmark(config: &Phase3Config) -> Result<Phase3Report> {
 
     // 4. Verify Reproducibility (if enabled)
     println!("[4/4] Verifying bit-exact reproducibility...");
+    let reproducibility_checked = config.run_repro_check;
     let reproducibility_verified = if config.run_repro_check {
         let repro_b = config.repro_vectors.min(loaded.base.rows());
         let repro_q = 100.min(loaded.query.rows());
@@ -2648,7 +2685,7 @@ pub fn run_phase3_benchmark(config: &Phase3Config) -> Result<Phase3Report> {
 
         verify_reproducibility(b_ref, q_ref, &hnsw_cfg, config.k, 50).is_ok()
     } else {
-        true
+        false
     };
 
     // Baseline profiles summary
@@ -2659,6 +2696,7 @@ pub fn run_phase3_benchmark(config: &Phase3Config) -> Result<Phase3Report> {
             .iter_mut()
             .find(|p| p.scale_vectors == 1_000_000)
         {
+            p1m.measured_this_run = true;
             p1m.build_time_s = build_time_s;
             p1m.build_qps = build_qps;
             p1m.peak_rss_mb = peak_rss_mb;
@@ -2731,6 +2769,7 @@ pub fn run_phase3_benchmark(config: &Phase3Config) -> Result<Phase3Report> {
         multi_scale_baseline_summary: baseline_profiles,
         ef_evaluations,
         monotonic_scaling_verified,
+        reproducibility_checked,
         reproducibility_verified,
         official_ground_truth_matched,
         terminal_stopping_enforced: true,
@@ -2876,7 +2915,9 @@ pub fn print_phase3_report(r: &Phase3Report) {
     );
     println!(
         "  - Bit-Exact Reproducibility:     {}",
-        if r.reproducibility_verified {
+        if !r.reproducibility_checked {
+            "SKIPPED"
+        } else if r.reproducibility_verified {
             "PASSED"
         } else {
             "FAILED"
