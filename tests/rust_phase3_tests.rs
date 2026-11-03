@@ -1,13 +1,21 @@
 //! Phase 3 regression tests. They run on small synthetic data so they need no SIFT download.
 
+use std::fs;
+use std::path::PathBuf;
+
 use vector_search::benchmark::{
-    run_phase2_benchmark, run_phase3_benchmark, Phase1DatasetMode, Phase2Config, Phase3Config,
+    run_phase2_benchmark, run_phase3_benchmark, summarize_repeated_latencies, Phase1DatasetMode,
+    Phase2Config, Phase3Config,
 };
-use vector_search::dataset::generate_synthetic_sift;
+use vector_search::dataset::{
+    generate_synthetic_sift, read_fvecs_max_rows, read_ivecs_max_rows, write_fvecs, write_ivecs,
+};
 use vector_search::distance::Metric;
 use vector_search::error::VectorSearchError;
-use vector_search::hnsw::{HnswConfig, HnswIndex};
+use vector_search::exact_knn::ExactKnn;
+use vector_search::hnsw::{HnswConfig, HnswIndex, VisitedTracker};
 use vector_search::matrix::RowMatrix;
+use vector_search::recall::LatencyStats;
 
 fn small_phase2_config(run_repro_check: bool) -> Phase2Config {
     Phase2Config {
@@ -40,6 +48,8 @@ fn small_config(run_repro_check: bool) -> Phase3Config {
         save_files: false,
         run_repro_check,
         repro_vectors: 300,
+        sweep_runs: 2,
+        run_multi_scale: false,
         ..Default::default()
     }
 }
@@ -143,4 +153,278 @@ fn parallel_search_rejects_non_finite_query_instead_of_panicking() {
             actual: 4
         })
     ));
+}
+
+#[test]
+fn phase3_official_ground_truth_check_detects_corrupted_gt_and_truncated_base() {
+    let mut tmp_dir: PathBuf = std::env::temp_dir();
+    tmp_dir.push(format!(
+        "vector_search_phase3_gt_test_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&tmp_dir);
+    fs::create_dir_all(&tmp_dir).unwrap();
+
+    let (base, query) = generate_synthetic_sift(200, 20, 16, 4, 123).unwrap();
+    let true_gt = ExactKnn::search_parallel_with_base(Metric::L2Squared, &base, &query, 10, 2)
+        .unwrap()
+        .indices;
+
+    let base_path = tmp_dir.join("base.fvecs");
+    let query_path = tmp_dir.join("query.fvecs");
+    let true_gt_path = tmp_dir.join("true_gt.ivecs");
+    let bad_gt_path = tmp_dir.join("bad_gt.ivecs");
+
+    write_fvecs(&base_path, &base).unwrap();
+    write_fvecs(&query_path, &query).unwrap();
+    write_ivecs(&true_gt_path, &true_gt).unwrap();
+
+    // Create a corrupted ground-truth file where each row still has 10 distinct IDs (which
+    // would fool a self-recall check `verify_self_recall(gt, 10)`), but shifted by +50 mod 200
+    // so they are not the true nearest neighbors.
+    let mut bad_rows = Vec::with_capacity(true_gt.rows());
+    for q in 0..true_gt.rows() {
+        let shifted: Vec<i32> = true_gt.row(q).iter().map(|&id| (id + 50) % 200).collect();
+        bad_rows.push(shifted);
+    }
+    let bad_gt = RowMatrix::from_rows(&bad_rows).unwrap();
+    write_ivecs(&bad_gt_path, &bad_gt).unwrap();
+
+    // 1. Authentic ground truth on full base -> official_ground_truth_matched must be true
+    let cfg_good = Phase3Config {
+        dataset_mode: Phase1DatasetMode::Custom {
+            base_fvecs: base_path.clone(),
+            query_fvecs: query_path.clone(),
+            gt_ivecs: Some(true_gt_path.clone()),
+        },
+        k: 10,
+        ef_search_list: vec![10, 50],
+        allow_download: false,
+        save_files: false,
+        run_repro_check: false,
+        sweep_runs: 1,
+        run_multi_scale: false,
+        ..Default::default()
+    };
+    let rep_good = run_phase3_benchmark(&cfg_good).unwrap();
+    assert!(rep_good.official_ground_truth_matched);
+    assert_eq!(rep_good.official_gt_check_queries, 20);
+    assert!((rep_good.official_gt_recall_at_k.unwrap() - 1.0).abs() < 1e-6);
+    assert_eq!(rep_good.official_gt_exact_id_matches, Some(200));
+    assert!(rep_good
+        .to_json_string()
+        .contains("\"official_ground_truth_matched\": true"));
+
+    // 2. Corrupted ground truth (still distinct per row) -> must be rejected as false
+    let cfg_bad = Phase3Config {
+        dataset_mode: Phase1DatasetMode::Custom {
+            base_fvecs: base_path.clone(),
+            query_fvecs: query_path.clone(),
+            gt_ivecs: Some(bad_gt_path),
+        },
+        ..cfg_good.clone()
+    };
+    let rep_bad = run_phase3_benchmark(&cfg_bad).unwrap();
+    assert!(!rep_bad.official_ground_truth_matched);
+    assert!(rep_bad.official_gt_recall_at_k.unwrap() < 0.5);
+    assert!(rep_bad
+        .to_json_string()
+        .contains("\"official_ground_truth_matched\": false"));
+
+    // 3. Single non-optimal neighbor (199/200 match => 0.995 recall, but 1 neighbor has distance > kth exact)
+    // -> must be rejected as false
+    let mut one_bad_rows: Vec<Vec<i32>> = (0..true_gt.rows())
+        .map(|q| true_gt.row(q).to_vec())
+        .collect();
+    let full_nn = ExactKnn::search_parallel_with_base(Metric::L2Squared, &base, &query, 200, 2)
+        .unwrap()
+        .indices;
+    // Replace the 10th neighbor of query 0 with the farthest vector (rank 199)
+    one_bad_rows[0][9] = full_nn.row(0)[199];
+    let one_bad_gt = RowMatrix::from_rows(&one_bad_rows).unwrap();
+    let one_bad_gt_path = tmp_dir.join("one_bad_gt.ivecs");
+    write_ivecs(&one_bad_gt_path, &one_bad_gt).unwrap();
+    let cfg_one_bad = Phase3Config {
+        dataset_mode: Phase1DatasetMode::Custom {
+            base_fvecs: base_path.clone(),
+            query_fvecs: query_path.clone(),
+            gt_ivecs: Some(one_bad_gt_path),
+        },
+        ..cfg_good.clone()
+    };
+    let rep_one_bad = run_phase3_benchmark(&cfg_one_bad).unwrap();
+    assert!((rep_one_bad.official_gt_recall_at_k.unwrap() - 0.995).abs() < 1e-6);
+    assert!(!rep_one_bad.official_ground_truth_matched);
+
+    // 4. Genuine k-th boundary distance tie (199/200 ID match => 0.995 recall, and the 1 differing ID
+    // has the exact same distance to query 0 as the 10th nearest neighbor) -> must be accepted as true
+    let mut tied_base_rows: Vec<Vec<f32>> =
+        (0..base.rows()).map(|r| base.row(r).to_vec()).collect();
+    let tenth_id = true_gt.row(0)[9] as usize;
+    let farthest_id = full_nn.row(0)[199] as usize;
+    tied_base_rows[farthest_id] = tied_base_rows[tenth_id].clone();
+    let tied_base = RowMatrix::from_rows(&tied_base_rows).unwrap();
+    let tied_base_path = tmp_dir.join("tied_base.fvecs");
+    write_fvecs(&tied_base_path, &tied_base).unwrap();
+
+    let tied_exact =
+        ExactKnn::search_parallel_with_base(Metric::L2Squared, &tied_base, &query, 10, 2)
+            .unwrap()
+            .indices;
+    let mut tied_gt_rows: Vec<Vec<i32>> = (0..tied_exact.rows())
+        .map(|q| tied_exact.row(q).to_vec())
+        .collect();
+    let other_tied_id = if tied_gt_rows[0][9] == tenth_id as i32 {
+        farthest_id as i32
+    } else {
+        tenth_id as i32
+    };
+    tied_gt_rows[0][9] = other_tied_id;
+    let tied_gt = RowMatrix::from_rows(&tied_gt_rows).unwrap();
+    let tied_gt_path = tmp_dir.join("tied_gt.ivecs");
+    write_ivecs(&tied_gt_path, &tied_gt).unwrap();
+
+    let cfg_tied = Phase3Config {
+        dataset_mode: Phase1DatasetMode::Custom {
+            base_fvecs: tied_base_path,
+            query_fvecs: query_path.clone(),
+            gt_ivecs: Some(tied_gt_path),
+        },
+        ..cfg_good.clone()
+    };
+    let rep_tied = run_phase3_benchmark(&cfg_tied).unwrap();
+    assert!((rep_tied.official_gt_recall_at_k.unwrap() - 0.995).abs() < 1e-6);
+    assert!(rep_tied.official_ground_truth_matched);
+
+    // 5. Truncated base (--max-base 100 on 200-vector file) -> full-corpus GT does not apply
+    let cfg_trunc = Phase3Config {
+        max_base: Some(100),
+        ..cfg_good
+    };
+    let rep_trunc = run_phase3_benchmark(&cfg_trunc).unwrap();
+    assert_eq!(rep_trunc.num_base, 100);
+    assert!(!rep_trunc.official_ground_truth_matched);
+    assert_eq!(rep_trunc.official_gt_check_queries, 0);
+
+    let _ = fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn phase3_repeated_ef_search_sweep_reports_median_and_spread() {
+    // 1. Direct unit test on summarize_repeated_latencies with 5 synthetic runs
+    let synthetic_runs: Vec<LatencyStats> = [0.10, 0.50, 0.20, 0.30, 0.40]
+        .into_iter()
+        .map(|m| LatencyStats {
+            num_queries: 100,
+            total_s: m * 0.1,
+            qps: 1000.0 / m,
+            min_ms: m * 0.5,
+            mean_ms: m,
+            p50_ms: m * 0.9,
+            p95_ms: m * 1.5,
+            p99_ms: m * 2.0,
+            max_ms: m * 3.0,
+        })
+        .collect();
+
+    let summary = summarize_repeated_latencies(&synthetic_runs);
+    assert_eq!(summary.num_runs, 5);
+    assert!((summary.median_latency.mean_ms - 0.30).abs() < 1e-9);
+    assert!((summary.mean_ms_min - 0.10).abs() < 1e-9);
+    assert!((summary.mean_ms_max - 0.50).abs() < 1e-9);
+    assert!((summary.mean_ms_spread - 0.40).abs() < 1e-9);
+    assert!((summary.median_latency.p99_ms - 0.60).abs() < 1e-9);
+    assert!((summary.p99_ms_min - 0.20).abs() < 1e-9);
+    assert!((summary.p99_ms_max - 1.00).abs() < 1e-9);
+    assert!((summary.p99_ms_spread - 0.80).abs() < 1e-9);
+
+    // 2. End-to-end Phase 3 benchmark with sweep_runs = 3
+    let mut cfg = small_config(false);
+    cfg.sweep_runs = 3;
+    let report = run_phase3_benchmark(&cfg).unwrap();
+    assert_eq!(report.sweep_runs, 3);
+    for eval in &report.ef_evaluations {
+        assert_eq!(eval.num_runs, 3);
+        assert_eq!(eval.run_mean_latencies_ms.len(), 3);
+        assert_eq!(eval.run_p99_latencies_ms.len(), 3);
+        assert!(eval.mean_ms_min <= eval.latency.mean_ms + 1e-9);
+        assert!(eval.latency.mean_ms <= eval.mean_ms_max + 1e-9);
+        assert!((eval.mean_ms_max - eval.mean_ms_min - eval.mean_ms_spread).abs() < 1e-9);
+        assert!(eval.p99_ms_min <= eval.latency.p99_ms + 1e-9);
+        assert!(eval.latency.p99_ms <= eval.p99_ms_max + 1e-9);
+        assert!((eval.p99_ms_max - eval.p99_ms_min - eval.p99_ms_spread).abs() < 1e-9);
+    }
+
+    let json = report.to_json_string();
+    assert!(json.contains("\"num_runs\": 3"));
+    assert!(json.contains("\"mean_ms_spread\":"));
+    assert!(json.contains("\"p99_ms_spread\":"));
+    assert!(json.contains("\"run_mean_latencies_ms\":"));
+    assert!(json.contains("\"run_p99_latencies_ms\":"));
+}
+
+#[test]
+fn phase3_prefix_fvecs_loading_graph_only_bytes_and_config_validation() {
+    // 1. HnswConfig::new must not silently clamp invalid parameters; validate() must reject them
+    let bad_m = HnswConfig::new(0, 100);
+    assert_eq!(bad_m.m, 0);
+    assert!(bad_m.validate().is_err());
+
+    let bad_ef = HnswConfig::new(16, 8);
+    assert_eq!(bad_ef.ef_construction, 8);
+    assert!(bad_ef.validate().is_err());
+
+    let good_cfg = HnswConfig::new(16, 100);
+    assert!(good_cfg.validate().is_ok());
+
+    // 2. Prefix .fvecs / .ivecs loading reads only max_rows while validating full file alignment
+    let mut tmp_dir: PathBuf = std::env::temp_dir();
+    tmp_dir.push(format!(
+        "vector_search_phase3_prefix_test_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&tmp_dir);
+    fs::create_dir_all(&tmp_dir).unwrap();
+
+    let (base, _) = generate_synthetic_sift(80, 5, 12, 4, 77).unwrap();
+    let fvecs_path = tmp_dir.join("test.fvecs");
+    write_fvecs(&fvecs_path, &base).unwrap();
+
+    let prefix_25 = read_fvecs_max_rows(&fvecs_path, Some(25)).unwrap();
+    assert_eq!(prefix_25.rows(), 25);
+    assert_eq!(prefix_25.cols(), 12);
+    assert_eq!(prefix_25.as_slice(), base.slice_first_rows(25).as_slice());
+
+    let gt = ExactKnn::search_parallel_with_base(Metric::L2Squared, &base, &prefix_25, 5, 2)
+        .unwrap()
+        .indices;
+    let ivecs_path = tmp_dir.join("test.ivecs");
+    write_ivecs(&ivecs_path, &gt).unwrap();
+    let gt_prefix_10 = read_ivecs_max_rows(&ivecs_path, Some(10)).unwrap();
+    assert_eq!(gt_prefix_10.rows(), 10);
+    assert_eq!(gt_prefix_10.cols(), 5);
+    assert_eq!(gt_prefix_10.as_slice(), gt.slice_first_rows(10).as_slice());
+
+    let _ = fs::remove_dir_all(&tmp_dir);
+
+    // 3. Graph-only memory accounting and search_batch_timed_with_tracker(&self, ...)
+    let index = HnswIndex::build(&base, Metric::L2Squared, good_cfg).unwrap();
+    let gc = index.graph_components();
+    assert_eq!(index.graph_only_memory_bytes(), gc.graph_only_bytes());
+    assert_eq!(
+        index.memory_bytes(),
+        index.graph_only_memory_bytes() + gc.visited_tracker_tags_bytes
+    );
+    assert_eq!(
+        gc.total_graph_bytes(),
+        index.memory_bytes() + gc.heuristic_scratch_bytes
+    );
+    assert!((index.bytes_per_vector() - index.graph_only_bytes_per_vector() - 4.0).abs() < 1e-9);
+
+    let mut tracker = VisitedTracker::new(index.num_vectors());
+    let timed = index
+        .search_batch_timed_with_tracker(&prefix_25, 5, 20, &mut tracker)
+        .unwrap();
+    assert_eq!(timed.result.indices.rows(), 25);
+    assert_eq!(timed.result.indices.cols(), 5);
 }

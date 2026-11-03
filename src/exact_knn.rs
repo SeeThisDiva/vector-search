@@ -281,6 +281,66 @@ impl ExactKnn {
         num_threads: usize,
     ) -> Result<KnnSearchResult> {
         let base = self.validate_batch_inputs(queries, k)?;
+        Self::search_parallel_validated(self.metric, base, queries, k, num_threads)
+    }
+
+    /// Multi-threaded batch ground-truth computation directly over a borrowed `base` matrix
+    /// without cloning `base` into an `ExactKnn` instance.
+    pub fn search_parallel_with_base(
+        metric: Metric,
+        base: &RowMatrix<f32>,
+        queries: &RowMatrix<f32>,
+        k: usize,
+        num_threads: usize,
+    ) -> Result<KnnSearchResult> {
+        if base.rows() == 0 || base.cols() == 0 {
+            return Err(VectorSearchError::InvalidArgument(
+                "base_vectors cannot be empty (rows and cols must be > 0)".to_string(),
+            ));
+        }
+        if i32::try_from(base.rows()).is_err() {
+            return Err(VectorSearchError::InvalidArgument(format!(
+                "base_vectors row count {} exceeds i32::MAX",
+                base.rows()
+            )));
+        }
+        if let Some(pos) = base.as_slice().iter().position(|v| !v.is_finite()) {
+            let row = pos / base.cols();
+            let col = pos % base.cols();
+            return Err(VectorSearchError::InvalidArgument(format!(
+                "base_vectors contains non-finite value (NaN/Inf) at ({row}, {col})"
+            )));
+        }
+        if k == 0 {
+            return Err(VectorSearchError::InvalidArgument(
+                "k must be positive (> 0)".to_string(),
+            ));
+        }
+        if queries.rows() > 0 && queries.cols() != base.cols() {
+            return Err(VectorSearchError::DimensionMismatch {
+                expected: base.cols(),
+                actual: queries.cols(),
+            });
+        }
+        if let Some(pos) = queries.as_slice().iter().position(|v| !v.is_finite()) {
+            let cols = queries.cols().max(1);
+            let row = pos / cols;
+            let col = pos % cols;
+            return Err(VectorSearchError::InvalidArgument(format!(
+                "queries contains non-finite value (NaN/Inf) at ({row}, {col})"
+            )));
+        }
+
+        Self::search_parallel_validated(metric, base, queries, k, num_threads)
+    }
+
+    fn search_parallel_validated(
+        metric: Metric,
+        base: &RowMatrix<f32>,
+        queries: &RowMatrix<f32>,
+        k: usize,
+        num_threads: usize,
+    ) -> Result<KnnSearchResult> {
         let num_queries = queries.rows();
         if num_queries == 0 {
             return Ok(KnnSearchResult {
@@ -289,6 +349,8 @@ impl ExactKnn {
             });
         }
 
+        let engine = Self::new(metric);
+        let effective_k = k.min(base.rows());
         let workers = if num_threads == 0 {
             thread::available_parallelism()
                 .map(usize::from)
@@ -300,10 +362,27 @@ impl ExactKnn {
         .max(1);
 
         if workers == 1 {
-            return self.search(queries, k);
+            let mut all_indices = Vec::with_capacity(num_queries * effective_k);
+            let mut all_distances = Vec::with_capacity(num_queries * effective_k);
+            let mut heap = BinaryHeap::with_capacity(effective_k);
+
+            for q_row in queries.iter_rows() {
+                heap.clear();
+                engine.scan_into_heap(base, q_row, effective_k, &mut heap);
+                let sorted = std::mem::replace(&mut heap, BinaryHeap::with_capacity(effective_k))
+                    .into_sorted_vec();
+                for cand in sorted {
+                    all_indices.push(cand.id);
+                    all_distances.push(engine.format_output_distance(cand.sort_key));
+                }
+            }
+
+            return Ok(KnnSearchResult {
+                indices: RowMatrix::new(num_queries, effective_k, all_indices)?,
+                distances: RowMatrix::new(num_queries, effective_k, all_distances)?,
+            });
         }
 
-        let effective_k = k.min(base.rows());
         let mut all_indices = vec![0_i32; num_queries * effective_k];
         let mut all_distances = vec![0.0_f32; num_queries * effective_k];
 
@@ -325,13 +404,14 @@ impl ExactKnn {
 
                 let start_q = q_offset;
                 q_offset += take_q;
+                let worker_engine = engine.clone();
 
                 s.spawn(move || {
                     let mut heap = BinaryHeap::with_capacity(effective_k);
                     for local_i in 0..take_q {
                         let q_row = queries.row(start_q + local_i);
                         heap.clear();
-                        self.scan_into_heap(base, q_row, effective_k, &mut heap);
+                        worker_engine.scan_into_heap(base, q_row, effective_k, &mut heap);
                         let sorted =
                             std::mem::replace(&mut heap, BinaryHeap::with_capacity(effective_k))
                                 .into_sorted_vec();
@@ -339,7 +419,8 @@ impl ExactKnn {
                         let out_base = local_i * effective_k;
                         for (j, cand) in sorted.into_iter().enumerate() {
                             idx_slice[out_base + j] = cand.id;
-                            dist_slice[out_base + j] = self.format_output_distance(cand.sort_key);
+                            dist_slice[out_base + j] =
+                                worker_engine.format_output_distance(cand.sort_key);
                         }
                     }
                 });

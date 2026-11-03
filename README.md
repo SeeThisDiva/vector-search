@@ -79,29 +79,37 @@ cargo run --release --bin phase2 -- --dataset siftsmall --json-out data/phase2_r
 
 ## Phase 3 Results (`SIFT1M` 1,000,000 $\times$ 128-d, `M=16`, `efConstruction=100`, $k=10$)
 
-Single run on `12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)`, official Texmex ground truth, 10,000 queries, single-threaded. Source: `data/phase3_report.json` (gitignored, regenerate with the command below).
+Measured on `12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)`, official Texmex ground truth (verified against brute-force `ExactKnn` on 100 queries), 10,000 queries, single-threaded search, **5 repetitions per `efSearch`** (reporting median and min–max spread). Source: `data/phase3_report.json` and `data/baseline_profile_report.json` (gitignored, regenerate with the command below).
 
-| efSearch | Recall@10 | Mean latency (ms) | p99 (ms) |
-|---------:|----------:|------------------:|---------:|
-| 10  | 73.3% | 0.124 | 0.326 |
-| 20  | 84.9% | 0.194 | 0.542 |
-| 50  | 94.7% | 0.419 | 0.961 |
-| 100 | 98.1% | 0.688 | 1.461 |
-| 200 | 99.4% | 1.192 | 2.146 |
+| efSearch | Recall@10 | Median Mean (ms) | Mean Spread (ms) | Median p50 (ms) | Median p99 (ms) | p99 Spread (ms) | Median QPS |
+|---------:|----------:|-----------------:|-----------------:|----------------:|----------------:|----------------:|-----------:|
+| 10  | 73.315% | 0.084 | 0.002 | 0.082 | 0.141 | 0.008 | 11,927.2 |
+| 20  | 84.949% | 0.126 | 0.004 | 0.126 | 0.195 | 0.012 | 7,904.3 |
+| 50  | 94.703% | 0.248 | 0.002 | 0.254 | 0.347 | 0.010 | 4,024.2 |
+| 100 | 98.061% | 0.440 | 0.011 | 0.456 | 0.588 | 0.045 | 2,270.0 |
+| 200 | 99.376% | 0.810 | 0.015 | 0.841 | 1.084 | 0.036 | 1,234.5 |
 
 | Metric | Value |
 |--------|-------|
-| Build time | 728 s (1,373 vectors/s), top layer 5 |
-| Raw vectors | 512 B/vector |
-| Graph (incl. 4 B/vector visited tags) | ~343 B/vector |
-| Total | ~855 B/vector, 815 MiB |
-| Peak working set after build | 834 MiB |
+| Build time | 471.0 s (2,123.3 vectors/s), top layer 5, entry point `#829262` |
+| Raw vectors | 512.00 B/vector (488.28 MiB) |
+| Graph-only (excl. visited tags & scratch) | 338.67 B/vector (322.98 MiB) |
+| Graph total (incl. 4 B/vector visited tags) | 342.67 B/vector (326.79 MiB) |
+| Total index footprint | 854.67 B/vector (815.08 MiB) |
+| Peak working set after build (1M) | 845.84 MiB |
 
-Caveats:
-- Latency comes from one run on a laptop. The same index at efSearch=50 measured 0.35 ms in the earlier baseline run and 0.42 ms here, so treat latency as +/-20% until repeated runs are recorded.
-- Peak RSS is a process-wide high-water mark that includes the 488 MiB base file loaded up front. Only the 1M row is meaningful; the 10k and 100k rows in the multi-scale baseline mostly measure the loaded dataset.
-- The 10k / 100k baseline rows in the Phase 3 JSON are constants copied from an earlier run and are marked `"measured_this_run": false`.
-- Recall at a fixed efSearch drops with scale (99.8% at 10k, 98.1% at 100k, 94.7% at 1M, all at efSearch=50), so efSearch must grow with N.
+### Multi-Scale Baseline Profile (Isolated Process per Scale, `measured_this_run = true`)
+
+| Scale ($N$) | Build Time (s) | Build QPS | Isolated Peak RSS (MiB) | Graph-Only (B/vec) | Graph Total (B/vec) | Total (B/vec) | Recall@10 (`ef=50`) |
+|------------:|---------------:|----------:|------------------------:|-------------------:|--------------------:|--------------:|--------------------:|
+| 10,000 | 1.440 | 6,942.5 | 13.70 | 338.98 | 342.98 | 854.98 | 99.750% |
+| 100,000 | 28.611 | 3,495.2 | 88.67 | 338.66 | 342.66 | 854.66 | 98.140% |
+| 1,000,000 | 470.966 | 2,123.3 | 845.84 | 338.67 | 342.67 | 854.67 | 94.703% |
+
+Notes:
+- Each scale (`10k`, `100k`, `1M`) is profiled in its own isolated OS process loading only `scale` prefix rows from `sift_base.fvecs`, so `PeakWorkingSet64` reflects only that scale's true memory footprint.
+- `official_ground_truth_matched` runs brute-force `ExactKnn` on the first 100 queries against the full 1M base (`999/1000` identical IDs and `1` exact integer $L_2^2$ distance tie at the $k=10$ boundary, with 100% of official top-10 neighbors verified to have distance $\le$ the true 10th nearest-neighbor distance).
+- Recall at fixed `efSearch=50` drops with scale (`99.75%` at 10k, `98.14%` at 100k, `94.70%` at 1M), so `efSearch` must grow with $N$.
 
 ```bash
 cargo run --release --bin phase3 -- --dataset sift1m --json-out data/phase3_report.json

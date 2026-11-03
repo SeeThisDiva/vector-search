@@ -55,7 +55,7 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 │   ├── rust_phase1_tests.rs    # 16 Rust Phase 1 integration & edge-case tests (PASSING)
 │   ├── rust_phase2_tests.rs    # 23 Rust Phase 2 HNSW correctness & recall tests (PASSING)
 │   ├── adversarial_hnsw_tests.rs # 12 Rust HNSW stress & boundary tests (PASSING)
-│   ├── rust_phase3_tests.rs    # 4 Rust Phase 3 report semantics & query guard tests (PASSING)
+│   ├── rust_phase3_tests.rs    # 7 Rust Phase 3 report semantics, GT check & sweep tests (PASSING)
 │   ├── test_phase1.py          # 23 Python reference tests (PASSING)
 │   └── test_rust_parity.py     # 4 Rust <-> Python <-> FAISS parity tests (PASSING)
 ├── data/                       # Contains SIFT corpora & JSON benchmark reports (gitignored)
@@ -80,7 +80,7 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 6. **Self-Verification Invariant**: `Recall@k(GT, GT) == 1.000000` (100.0%) strictly verified.
 7. **FAISS Parity Alignment**: `1000/1000` (100.0%) exact neighbor ID match against `faiss.IndexFlatL2`.
 8. **Test Suite Status**:
-   - `cargo test`: **55/55 PASS** (16 Phase 1 + 23 Phase 2 + 12 adversarial + 4 Phase 3; siftsmall tests skip if `data/*.fvecs` is absent)
+   - `cargo test`: **58/58 PASS** (16 Phase 1 + 23 Phase 2 + 12 adversarial + 7 Phase 3; siftsmall tests skip if `data/*.fvecs` is absent)
    - `pytest`: **27/27 PASS** (with `faiss-cpu` installed; the FAISS parity test skips otherwise)
 
 ---

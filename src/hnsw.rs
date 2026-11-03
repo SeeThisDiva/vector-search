@@ -55,12 +55,14 @@ impl Default for HnswConfig {
 
 impl HnswConfig {
     /// Constructs a configuration with target degree `m` and beam width `ef_construction`.
+    ///
+    /// Does not silently clamp invalid values; call [`HnswConfig::validate`] (invoked
+    /// automatically by [`HnswIndex::build`]) to check configuration invariants.
     #[must_use]
     pub fn new(m: usize, ef_construction: usize) -> Self {
-        let m = m.max(2);
         Self {
             m,
-            ef_construction: ef_construction.max(m),
+            ef_construction,
             ..Self::default()
         }
     }
@@ -274,7 +276,7 @@ pub struct HnswGraphComponents {
 }
 
 impl HnswGraphComponents {
-    /// Total bytes allocated by all graph components.
+    /// Total bytes allocated by all graph components (including visited tags and scratch).
     #[must_use]
     pub const fn total_graph_bytes(&self) -> usize {
         self.node_structs_bytes
@@ -283,6 +285,16 @@ impl HnswGraphComponents {
             + self.outer_neighbors_headers_bytes
             + self.visited_tracker_tags_bytes
             + self.heuristic_scratch_bytes
+    }
+
+    /// Bytes allocated strictly by graph topology (node structs, `Vec` headers, and edge lists),
+    /// excluding query-time visited tags and construction-time heuristic scratch buffers.
+    #[must_use]
+    pub const fn graph_only_bytes(&self) -> usize {
+        self.node_structs_bytes
+            + self.layer0_edges_bytes
+            + self.upper_layers_edges_bytes
+            + self.outer_neighbors_headers_bytes
     }
 }
 
@@ -375,9 +387,10 @@ impl<'a> HnswIndex<'a> {
         self.enter_point
     }
 
-    /// Graph memory footprint allocated by index structures in bytes.
+    /// Graph-only memory footprint (nodes, `Vec` headers, and edge lists) in bytes,
+    /// excluding visited tracker tags and heuristic scratch buffers.
     #[must_use]
-    pub fn memory_bytes(&self) -> usize {
+    pub fn graph_only_memory_bytes(&self) -> usize {
         let mut total = self.nodes.capacity() * std::mem::size_of::<HnswNode>();
         for node in &self.nodes {
             total += node.neighbors.capacity() * std::mem::size_of::<Vec<usize>>();
@@ -385,8 +398,31 @@ impl<'a> HnswIndex<'a> {
                 total += layer_edges.capacity() * std::mem::size_of::<usize>();
             }
         }
-        total += self.visited_tracker.memory_bytes();
         total
+    }
+
+    /// Graph-only memory footprint in mebibytes (MiB), excluding visited tracker tags.
+    #[inline]
+    #[must_use]
+    pub fn graph_only_memory_mb(&self) -> f64 {
+        self.graph_only_memory_bytes() as f64 / (1024.0 * 1024.0)
+    }
+
+    /// Average graph-only memory per indexed vector in bytes (excluding visited tracker tags).
+    #[inline]
+    #[must_use]
+    pub fn graph_only_bytes_per_vector(&self) -> f64 {
+        if self.nodes.is_empty() {
+            0.0
+        } else {
+            self.graph_only_memory_bytes() as f64 / self.nodes.len() as f64
+        }
+    }
+
+    /// Graph memory footprint allocated by index structures in bytes (including visited tracker tags).
+    #[must_use]
+    pub fn memory_bytes(&self) -> usize {
+        self.graph_only_memory_bytes() + self.visited_tracker.memory_bytes()
     }
 
     /// Graph memory footprint in mebibytes (MiB).
@@ -396,7 +432,7 @@ impl<'a> HnswIndex<'a> {
         self.memory_bytes() as f64 / (1024.0 * 1024.0)
     }
 
-    /// Average graph memory per indexed vector in bytes.
+    /// Average graph memory per indexed vector in bytes (including visited tracker tags).
     #[inline]
     #[must_use]
     pub fn bytes_per_vector(&self) -> f64 {
@@ -971,6 +1007,21 @@ impl<'a> HnswIndex<'a> {
         k: usize,
         ef_search: usize,
     ) -> Result<TimedKnnSearchResult> {
+        let mut tracker = std::mem::take(&mut self.visited_tracker);
+        let res = self.search_batch_timed_with_tracker(queries, k, ef_search, &mut tracker);
+        self.visited_tracker = tracker;
+        res
+    }
+
+    /// Read-only batch sequential query execution recording latency statistics using an
+    /// externally-supplied [`VisitedTracker`].
+    pub fn search_batch_timed_with_tracker(
+        &self,
+        queries: &RowMatrix<f32>,
+        k: usize,
+        ef_search: usize,
+        tracker: &mut VisitedTracker,
+    ) -> Result<TimedKnnSearchResult> {
         let num_queries = queries.rows();
         if num_queries == 0 {
             return Ok(TimedKnnSearchResult {
@@ -991,7 +1042,7 @@ impl<'a> HnswIndex<'a> {
         let batch_start = std::time::Instant::now();
         for q_row in queries.iter_rows() {
             let q_start = std::time::Instant::now();
-            let hits = self.search_knn(q_row, k, ef_search)?;
+            let hits = self.search_knn_with_tracker(q_row, k, ef_search, tracker)?;
             let q_ms = q_start.elapsed().as_secs_f64() * 1000.0;
             latencies_ms.push(q_ms);
 

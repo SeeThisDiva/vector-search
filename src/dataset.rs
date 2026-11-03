@@ -180,6 +180,21 @@ pub struct LoadedDataset {
 ///
 /// An empty (0-byte) file yields an empty `(0, 0)` matrix.
 pub fn read_fvecs<P: AsRef<Path>>(path: P) -> Result<RowMatrix<f32>> {
+    read_fvecs_max_rows(path, None)
+}
+
+/// Reads up to `max_rows` records from a standard Texmex `.fvecs` file after validating
+/// full-file record alignment, avoiding allocating the entire file when only a prefix is needed.
+pub fn read_fvecs_max_rows<P: AsRef<Path>>(
+    path: P,
+    max_rows: Option<usize>,
+) -> Result<RowMatrix<f32>> {
+    if max_rows == Some(0) {
+        return Err(VectorSearchError::InvalidArgument(
+            "max_rows must be positive (> 0) when specified".to_string(),
+        ));
+    }
+
     let path_ref = path.as_ref();
     let meta = fs::metadata(path_ref)?;
     let file_size = meta.len();
@@ -221,9 +236,13 @@ pub fn read_fvecs<P: AsRef<Path>>(path: P) -> Result<RowMatrix<f32>> {
     }
 
     let num_vecs_u64 = file_size / record_bytes;
-    let num_vecs = usize::try_from(num_vecs_u64).map_err(|_| {
+    let total_vecs = usize::try_from(num_vecs_u64).map_err(|_| {
         VectorSearchError::CorruptData(format!("Vector count {num_vecs_u64} exceeds usize"))
     })?;
+    let num_vecs = match max_rows {
+        Some(limit) => total_vecs.min(limit),
+        None => total_vecs,
+    };
     let total_floats = num_vecs.checked_mul(dim).ok_or_else(|| {
         VectorSearchError::CorruptData("Total float count overflows usize".to_string())
     })?;
@@ -303,6 +322,21 @@ pub fn write_fvecs<P: AsRef<Path>>(path: P, matrix: &RowMatrix<f32>) -> Result<(
 /// - 4-byte signed 32-bit integer `k` (little-endian)
 /// - `k` signed 32-bit integer neighbor IDs (little-endian, `4 * k` bytes)
 pub fn read_ivecs<P: AsRef<Path>>(path: P) -> Result<RowMatrix<i32>> {
+    read_ivecs_max_rows(path, None)
+}
+
+/// Reads up to `max_rows` records from a standard Texmex `.ivecs` file after validating
+/// full-file record alignment.
+pub fn read_ivecs_max_rows<P: AsRef<Path>>(
+    path: P,
+    max_rows: Option<usize>,
+) -> Result<RowMatrix<i32>> {
+    if max_rows == Some(0) {
+        return Err(VectorSearchError::InvalidArgument(
+            "max_rows must be positive (> 0) when specified".to_string(),
+        ));
+    }
+
     let path_ref = path.as_ref();
     let meta = fs::metadata(path_ref)?;
     let file_size = meta.len();
@@ -344,9 +378,13 @@ pub fn read_ivecs<P: AsRef<Path>>(path: P) -> Result<RowMatrix<i32>> {
     }
 
     let num_rows_u64 = file_size / record_bytes;
-    let num_rows = usize::try_from(num_rows_u64).map_err(|_| {
+    let total_rows = usize::try_from(num_rows_u64).map_err(|_| {
         VectorSearchError::CorruptData(format!("Row count {num_rows_u64} exceeds usize"))
     })?;
+    let num_rows = match max_rows {
+        Some(limit) => total_rows.min(limit),
+        None => total_rows,
+    };
     let total_ints = num_rows.checked_mul(k).ok_or_else(|| {
         VectorSearchError::CorruptData("Total int32 count overflows usize".to_string())
     })?;
@@ -518,9 +556,21 @@ pub fn load_custom_dataset(
     query_path: &Path,
     gt_path: Option<&Path>,
 ) -> Result<LoadedDataset> {
+    load_custom_dataset_with_options(base_path, query_path, gt_path, None, None)
+}
+
+/// Loads user-provided `.fvecs` (and optional `.ivecs` ground truth) files from disk,
+/// reading at most `max_base` base rows and `max_queries` query/GT rows when specified.
+pub fn load_custom_dataset_with_options(
+    base_path: &Path,
+    query_path: &Path,
+    gt_path: Option<&Path>,
+    max_base: Option<usize>,
+    max_queries: Option<usize>,
+) -> Result<LoadedDataset> {
     let t0 = Instant::now();
-    let base = read_fvecs(base_path)?;
-    let query = read_fvecs(query_path)?;
+    let base = read_fvecs_max_rows(base_path, max_base)?;
+    let query = read_fvecs_max_rows(query_path, max_queries)?;
     if base.rows() == 0 || query.rows() == 0 {
         return Err(VectorSearchError::InvalidArgument(
             "Custom base and query .fvecs files must be non-empty".to_string(),
@@ -533,7 +583,7 @@ pub fn load_custom_dataset(
         });
     }
     let official_ground_truth = match gt_path {
-        Some(p) => Some(read_ivecs(p)?),
+        Some(p) => Some(read_ivecs_max_rows(p, max_queries)?),
         None => None,
     };
     Ok(LoadedDataset {
@@ -557,10 +607,50 @@ pub fn load_or_download_sift(
     allow_download: bool,
     fallback_seed: u64,
 ) -> Result<LoadedDataset> {
+    load_or_download_sift_with_options(
+        preset,
+        cache_dir,
+        allow_download,
+        fallback_seed,
+        None,
+        None,
+        true,
+    )
+}
+
+/// Loads an authentic SIFT dataset (`siftsmall` or `SIFT1M`) reading at most `max_base` base
+/// vectors and `max_queries` query vectors directly from disk so prefix scale benchmarks do not
+/// inflate process peak RSS with the full corpus.
+pub fn load_or_download_sift_with_options(
+    preset: SiftPreset,
+    cache_dir: &Path,
+    allow_download: bool,
+    fallback_seed: u64,
+    max_base: Option<usize>,
+    max_queries: Option<usize>,
+    load_ground_truth: bool,
+) -> Result<LoadedDataset> {
+    if max_base == Some(0) {
+        return Err(VectorSearchError::InvalidArgument(
+            "max_base must be positive (> 0) when specified".to_string(),
+        ));
+    }
+    if max_queries == Some(0) {
+        return Err(VectorSearchError::InvalidArgument(
+            "max_queries must be positive (> 0) when specified".to_string(),
+        ));
+    }
+
     let t0 = Instant::now();
 
     // 1. Check existing local cache first
-    if let Some((base, query, gt, resolved_dir)) = try_load_cached_sift(preset, cache_dir) {
+    if let Some((base, query, gt, resolved_dir)) = try_load_cached_sift_with_options(
+        preset,
+        cache_dir,
+        max_base,
+        max_queries,
+        load_ground_truth,
+    ) {
         let source = match preset {
             SiftPreset::SiftSmall => DatasetSource::AuthenticSiftSmall { dir: resolved_dir },
             SiftPreset::Sift1M => DatasetSource::AuthenticSift1M { dir: resolved_dir },
@@ -568,7 +658,7 @@ pub fn load_or_download_sift(
         return Ok(LoadedDataset {
             base,
             query,
-            official_ground_truth: Some(gt),
+            official_ground_truth: gt,
             source,
             load_time_s: t0.elapsed().as_secs_f64(),
         });
@@ -580,9 +670,13 @@ pub fn load_or_download_sift(
     } else {
         match download_sift_preset(preset, cache_dir) {
             Ok(()) => {
-                if let Some((base, query, gt, resolved_dir)) =
-                    try_load_cached_sift(preset, cache_dir)
-                {
+                if let Some((base, query, gt, resolved_dir)) = try_load_cached_sift_with_options(
+                    preset,
+                    cache_dir,
+                    max_base,
+                    max_queries,
+                    load_ground_truth,
+                ) {
                     let source = match preset {
                         SiftPreset::SiftSmall => {
                             DatasetSource::AuthenticSiftSmall { dir: resolved_dir }
@@ -592,7 +686,7 @@ pub fn load_or_download_sift(
                     return Ok(LoadedDataset {
                         base,
                         query,
-                        official_ground_truth: Some(gt),
+                        official_ground_truth: gt,
                         source,
                         load_time_s: t0.elapsed().as_secs_f64(),
                     });
@@ -607,9 +701,15 @@ pub fn load_or_download_sift(
     };
 
     // 3. Graceful offline fallback to deterministic seeded 128-d vectors
+    let eff_base = max_base.map_or(preset.expected_num_base(), |lim| {
+        preset.expected_num_base().min(lim)
+    });
+    let eff_query = max_queries.map_or(preset.expected_num_query(), |lim| {
+        preset.expected_num_query().min(lim)
+    });
     let (base, query) = generate_synthetic_sift(
-        preset.expected_num_base(),
-        preset.expected_num_query(),
+        eff_base,
+        eff_query,
         preset.expected_dim(),
         16,
         fallback_seed,
@@ -642,9 +742,27 @@ fn candidate_sift_dirs(preset: SiftPreset, cache_dir: &Path) -> Vec<(PathBuf, &'
     }
 }
 
-type CachedSiftBundle = (RowMatrix<f32>, RowMatrix<f32>, RowMatrix<i32>, PathBuf);
+type CachedSiftBundle = (
+    RowMatrix<f32>,
+    RowMatrix<f32>,
+    Option<RowMatrix<i32>>,
+    PathBuf,
+);
 
-fn try_load_cached_sift(preset: SiftPreset, cache_dir: &Path) -> Option<CachedSiftBundle> {
+fn try_load_cached_sift_with_options(
+    preset: SiftPreset,
+    cache_dir: &Path,
+    max_base: Option<usize>,
+    max_queries: Option<usize>,
+    load_ground_truth: bool,
+) -> Option<CachedSiftBundle> {
+    let expected_base_bytes =
+        (preset.expected_num_base() as u64) * (4 + 4 * (preset.expected_dim() as u64));
+    let expected_query_bytes =
+        (preset.expected_num_query() as u64) * (4 + 4 * (preset.expected_dim() as u64));
+    let expected_gt_bytes =
+        (preset.expected_num_query() as u64) * (4 + 4 * (preset.expected_gt_k() as u64));
+
     for (dir, prefix) in candidate_sift_dirs(preset, cache_dir) {
         let base_path = dir.join(format!("{prefix}_base.fvecs"));
         let query_path = dir.join(format!("{prefix}_query.fvecs"));
@@ -654,34 +772,64 @@ fn try_load_cached_sift(preset: SiftPreset, cache_dir: &Path) -> Option<CachedSi
             continue;
         }
 
-        let (Ok(base), Ok(query), Ok(gt)) = (
-            read_fvecs(&base_path),
-            read_fvecs(&query_path),
-            read_ivecs(&gt_path),
+        // Verify full-file byte sizes on disk match the authentic SIFT preset even when
+        // reading only a prefix of rows into memory.
+        if fs::metadata(&base_path).map(|m| m.len()).unwrap_or(0) != expected_base_bytes
+            || fs::metadata(&query_path).map(|m| m.len()).unwrap_or(0) != expected_query_bytes
+            || fs::metadata(&gt_path).map(|m| m.len()).unwrap_or(0) != expected_gt_bytes
+        {
+            continue;
+        }
+
+        let (Ok(base), Ok(query)) = (
+            read_fvecs_max_rows(&base_path, max_base),
+            read_fvecs_max_rows(&query_path, max_queries),
         ) else {
             continue;
         };
 
-        if validate_authentic_sift_shapes(preset, &base, &query, &gt) {
+        let gt = if load_ground_truth {
+            let Ok(g) = read_ivecs_max_rows(&gt_path, max_queries) else {
+                continue;
+            };
+            Some(g)
+        } else {
+            None
+        };
+
+        if validate_authentic_sift_shapes_with_options(
+            preset,
+            &base,
+            &query,
+            gt.as_ref(),
+            max_base,
+            max_queries,
+        ) {
             return Some((base, query, gt, dir));
         }
     }
     None
 }
 
-fn validate_authentic_sift_shapes(
+fn validate_authentic_sift_shapes_with_options(
     preset: SiftPreset,
     base: &RowMatrix<f32>,
     query: &RowMatrix<f32>,
-    gt: &RowMatrix<i32>,
+    gt: Option<&RowMatrix<i32>>,
+    max_base: Option<usize>,
+    max_queries: Option<usize>,
 ) -> bool {
-    if base.shape() != (preset.expected_num_base(), preset.expected_dim()) {
+    let expected_base_rows = max_base.map_or(preset.expected_num_base(), |lim| {
+        preset.expected_num_base().min(lim)
+    });
+    let expected_query_rows = max_queries.map_or(preset.expected_num_query(), |lim| {
+        preset.expected_num_query().min(lim)
+    });
+
+    if base.shape() != (expected_base_rows, preset.expected_dim()) {
         return false;
     }
-    if query.shape() != (preset.expected_num_query(), preset.expected_dim()) {
-        return false;
-    }
-    if gt.shape() != (preset.expected_num_query(), preset.expected_gt_k()) {
+    if query.shape() != (expected_query_rows, preset.expected_dim()) {
         return false;
     }
     if !base.as_slice().iter().all(|v| v.is_finite())
@@ -689,8 +837,16 @@ fn validate_authentic_sift_shapes(
     {
         return false;
     }
-    let max_id = preset.expected_num_base() as i32;
-    gt.as_slice().iter().all(|&id| id >= 0 && id < max_id)
+    if let Some(gt_mat) = gt {
+        if gt_mat.shape() != (expected_query_rows, preset.expected_gt_k()) {
+            return false;
+        }
+        let max_id = preset.expected_num_base() as i32;
+        if !gt_mat.as_slice().iter().all(|&id| id >= 0 && id < max_id) {
+            return false;
+        }
+    }
+    true
 }
 
 fn download_sift_preset(preset: SiftPreset, cache_dir: &Path) -> Result<()> {
