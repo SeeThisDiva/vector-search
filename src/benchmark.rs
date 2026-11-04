@@ -1386,7 +1386,7 @@ pub fn run_baseline_multi_scale_profile(
     }
 
     #[cfg(target_os = "windows")]
-    let peak_rss_measurement_method = "windows_powershell_peak_working_set_64 (per-scale isolated child process): powershell -NoProfile -NonInteractive -Command (Get-Process -Id $PID).PeakWorkingSet64".to_string();
+    let peak_rss_measurement_method = "windows_powershell_peak_working_set_64 (per-scale isolated child process): powershell -NoProfile -NonInteractive -Command (Get-Process -Id <benchmark process id>).PeakWorkingSet64".to_string();
     #[cfg(target_os = "linux")]
     let peak_rss_measurement_method =
         "linux_proc_status_vm_hwm (per-scale isolated child process): /proc/self/status VmHWM"
@@ -3061,7 +3061,7 @@ pub fn run_phase3_benchmark(config: &Phase3Config) -> Result<Phase3Report> {
     let is_peak_rss_os_measured = peak_rss_mb > 0.0;
 
     #[cfg(target_os = "windows")]
-    let peak_rss_measurement_method = "windows_powershell_peak_working_set_64: powershell -NoProfile -NonInteractive -Command (Get-Process -Id $PID).PeakWorkingSet64".to_string();
+    let peak_rss_measurement_method = "windows_powershell_peak_working_set_64: powershell -NoProfile -NonInteractive -Command (Get-Process -Id <benchmark process id>).PeakWorkingSet64".to_string();
     #[cfg(target_os = "linux")]
     let peak_rss_measurement_method =
         "linux_proc_status_vm_hwm: /proc/self/status VmHWM".to_string();
