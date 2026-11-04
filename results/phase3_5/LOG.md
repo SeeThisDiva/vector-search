@@ -27,7 +27,7 @@
 | Run 3 | 36.244 s | 2759.1 | 128.52 MiB | 338.66 | 0x7cc605e91d8ccce8 / 98.14% (ef50) |
 | **Summary** | **Median: 36.244 s** | **Min: 31.142 s** | **Max: 41.353 s** | **Spread ($\Delta_{\text{spread}}$): 10.211 s (28.17%)** | **Noise Hurdle ($>2\times\Delta$, $\ge 5\%$): 20.421 s** |
 
-- **Graph Fingerprint (100k)**: `0x8d1cce443935778f` (`10168228851108640655`)
+- **Graph Fingerprint (100k)**: `0x80af03bd7aebaade` (`9272630593691568862`)
 - **Query Results Hash (100k, 1k queries @ k=10, efSearch=100)**: `0x7cc605e91d8ccce8` (`8990880204873059560`)
 - **Golden Fixture Verification**: PASSED against `results/phase3_5/golden_100k.json`
 - **efSearch Sweep on 100k**:
@@ -124,7 +124,7 @@ Based on the empirical profile above, the candidate optimizations are ordered st
 
 | Commit / Candidate | Task | Target Scale | Build Time (s) | $\Delta$ vs Base | % Speedup | Peak RSS | Graph B/vec | Fingerprint / Recall | Decision |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| `170b9d7` Baseline | M1 | 100k | 36.244 s | - | - | 128.52 MiB | 338.66 | `0x8d1cce443935778f` / 98.14% | **BASELINE ANCHOR** |
+| `170b9d7` Baseline | M1 | 100k | 36.244 s | - | - | 128.52 MiB | 338.66 | `0x80af03bd7aebaade` / 98.14% | **BASELINE ANCHOR** |
 | `170b9d7` Baseline | M1 | 1M | 511.271 s | - | - | 845.75 MiB | 338.67 | `0x19b378e1f978084d` / 94.70% | **BASELINE ANCHOR** |
 | Candidate T1.5 | T1.5 | 100k | *Pending M2* | - | - | - | - | - | *Pending* |
 | Candidate T1.6 | T1.6 | 100k | *Pending M3* | - | - | - | - | - | *Pending* |
