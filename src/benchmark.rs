@@ -3614,9 +3614,13 @@ pub fn run_phase3_benchmark(config: &Phase3Config) -> Result<Phase3Report> {
                         .map_err(|e| eprintln!("[repro-check] Build failed: {e}"))
                         .ok();
                     match index1 {
-                        Some(ref idx) => verify_index_against_golden_fixture(idx, &loaded.query, gp)
-                            .map_err(|e| eprintln!("[repro-check] Golden verification failed: {e}"))
-                            .is_ok(),
+                        Some(ref idx) => {
+                            verify_index_against_golden_fixture(idx, &loaded.query, gp)
+                                .map_err(|e| {
+                                    eprintln!("[repro-check] Golden verification failed: {e}")
+                                })
+                                .is_ok()
+                        }
                         None => false,
                     }
                 } else {
