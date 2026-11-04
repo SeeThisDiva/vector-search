@@ -4290,6 +4290,9 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
         let exact_res =
             ExactKnn::search_parallel_with_base(Metric::L2Squared, &base, &eval_queries, 10, 0)?;
 
+        // Brief cooldown after multi-threaded ExactKNN so Run 1/3 starts at steady CPU temperature
+        std::thread::sleep(std::time::Duration::from_secs(2));
+
         let cfg = HnswConfig {
             m: 16,
             m_max: None,

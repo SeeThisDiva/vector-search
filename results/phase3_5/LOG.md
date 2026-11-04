@@ -22,10 +22,10 @@
 
 | Run # | Build Time (s) | Build QPS (vec/s) | Peak RSS (MiB) | Graph-Only (B/vec) | Fixed-Query Hash / Recall@10 |
 |:---:|:---:|:---:|:---:|:---:|:---:|
-| Run 1 | 41.353 s | 2418.2 | 128.52 MiB | 338.66 | 0x7cc605e91d8ccce8 / 98.14% (ef50) |
-| Run 2 | 31.142 s | 3211.1 | 128.52 MiB | 338.66 | 0x7cc605e91d8ccce8 / 98.14% (ef50) |
-| Run 3 | 36.244 s | 2759.1 | 128.52 MiB | 338.66 | 0x7cc605e91d8ccce8 / 98.14% (ef50) |
-| **Summary** | **Median: 36.244 s** | **Min: 31.142 s** | **Max: 41.353 s** | **Spread ($\Delta_{\text{spread}}$): 10.211 s (28.17%)** | **Noise Hurdle ($>2\times\Delta$, $\ge 5\%$): 20.421 s** |
+| Run 1 | 30.536 s | 3274.8 | 128.48 MiB | 338.66 | 0x7cc605e91d8ccce8 / 98.14% (ef50) |
+| Run 2 | 30.116 s | 3320.5 | 128.48 MiB | 338.66 | 0x7cc605e91d8ccce8 / 98.14% (ef50) |
+| Run 3 | 30.299 s | 3300.4 | 128.48 MiB | 338.66 | 0x7cc605e91d8ccce8 / 98.14% (ef50) |
+| **Summary** | **Median: 30.299 s** | **Min: 30.116 s** | **Max: 30.536 s** | **Spread ($\Delta_{\text{spread}}$): 0.421 s (1.39%)** | **2x Spread: 0.841 s *(36.244 s w/ `instrument` feature)*** |
 
 - **Graph Fingerprint (100k)**: `0x80af03bd7aebaade` (`9272630593691568862`)
 - **Query Results Hash (100k, 1k queries @ k=10, efSearch=100)**: `0x7cc605e91d8ccce8` (`8990880204873059560`)
@@ -124,7 +124,7 @@ Based on the empirical profile above, the candidate optimizations are ordered st
 
 | Commit / Candidate | Task | Target Scale | Build Time (s) | $\Delta$ vs Base | % Speedup | Peak RSS | Graph B/vec | Fingerprint / Recall | Decision |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| `170b9d7` Baseline | M1 | 100k | 36.244 s | - | - | 128.52 MiB | 338.66 | `0x80af03bd7aebaade` / 98.14% | **BASELINE ANCHOR** |
+| `9ba9c4a` Baseline | M1 | 100k | 30.299 s (36.244 s instr.) | - | - | 128.48 MiB | 338.66 | `0x80af03bd7aebaade` / 98.14% | **BASELINE ANCHOR** |
 | `170b9d7` Baseline | M1 | 1M | 511.271 s | - | - | 845.75 MiB | 338.67 | `0x19b378e1f978084d` / 94.70% | **BASELINE ANCHOR** |
 | Candidate T1.5 | T1.5 | 100k | *Pending M2* | - | - | - | - | - | *Pending* |
 | Candidate T1.6 | T1.6 | 100k | *Pending M3* | - | - | - | - | - | *Pending* |
