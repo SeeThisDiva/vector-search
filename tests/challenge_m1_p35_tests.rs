@@ -226,8 +226,8 @@ fn test_challenge_zero_cost_memory_and_stats() {
         // No distance_evals: u64 field!
         assert_eq!(std::mem::size_of::<HeuristicScratch>(), 192);
 
-        // HnswIndex is 416 bytes without build_stats
-        assert_eq!(std::mem::size_of::<HnswIndex>(), 416);
+        // HnswIndex is 480 bytes without build_stats
+        assert_eq!(std::mem::size_of::<HnswIndex>(), 480);
     }
 
     #[cfg(feature = "instrument")]
@@ -258,8 +258,8 @@ fn test_challenge_zero_cost_memory_and_stats() {
             176
         );
 
-        // HnswIndex with build_stats: 416 + 8 (tracker) + 8 (scratch) + 176 (build_stats) = 608 bytes
-        assert_eq!(std::mem::size_of::<HnswIndex>(), 608);
+        // HnswIndex with build_stats: 480 + 8 (tracker) + 8 (scratch) + 176 (build_stats) = 672 bytes
+        assert_eq!(std::mem::size_of::<HnswIndex>(), 672);
     }
 }
 

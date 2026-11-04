@@ -306,29 +306,11 @@ impl HnswGraphComponents {
     }
 }
 
-/// Internal node representing an indexed vector in the HNSW graph.
-#[derive(Debug, Clone)]
-pub struct HnswNode {
-    pub id: usize,
-    pub max_layer: usize,
-    pub neighbors: Vec<Vec<usize>>,
-}
-
-impl HnswNode {
-    /// Creates an empty node with neighbor lists allocated up to `max_layer`.
-    #[must_use]
-    pub fn new(id: usize, max_layer: usize, m_max0: usize, m_max: usize) -> Self {
-        let mut neighbors = Vec::with_capacity(max_layer + 1);
-        for lc in 0..=max_layer {
-            let cap = if lc == 0 { m_max0 + 1 } else { m_max + 1 };
-            neighbors.push(Vec::with_capacity(cap));
-        }
-        Self {
-            id,
-            max_layer,
-            neighbors,
-        }
-    }
+/// Compact per-node metadata pointing into the flat Layer 0 and Upper-Layer arenas.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HnswNodeMeta {
+    pub max_layer: u8,
+    pub upper_offset: u32,
 }
 
 /// FNV-1a 64 offset basis constant.
@@ -385,7 +367,16 @@ pub struct HnswIndex<'a> {
     matrix: &'a RowMatrix<f32>,
     metric: Metric,
     config: HnswConfig,
-    nodes: Vec<HnswNode>,
+    /// Per-node compact metadata (`max_layer` and `upper_offset`).
+    node_meta: Vec<HnswNodeMeta>,
+    /// Flat Layer-0 adjacency arena with fixed stride `l0_stride = m_max0 + 1` per node
+    /// (`slot 0` is degree `d`, followed by `d` neighbor `u32` IDs).
+    layer0: Vec<u32>,
+    /// Sparse upper-layer (`lc >= 1`) adjacency arena with fixed stride `upper_stride = m_max + 1`
+    /// per upper layer (`slot 0` is degree `d`, followed by `d` neighbor `u32` IDs).
+    upper_arena: Vec<u32>,
+    l0_stride: usize,
+    upper_stride: usize,
     enter_point: Option<usize>,
     top_layer: usize,
     rng: DeterministicRng,
@@ -399,14 +390,21 @@ impl<'a> HnswIndex<'a> {
     /// Initializes an empty HNSW index over `matrix`.
     pub fn new(matrix: &'a RowMatrix<f32>, metric: Metric, config: HnswConfig) -> Self {
         let rng = DeterministicRng::new(config.seed);
-        let visited_tracker = VisitedTracker::new(matrix.rows());
+        let n = matrix.rows();
+        let l0_stride = config.effective_m_max0() + 1;
+        let upper_stride = config.effective_m_max() + 1;
+        let visited_tracker = VisitedTracker::new(n);
         let heuristic_scratch = HeuristicScratch::new();
 
         Self {
             matrix,
             metric,
             config,
-            nodes: Vec::with_capacity(matrix.rows()),
+            node_meta: Vec::with_capacity(n),
+            layer0: Vec::with_capacity(n.saturating_mul(l0_stride)),
+            upper_arena: Vec::new(),
+            l0_stride,
+            upper_stride,
             enter_point: None,
             top_layer: 0,
             rng,
@@ -420,6 +418,13 @@ impl<'a> HnswIndex<'a> {
     /// Builds an HNSW index from scratch by inserting all rows in `matrix`.
     pub fn build(matrix: &'a RowMatrix<f32>, metric: Metric, config: HnswConfig) -> Result<Self> {
         config.validate()?;
+        if matrix.rows() > u32::MAX as usize {
+            return Err(VectorSearchError::InvalidArgument(format!(
+                "Matrix rows ({}) exceed u32::MAX ({})",
+                matrix.rows(),
+                u32::MAX
+            )));
+        }
         let mut index = Self::new(matrix, metric, config);
         #[cfg(feature = "instrument")]
         let t_build_start = std::time::Instant::now();
@@ -515,7 +520,7 @@ impl<'a> HnswIndex<'a> {
     #[inline]
     #[must_use]
     pub fn num_vectors(&self) -> usize {
-        self.nodes.len()
+        self.node_meta.len()
     }
 
     /// Current maximum layer height in the graph.
@@ -532,18 +537,13 @@ impl<'a> HnswIndex<'a> {
         self.enter_point
     }
 
-    /// Graph-only memory footprint (nodes, `Vec` headers, and edge lists) in bytes,
+    /// Graph-only memory footprint (node metadata and flat adjacency arenas) in bytes,
     /// excluding visited tracker tags and heuristic scratch buffers.
     #[must_use]
     pub fn graph_only_memory_bytes(&self) -> usize {
-        let mut total = self.nodes.capacity() * std::mem::size_of::<HnswNode>();
-        for node in &self.nodes {
-            total += node.neighbors.capacity() * std::mem::size_of::<Vec<usize>>();
-            for layer_edges in &node.neighbors {
-                total += layer_edges.capacity() * std::mem::size_of::<usize>();
-            }
-        }
-        total
+        self.node_meta.capacity() * std::mem::size_of::<HnswNodeMeta>()
+            + self.layer0.capacity() * std::mem::size_of::<u32>()
+            + self.upper_arena.capacity() * std::mem::size_of::<u32>()
     }
 
     /// Graph-only memory footprint in mebibytes (MiB), excluding visited tracker tags.
@@ -557,10 +557,10 @@ impl<'a> HnswIndex<'a> {
     #[inline]
     #[must_use]
     pub fn graph_only_bytes_per_vector(&self) -> f64 {
-        if self.nodes.is_empty() {
+        if self.node_meta.is_empty() {
             0.0
         } else {
-            self.graph_only_memory_bytes() as f64 / self.nodes.len() as f64
+            self.graph_only_memory_bytes() as f64 / self.node_meta.len() as f64
         }
     }
 
@@ -581,33 +581,20 @@ impl<'a> HnswIndex<'a> {
     #[inline]
     #[must_use]
     pub fn bytes_per_vector(&self) -> f64 {
-        if self.nodes.is_empty() {
+        if self.node_meta.is_empty() {
             0.0
         } else {
-            self.memory_bytes() as f64 / self.nodes.len() as f64
+            self.memory_bytes() as f64 / self.node_meta.len() as f64
         }
     }
 
     /// Detailed breakdown of memory allocated across individual graph components.
     #[must_use]
     pub fn graph_components(&self) -> HnswGraphComponents {
-        let node_structs_bytes = self.nodes.capacity() * std::mem::size_of::<HnswNode>();
-        let mut layer0_edges_bytes = 0;
-        let mut upper_layers_edges_bytes = 0;
-        let mut outer_neighbors_headers_bytes = 0;
-
-        for node in &self.nodes {
-            outer_neighbors_headers_bytes +=
-                node.neighbors.capacity() * std::mem::size_of::<Vec<usize>>();
-            for (lc, layer_edges) in node.neighbors.iter().enumerate() {
-                let bytes = layer_edges.capacity() * std::mem::size_of::<usize>();
-                if lc == 0 {
-                    layer0_edges_bytes += bytes;
-                } else {
-                    upper_layers_edges_bytes += bytes;
-                }
-            }
-        }
+        let node_structs_bytes = self.node_meta.capacity() * std::mem::size_of::<HnswNodeMeta>();
+        let layer0_edges_bytes = self.layer0.capacity() * std::mem::size_of::<u32>();
+        let upper_layers_edges_bytes = self.upper_arena.capacity() * std::mem::size_of::<u32>();
+        let outer_neighbors_headers_bytes = 0;
 
         let visited_tracker_tags_bytes = self.visited_tracker.memory_bytes();
         let heuristic_scratch_bytes = self.heuristic_scratch.memory_bytes();
@@ -639,16 +626,19 @@ impl<'a> HnswIndex<'a> {
     /// Number of nodes present at layer `layer`.
     #[must_use]
     pub fn layer_node_count(&self, layer: usize) -> usize {
-        self.nodes.iter().filter(|n| n.max_layer >= layer).count()
+        self.node_meta
+            .iter()
+            .filter(|m| (m.max_layer as usize) >= layer)
+            .count()
     }
 
     /// Node IDs present at layer `layer`.
     #[must_use]
     pub fn nodes_at_layer(&self, layer: usize) -> Vec<usize> {
-        self.nodes
+        self.node_meta
             .iter()
-            .filter(|n| n.max_layer >= layer)
-            .map(|n| n.id)
+            .enumerate()
+            .filter_map(|(id, m)| ((m.max_layer as usize) >= layer).then_some(id))
             .collect()
     }
 
@@ -656,28 +646,94 @@ impl<'a> HnswIndex<'a> {
     #[inline]
     #[must_use]
     pub fn node_exists_at_layer(&self, layer: usize, node: usize) -> bool {
-        node < self.nodes.len() && self.nodes[node].max_layer >= layer
+        node < self.node_meta.len() && (self.node_meta[node].max_layer as usize) >= layer
     }
 
     /// Maximum layer height of node `node`.
     #[inline]
     #[must_use]
     pub fn node_layer(&self, node: usize) -> usize {
-        if node < self.nodes.len() {
-            self.nodes[node].max_layer
+        if node < self.node_meta.len() {
+            self.node_meta[node].max_layer as usize
         } else {
             0
         }
     }
 
-    /// Outgoing neighbor node IDs for `node` at layer `layer`.
+    /// Outgoing neighbor node IDs (`u32`) for `node` at layer `layer`.
     #[inline]
     #[must_use]
-    pub fn neighbors(&self, layer: usize, node: usize) -> &[usize] {
-        if node < self.nodes.len() && layer <= self.nodes[node].max_layer {
-            &self.nodes[node].neighbors[layer]
+    pub fn neighbors(&self, layer: usize, node: usize) -> &[u32] {
+        let Some(meta) = self.node_meta.get(node) else {
+            return &[];
+        };
+        if layer > meta.max_layer as usize {
+            return &[];
+        }
+        if layer == 0 {
+            let base = node * self.l0_stride;
+            let deg = self.layer0[base] as usize;
+            &self.layer0[base + 1..base + 1 + deg]
         } else {
-            &[]
+            let base = (meta.upper_offset as usize) + (layer - 1) * self.upper_stride;
+            let deg = self.upper_arena[base] as usize;
+            &self.upper_arena[base + 1..base + 1 + deg]
+        }
+    }
+
+    #[inline]
+    fn layer_slot_base(&self, layer: usize, node: usize) -> (bool, usize) {
+        if layer == 0 {
+            (true, node * self.l0_stride)
+        } else {
+            let base =
+                (self.node_meta[node].upper_offset as usize) + (layer - 1) * self.upper_stride;
+            (false, base)
+        }
+    }
+
+    #[inline]
+    fn degree_at(&self, layer: usize, node: usize) -> usize {
+        let (is_l0, base) = self.layer_slot_base(layer, node);
+        if is_l0 {
+            self.layer0[base] as usize
+        } else {
+            self.upper_arena[base] as usize
+        }
+    }
+
+    #[inline]
+    fn push_neighbor_unique(&mut self, layer: usize, node: usize, target: u32) {
+        let (is_l0, base) = self.layer_slot_base(layer, node);
+        if is_l0 {
+            let deg = self.layer0[base] as usize;
+            if !self.layer0[base + 1..base + 1 + deg].contains(&target) {
+                self.layer0[base + 1 + deg] = target;
+                self.layer0[base] = (deg + 1) as u32;
+            }
+        } else {
+            let deg = self.upper_arena[base] as usize;
+            if !self.upper_arena[base + 1..base + 1 + deg].contains(&target) {
+                self.upper_arena[base + 1 + deg] = target;
+                self.upper_arena[base] = (deg + 1) as u32;
+            }
+        }
+    }
+
+    #[inline]
+    fn set_neighbors_from_slice(&mut self, layer: usize, node: usize, selected: &[usize]) {
+        let (is_l0, base) = self.layer_slot_base(layer, node);
+        let deg = selected.len();
+        if is_l0 {
+            self.layer0[base] = deg as u32;
+            for (i, &id) in selected.iter().enumerate() {
+                self.layer0[base + 1 + i] = id as u32;
+            }
+        } else {
+            self.upper_arena[base] = deg as u32;
+            for (i, &id) in selected.iter().enumerate() {
+                self.upper_arena[base + 1 + i] = id as u32;
+            }
         }
     }
 
@@ -769,7 +825,7 @@ impl<'a> HnswIndex<'a> {
         lc: usize,
         tracker: &mut VisitedTracker,
     ) -> BinaryHeap<Candidate> {
-        tracker.prepare(self.nodes.len());
+        tracker.prepare(self.node_meta.len());
         tracker.mark_visited(ep);
 
         let d_ep = self.compute_distance(query, ep);
@@ -795,31 +851,28 @@ impl<'a> HnswIndex<'a> {
                 break;
             }
 
-            if let Some(node) = self.nodes.get(curr.id) {
-                if lc <= node.max_layer {
-                    for &neighbor_id in &node.neighbors[lc] {
-                        if !tracker.is_visited(neighbor_id) {
-                            tracker.mark_visited(neighbor_id);
+            for &neighbor_u32 in self.neighbors(lc, curr.id) {
+                let neighbor_id = neighbor_u32 as usize;
+                if !tracker.is_visited(neighbor_id) {
+                    tracker.mark_visited(neighbor_id);
 
-                            let furthest_now = *w.peek().expect("W never empty");
-                            let d_neighbor = self.compute_distance(query, neighbor_id);
-                            #[cfg(feature = "instrument")]
-                            {
-                                dist_evals += 1;
-                            }
-                            let cand_neighbor = Candidate {
-                                distance: d_neighbor,
-                                id: neighbor_id,
-                            };
+                    let furthest_now = *w.peek().expect("W never empty");
+                    let d_neighbor = self.compute_distance(query, neighbor_id);
+                    #[cfg(feature = "instrument")]
+                    {
+                        dist_evals += 1;
+                    }
+                    let cand_neighbor = Candidate {
+                        distance: d_neighbor,
+                        id: neighbor_id,
+                    };
 
-                            if cand_neighbor < furthest_now || w.len() < ef {
-                                c.push(Reverse(cand_neighbor));
-                                w.push(cand_neighbor);
+                    if cand_neighbor < furthest_now || w.len() < ef {
+                        c.push(Reverse(cand_neighbor));
+                        w.push(cand_neighbor);
 
-                                if w.len() > ef {
-                                    w.pop();
-                                }
-                            }
+                        if w.len() > ef {
+                            w.pop();
                         }
                     }
                 }
@@ -862,21 +915,18 @@ impl<'a> HnswIndex<'a> {
         // Step 2: Optionally extend candidates with 1-hop neighbors
         if extend_candidates {
             for &cand in candidates {
-                if let Some(node) = self.nodes.get(cand.id) {
-                    if lc <= node.max_layer {
-                        for &adj_id in &node.neighbors[lc] {
-                            if adj_id != base_id && scratch.seen.insert(adj_id) {
-                                let d_adj = self.compute_node_distance(adj_id, base_id);
-                                #[cfg(feature = "instrument")]
-                                {
-                                    dist_evals += 1;
-                                }
-                                scratch.w_set.push(Candidate {
-                                    distance: d_adj,
-                                    id: adj_id,
-                                });
-                            }
+                for &adj_u32 in self.neighbors(lc, cand.id) {
+                    let adj_id = adj_u32 as usize;
+                    if adj_id != base_id && scratch.seen.insert(adj_id) {
+                        let d_adj = self.compute_node_distance(adj_id, base_id);
+                        #[cfg(feature = "instrument")]
+                        {
+                            dist_evals += 1;
                         }
+                        scratch.w_set.push(Candidate {
+                            distance: d_adj,
+                            id: adj_id,
+                        });
                     }
                 }
             }
@@ -963,29 +1013,41 @@ impl<'a> HnswIndex<'a> {
     /// unreachable placeholder nodes and re-inserting an id would leave dangling edges, so both
     /// are rejected with `InvalidArgument` instead of silently corrupting the graph.
     pub fn insert(&mut self, q_id: usize) -> Result<()> {
+        if q_id > u32::MAX as usize {
+            return Err(VectorSearchError::InvalidArgument(format!(
+                "Vector id {q_id} exceeds u32::MAX ({})",
+                u32::MAX
+            )));
+        }
         if q_id >= self.matrix.rows() {
             return Err(VectorSearchError::InvalidArgument(format!(
                 "Vector id {q_id} out of bounds for matrix with {} rows",
                 self.matrix.rows()
             )));
         }
-        if q_id != self.nodes.len() {
+        if q_id != self.node_meta.len() {
             return Err(VectorSearchError::InvalidArgument(format!(
                 "Vector id {q_id} must be inserted in order; next expected id is {}",
-                self.nodes.len()
+                self.node_meta.len()
             )));
         }
 
         let q_vec = self.matrix.row(q_id);
-        let l = self.sample_layer();
+        let l = self.sample_layer().min(u8::MAX as usize);
 
-        let new_node = HnswNode::new(
-            q_id,
-            l,
-            self.config.effective_m_max0(),
-            self.config.effective_m_max(),
-        );
-        self.nodes.push(new_node);
+        let upper_offset = if l == 0 {
+            u32::MAX
+        } else {
+            let off = self.upper_arena.len();
+            self.upper_arena.resize(off + l * self.upper_stride, 0_u32);
+            off as u32
+        };
+
+        self.node_meta.push(HnswNodeMeta {
+            max_layer: l as u8,
+            upper_offset,
+        });
+        self.layer0.resize((q_id + 1) * self.l0_stride, 0_u32);
 
         #[cfg(feature = "instrument")]
         let dist_evals_before = self.build_stats.distance_evals_search
@@ -1094,33 +1156,36 @@ impl<'a> HnswIndex<'a> {
             scratch.outer_neighbors.extend_from_slice(&scratch.r);
 
             // Add bidirectional edges
+            let q_id_u32 = q_id as u32;
             for i in 0..scratch.outer_neighbors.len() {
                 let e = scratch.outer_neighbors[i];
-                if !self.nodes[q_id].neighbors[lc].contains(&e) {
-                    self.nodes[q_id].neighbors[lc].push(e);
-                }
-                if !self.nodes[e].neighbors[lc].contains(&q_id) {
-                    self.nodes[e].neighbors[lc].push(q_id);
-                }
-
-                // Prune neighbor e if its degree exceeds layer cap
-                if self.nodes[e].neighbors[lc].len() > m_layer {
+                self.push_neighbor_unique(lc, q_id, e as u32);
+                let prev_deg_e = self.degree_at(lc, e);
+                if prev_deg_e < m_layer {
+                    self.push_neighbor_unique(lc, e, q_id_u32);
+                } else if !self.neighbors(lc, e).contains(&q_id_u32) {
                     #[cfg(feature = "instrument")]
                     let t_shrink = std::time::Instant::now();
                     #[cfg(feature = "instrument")]
-                    let cand_dist_evals = self.nodes[e].neighbors[lc].len() as u64;
+                    let cand_dist_evals = (prev_deg_e + 1) as u64;
                     #[cfg(feature = "instrument")]
                     let heur_evals_before = scratch.distance_evals;
 
                     e_cands.clear();
 
-                    for &adj_id in &self.nodes[e].neighbors[lc] {
+                    for &adj_u32 in self.neighbors(lc, e) {
+                        let adj_id = adj_u32 as usize;
                         let d = self.compute_node_distance(adj_id, e);
                         e_cands.push(Candidate {
                             distance: d,
                             id: adj_id,
                         });
                     }
+                    let d_q = self.compute_node_distance(q_id, e);
+                    e_cands.push(Candidate {
+                        distance: d_q,
+                        id: q_id,
+                    });
 
                     self.select_neighbors_heuristic_with_scratch(
                         e,
@@ -1131,8 +1196,7 @@ impl<'a> HnswIndex<'a> {
                         self.config.keep_pruned,
                         &mut scratch,
                     );
-                    self.nodes[e].neighbors[lc].clear();
-                    self.nodes[e].neighbors[lc].extend_from_slice(&scratch.r);
+                    self.set_neighbors_from_slice(lc, e, &scratch.r);
 
                     #[cfg(feature = "instrument")]
                     {
@@ -1296,7 +1360,7 @@ impl<'a> HnswIndex<'a> {
             });
         }
 
-        let effective_k = k.min(self.nodes.len());
+        let effective_k = k.min(self.node_meta.len());
         let mut all_indices = Vec::with_capacity(num_queries * effective_k);
         let mut all_distances = Vec::with_capacity(num_queries * effective_k);
         let mut latencies_ms = Vec::with_capacity(num_queries);
@@ -1374,14 +1438,14 @@ impl<'a> HnswIndex<'a> {
             });
         }
 
-        if self.nodes.is_empty() || self.enter_point.is_none() {
+        if self.node_meta.is_empty() || self.enter_point.is_none() {
             return Ok(KnnSearchResult {
                 indices: RowMatrix::new(num_queries, 0, vec![])?,
                 distances: RowMatrix::new(num_queries, 0, vec![])?,
             });
         }
 
-        let effective_k = k.min(self.nodes.len());
+        let effective_k = k.min(self.node_meta.len());
         let workers = if num_threads == 0 {
             std::thread::available_parallelism()
                 .map(usize::from)
@@ -1393,7 +1457,7 @@ impl<'a> HnswIndex<'a> {
         .max(1);
 
         if workers == 1 {
-            let mut tracker = VisitedTracker::new(self.nodes.len());
+            let mut tracker = VisitedTracker::new(self.node_meta.len());
             let mut all_indices = Vec::with_capacity(num_queries * effective_k);
             let mut all_distances = Vec::with_capacity(num_queries * effective_k);
             for q_row in queries.iter_rows() {
@@ -1430,7 +1494,7 @@ impl<'a> HnswIndex<'a> {
                 q_offset += take_q;
 
                 s.spawn(move || {
-                    let mut tracker = VisitedTracker::new(self.nodes.len());
+                    let mut tracker = VisitedTracker::new(self.node_meta.len());
                     for local_i in 0..take_q {
                         let q_row = queries.row(start_q + local_i);
                         let hits = self

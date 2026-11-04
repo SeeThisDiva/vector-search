@@ -412,7 +412,8 @@ fn count_reachable_layer0(index: &HnswIndex<'_>) -> usize {
     seen[entry] = true;
     let mut count = 1;
     while let Some(u) = stack.pop() {
-        for &v in index.neighbors(0, u) {
+        for &v_u32 in index.neighbors(0, u) {
+            let v = v_u32 as usize;
             if !seen[v] {
                 seen[v] = true;
                 count += 1;
@@ -439,9 +440,10 @@ fn test_tier3_degree_bounds_and_layer0_reachability() {
         let index = HnswIndex::build(&base, Metric::L2Squared, config).unwrap();
 
         for u in 0..300 {
+            let u_u32 = u as u32;
             // No self loops, no duplicate edges, strict degree caps
             let n0 = index.neighbors(0, u);
-            assert!(!n0.contains(&u));
+            assert!(!n0.contains(&u_u32));
             assert!(n0.len() <= m_max0);
             let mut sorted = n0.to_vec();
             sorted.sort_unstable();
@@ -455,10 +457,12 @@ fn test_tier3_degree_bounds_and_layer0_reachability() {
             for l in 1..=index.max_layer() {
                 if index.node_exists_at_layer(l, u) {
                     let nl = index.neighbors(l, u);
-                    assert!(!nl.contains(&u));
+                    assert!(!nl.contains(&u_u32));
                     assert!(nl.len() <= m);
                     // Edges at layer l may only point to nodes that exist at layer l
-                    assert!(nl.iter().all(|&v| index.node_exists_at_layer(l, v)));
+                    assert!(nl
+                        .iter()
+                        .all(|&v| index.node_exists_at_layer(l, v as usize)));
                 }
             }
         }

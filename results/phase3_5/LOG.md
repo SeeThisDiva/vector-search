@@ -126,10 +126,10 @@ Based on the empirical profile above, the candidate optimizations are ordered st
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | `9ba9c4a` Baseline | M1 | 100k | 30.299 s (36.244 s instr.) | - | - | 128.48 MiB | 338.66 | `0x80af03bd7aebaade` / 98.14% | **BASELINE ANCHOR** |
 | `170b9d7` Baseline | M1 | 1M | 511.271 s | - | - | 845.75 MiB | 338.67 | `0x19b378e1f978084d` / 94.70% | **BASELINE ANCHOR** |
-| Candidate T1.5 | T1.5 | 100k | *Pending M2* | - | - | - | - | - | *Pending* |
-| Candidate T1.6 | T1.6 | 100k | *Pending M3* | - | - | - | - | - | *Pending* |
-| Candidate T1.8 | T1.8 | 100k | *Pending M3* | - | - | - | - | - | *Pending* |
-| Candidate T1.7 | T1.7 | 100k | *Pending M4* | - | - | - | - | - | *Pending* |
+| Candidate T1.5 (`seen_tags`) | T1.5 | 100k | 30.855 s (31.033 s prealloc) | +0.556 s | -1.83% | 129.02 MiB | 338.66 | `0x80af03bd7aebaade` / 98.14% | **REVERTED (`no gain`)** — `search_layer` already uses `VisitedTracker`; `HeuristicScratch::seen` only runs on $\le 100$ items in `heuristic` (4.8% of build time), so replacing `HashSet` with `seen_tags` did not improve median build time beyond baseline noise. |
+| Candidate T1.6 (`search_layer` heap reuse) | T1.6 | 100k | 31.080 s (`c` reuse) / 43.120 s (`c`+`w` reuse) | +0.781 s | -2.58% | 128.48 MiB | 338.66 | `0x80af03bd7aebaade` / 98.14% | **REVERTED (`no gain`)** — thread-local allocator reuse of `BinaryHeap` in `search_layer` is already L1-hot; reusing `c_scratch` (`31.080 s`) or `c_scratch`+`w_scratch` (`43.120 s`) did not improve median build time vs baseline (`30.299 s`). |
+| Candidate T1.7 (`u32` flat adjacency) | T1.7 | 100k | **27.157 s** (min 27.068 s) | **-3.141 s** | **+10.37% faster** | **88.55 MiB** (-31.1%) | **145.57** (-57.0%) | `0x80af03bd7aebaade` / 98.14% | **KEPT** — cuts graph-only memory from 338.66 to 145.57 B/vec, improves 100k build median by 3.141 s (10.37%, $>7.4\times$ baseline spread), and speeds up query QPS by 15.3%. |
+| Candidate T1.9 (`keep_pruned_shrink=false`) | T1.9 | 100k & 1M | *Pending* | - | - | - | - | - | *Pending* |
 
 ---
 

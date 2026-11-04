@@ -255,7 +255,13 @@ fn test_adv_fingerprint_blindness_to_entry_point() {
         .map(|i| {
             let max_l = index.node_layer(i);
             let layers = (0..=max_l)
-                .map(|lc| index.neighbors(lc, i).to_vec())
+                .map(|lc| {
+                    index
+                        .neighbors(lc, i)
+                        .iter()
+                        .map(|&nid| nid as usize)
+                        .collect()
+                })
                 .collect();
             (max_l, layers)
         })
