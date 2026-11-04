@@ -500,3 +500,48 @@ fn test_hnsw_build_instrumentation_zero_cost_and_metrics() {
         assert!(index.build_stats().is_none());
     }
 }
+
+#[test]
+fn test_keep_pruned_shrink_config_override() {
+    let (base, queries) = generate_synthetic_sift(200, 10, 16, 4, 42).unwrap();
+    let cfg_default = HnswConfig {
+        m: 8,
+        m_max0: Some(16),
+        ef_construction: 40,
+        seed: 42,
+        ..Default::default()
+    };
+    assert!(cfg_default.effective_keep_pruned_shrink());
+
+    let cfg_explicit_true = HnswConfig {
+        keep_pruned_shrink: Some(true),
+        ..cfg_default.clone()
+    };
+    assert!(cfg_explicit_true.effective_keep_pruned_shrink());
+
+    let cfg_shrink_false = HnswConfig {
+        keep_pruned_shrink: Some(false),
+        ..cfg_default.clone()
+    };
+    assert!(!cfg_shrink_false.effective_keep_pruned_shrink());
+
+    let idx_default = HnswIndex::build(&base, Metric::L2Squared, cfg_default).unwrap();
+    let idx_explicit_true = HnswIndex::build(&base, Metric::L2Squared, cfg_explicit_true).unwrap();
+    let mut idx_shrink_false =
+        HnswIndex::build(&base, Metric::L2Squared, cfg_shrink_false).unwrap();
+
+    // Explicit Some(true) must match default (None) bit-for-bit
+    assert_eq!(
+        idx_default.graph_fingerprint(),
+        idx_explicit_true.graph_fingerprint()
+    );
+    // keep_pruned_shrink = Some(false) alters shrink pruning when degree overflows m_layer
+    assert_ne!(
+        idx_default.graph_fingerprint(),
+        idx_shrink_false.graph_fingerprint()
+    );
+
+    let res = idx_shrink_false.search_batch(&queries, 5, 40).unwrap();
+    assert_eq!(res.indices.rows(), 10);
+    assert_eq!(res.indices.cols(), 5);
+}

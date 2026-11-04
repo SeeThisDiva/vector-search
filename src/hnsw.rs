@@ -34,6 +34,8 @@ pub struct HnswConfig {
     pub extend_candidates: bool,
     /// Whether to retain diverse pruned candidates to guarantee degree M (default: true).
     pub keep_pruned: bool,
+    /// Optional override for `keep_pruned` during reverse-edge degree shrink only (default: `None`, uses `keep_pruned`).
+    pub keep_pruned_shrink: Option<bool>,
     /// Fixed PRNG seed for deterministic layer assignment and tie-breaking (default: 42).
     pub seed: u64,
 }
@@ -48,6 +50,7 @@ impl Default for HnswConfig {
             m_l: None,
             extend_candidates: false,
             keep_pruned: true,
+            keep_pruned_shrink: None,
             seed: 42,
         }
     }
@@ -83,6 +86,13 @@ impl HnswConfig {
     #[must_use]
     pub fn effective_m_l(&self) -> f64 {
         self.m_l.unwrap_or_else(|| 1.0 / (self.m as f64).ln())
+    }
+
+    /// Effective `keep_pruned` flag used during reverse-edge degree shrink.
+    #[inline]
+    #[must_use]
+    pub fn effective_keep_pruned_shrink(&self) -> bool {
+        self.keep_pruned_shrink.unwrap_or(self.keep_pruned)
     }
 
     /// Validates configuration invariants before building the index.
@@ -1193,7 +1203,7 @@ impl<'a> HnswIndex<'a> {
                         m_layer,
                         lc,
                         self.config.extend_candidates,
-                        self.config.keep_pruned,
+                        self.config.effective_keep_pruned_shrink(),
                         &mut scratch,
                     );
                     self.set_neighbors_from_slice(lc, e, &scratch.r);

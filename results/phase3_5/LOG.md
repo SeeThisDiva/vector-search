@@ -129,7 +129,31 @@ Based on the empirical profile above, the candidate optimizations are ordered st
 | Candidate T1.5 (`seen_tags`) | T1.5 | 100k | 30.855 s (31.033 s prealloc) | +0.556 s | -1.83% | 129.02 MiB | 338.66 | `0x80af03bd7aebaade` / 98.14% | **REVERTED (`no gain`)** — `search_layer` already uses `VisitedTracker`; `HeuristicScratch::seen` only runs on $\le 100$ items in `heuristic` (4.8% of build time), so replacing `HashSet` with `seen_tags` did not improve median build time beyond baseline noise. |
 | Candidate T1.6 (`search_layer` heap reuse) | T1.6 | 100k | 31.080 s (`c` reuse) / 43.120 s (`c`+`w` reuse) | +0.781 s | -2.58% | 128.48 MiB | 338.66 | `0x80af03bd7aebaade` / 98.14% | **REVERTED (`no gain`)** — thread-local allocator reuse of `BinaryHeap` in `search_layer` is already L1-hot; reusing `c_scratch` (`31.080 s`) or `c_scratch`+`w_scratch` (`43.120 s`) did not improve median build time vs baseline (`30.299 s`). |
 | Candidate T1.7 (`u32` flat adjacency) | T1.7 | 100k | **27.157 s** (min 27.068 s) | **-3.141 s** | **+10.37% faster** | **88.55 MiB** (-31.1%) | **145.57** (-57.0%) | `0x80af03bd7aebaade` / 98.14% | **KEPT** — cuts graph-only memory from 338.66 to 145.57 B/vec, improves 100k build median by 3.141 s (10.37%, $>7.4\times$ baseline spread), and speeds up query QPS by 15.3%. |
-| Candidate T1.9 (`keep_pruned_shrink=false`) | T1.9 | 100k & 1M | *Pending* | - | - | - | - | - | *Pending* |
+| Candidate T1.9 (`keep_pruned_shrink=false`) | T1.9 | 100k | **21.351 s** | **-8.948 s** | **+29.53% faster** | **77.21 MiB** (-39.9%) | **145.57** | `0xeecb25668ae17f19` / 98.70% | **EXPERIMENT (Flagged, default unchanged)** — cuts 100k build time by an additional 21.4% beyond T1.7. |
+| Candidate T1.9 (`keep_pruned_shrink=false`) | T1.9 | 1M | **415.076 s** | **-96.195 s** vs 511.271 s (`-55.90 s` vs 470.97 s) | **+18.81% faster** | **645.89 MiB** (-23.6%) | **148.91** (-56.0%) | `0xf59eb0d017b09d4a` / 94.30% | **EXPERIMENT (Flagged, default unchanged)** — Dev decision required (Gate G1). See Section 4.1 below for full `efSearch` sweep and matched-latency comparison. |
+
+### 4.1 Candidate T1.9 (`keep_pruned_shrink = Some(false)`) SIFT1M Experiment Report (R3 / Gate G1)
+
+- **Configuration**: `HnswConfig { m: 16, m_max0: Some(32), ef_construction: 100, extend_candidates: false, keep_pruned: true, keep_pruned_shrink: Some(false), seed: 42 }`
+- **Default Status**: `HnswConfig::default().keep_pruned_shrink` remains `None` (which delegates to `keep_pruned = true`), so default index builds remain 100% bit-identical to Phase 3.
+- **1M Build Time**: **415.076 s** (`2,409.2 vectors/s`) vs **511.271 s** baseline (**1.232x speedup / -18.81%**).
+- **1M Memory Footprint**: **645.89 MiB Peak RSS** (down from `845.75 MiB`), **148.91 B/vector graph-only** (down from `338.67 B/vector`).
+
+#### Full SIFT1M `efSearch` Sweep Comparison (`keep_pruned_shrink = false` vs Default `true`)
+| efSearch | Recall@10 (`shrink=false`) | Recall@10 (Default `true`) | Exact Recall $\Delta$ | MedMean ms (`shrink=false`) | MedMean ms (Default `true`) | p50 ms (`shrink=false`) | p99 ms (`shrink=false`) | QPS (`shrink=false`) | QPS (Default `true`) |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 10 | 71.019% | 73.311% | **-2.292%** | 0.088 ms | 0.095 ms | 0.085 ms | 0.160 ms | 11,369.0 | 10,565.0 |
+| 20 | 83.559% | 84.953% | **-1.394%** | 0.132 ms | 0.140 ms | 0.129 ms | 0.220 ms | 7,574.3 | 7,124.5 |
+| 50 | 94.304% | 94.703% | **-0.399%** | 0.255 ms | 0.272 ms | 0.257 ms | 0.391 ms | 3,914.9 | 3,671.8 |
+| 100 | 98.009% | 98.061% | **-0.052%** | 0.457 ms | 0.486 ms | 0.465 ms | 0.700 ms | 2,186.3 | 2,055.6 |
+| 200 | **99.442%** | 99.383% | **+0.059%** | 0.824 ms | 0.893 ms | 0.848 ms | 1.222 ms | 1,212.8 | 1,119.2 |
+
+#### Recall at Matched Latency Analysis (Linear Interpolation on Recall vs. `MedMean ms`)
+-Because `keep_pruned_shrink = false` leaves pruned nodes with slightly sparser average out-degree than `m_layer`, each `efSearch` step visits fewer redundant edges and runs **6.0%–7.7% faster** in query latency at equal `efSearch`:
+  - At **0.140 ms** mean latency (Default `efSearch=20` @ `84.953%` recall): `keep_pruned_shrink = false` interpolates between `ef=20` (`0.132 ms`, `83.559%`) and `ef=50` (`0.255 ms`, `94.304%`) to **84.26% recall** ($\Delta = -0.69\%$).
+  - At **0.272 ms** mean latency (Default `efSearch=50` @ `94.703%` recall): `keep_pruned_shrink = false` interpolates between `ef=50` (`0.255 ms`, `94.304%`) and `ef=100` (`0.457 ms`, `98.009%`) to **94.62% recall** ($\Delta = -0.08\%$).
+  - At **0.486 ms** mean latency (Default `efSearch=100` @ `98.061%` recall): `keep_pruned_shrink = false` interpolates between `ef=100` (`0.457 ms`, `98.009%`) and `ef=200` (`0.824 ms`, `99.442%`) to **98.12% recall** ($\Delta = +0.06\%$ **higher recall at matched latency**).
+  - At **`efSearch=200`**: `keep_pruned_shrink = false` achieves **both higher recall** (`99.442%` vs `99.383%`, `+0.059%`) **and lower latency** (`0.824 ms` vs `0.893 ms`, `-7.7%`).
 
 ---
 

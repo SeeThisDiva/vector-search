@@ -1057,6 +1057,7 @@ pub fn profile_single_sift1m_scale(
         m_l: None,
         extend_candidates: false,
         keep_pruned: true,
+        keep_pruned_shrink: None,
         seed,
     };
 
@@ -1803,6 +1804,7 @@ pub fn run_phase2_benchmark(config: &Phase2Config) -> Result<Phase2Report> {
         m_l: None,
         extend_candidates: false,
         keep_pruned: true,
+        keep_pruned_shrink: None,
         seed: config.seed,
     };
 
@@ -2501,6 +2503,7 @@ pub struct Phase3Config {
     pub repro_vectors: usize,
     pub sweep_runs: usize,
     pub run_multi_scale: bool,
+    pub keep_pruned_shrink: Option<bool>,
 }
 
 impl Default for Phase3Config {
@@ -2525,6 +2528,7 @@ impl Default for Phase3Config {
             repro_vectors: 10_000,
             sweep_runs: 5,
             run_multi_scale: true,
+            keep_pruned_shrink: None,
         }
     }
 }
@@ -3335,6 +3339,7 @@ pub fn run_phase3_benchmark(config: &Phase3Config) -> Result<Phase3Report> {
         m_l: None,
         extend_candidates: false,
         keep_pruned: true,
+        keep_pruned_shrink: config.keep_pruned_shrink,
         seed: config.seed,
     };
 
@@ -3600,7 +3605,10 @@ pub fn run_phase3_benchmark(config: &Phase3Config) -> Result<Phase3Report> {
             50,
         )
         .is_ok();
-        let golden_ok = if repro_ok && loaded.source.is_authentic_sift() {
+        let golden_ok = if repro_ok
+            && loaded.source.is_authentic_sift()
+            && hnsw_cfg.effective_keep_pruned_shrink() == hnsw_cfg.keep_pruned
+        {
             let golden_file = if repro_b == 10_000 {
                 Some(std::path::Path::new("results/phase3_5/golden_10k.json"))
             } else if repro_b == 100_000 {
@@ -4156,6 +4164,7 @@ pub fn generate_golden_fixtures(data_dir: &Path, output_dir: &Path) -> Result<()
             m_l: None,
             extend_candidates: false,
             keep_pruned: true,
+            keep_pruned_shrink: None,
             seed: 42,
         };
         println!(
@@ -4301,6 +4310,7 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
             m_l: None,
             extend_candidates: false,
             keep_pruned: true,
+            keep_pruned_shrink: None,
             seed: 42,
         };
 
@@ -4592,6 +4602,7 @@ pub fn run_phase3_cli(args: &[String]) -> Result<()> {
     let mut repro_vectors = 10_000;
     let mut sweep_runs: usize = 5;
     let mut run_multi_scale = true;
+    let mut keep_pruned_shrink: Option<bool> = None;
     let mut internal_profile_scale: Option<usize> = None;
     let mut json_out: Option<PathBuf> = None;
     let mut show_help = false;
@@ -4869,6 +4880,14 @@ pub fn run_phase3_cli(args: &[String]) -> Result<()> {
                 run_multi_scale = false;
                 i += 1;
             }
+            "--no-keep-pruned-shrink" => {
+                keep_pruned_shrink = Some(false);
+                i += 1;
+            }
+            "--keep-pruned-shrink" => {
+                keep_pruned_shrink = Some(true);
+                i += 1;
+            }
             "--internal-profile-scale" => {
                 if i + 1 >= args.len() {
                     return Err(VectorSearchError::InvalidArgument(
@@ -5008,6 +5027,7 @@ OPTIONS:
         repro_vectors,
         sweep_runs,
         run_multi_scale,
+        keep_pruned_shrink,
     };
 
     let report = run_phase3_benchmark(&config)?;
