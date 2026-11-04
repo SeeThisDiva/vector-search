@@ -428,3 +428,76 @@ fn phase3_prefix_fvecs_loading_graph_only_bytes_and_config_validation() {
     assert_eq!(timed.result.indices.rows(), 25);
     assert_eq!(timed.result.indices.cols(), 5);
 }
+
+#[test]
+fn test_graph_fingerprint_properties() {
+    let (base, _) = generate_synthetic_sift(100, 5, 16, 4, 42).unwrap();
+    let cfg1 = HnswConfig {
+        seed: 42,
+        ..Default::default()
+    };
+    let index1 = HnswIndex::build(&base, Metric::L2Squared, cfg1.clone()).unwrap();
+    let fp1 = index1.graph_fingerprint();
+
+    // 1. Deterministic: same seed produces identical fingerprint
+    let cfg2 = HnswConfig {
+        seed: 42,
+        ..Default::default()
+    };
+    let index2 = HnswIndex::build(&base, Metric::L2Squared, cfg2).unwrap();
+    let fp2 = index2.graph_fingerprint();
+    assert_eq!(fp1, fp2);
+    assert_ne!(fp1, 0);
+
+    // 2. Seed-sensitive: different seed produces different fingerprint
+    let cfg3 = HnswConfig {
+        seed: 43,
+        ..Default::default()
+    };
+    let index3 = HnswIndex::build(&base, Metric::L2Squared, cfg3).unwrap();
+    let fp3 = index3.graph_fingerprint();
+    assert_ne!(fp1, fp3);
+
+    // 3. Non-empty vs empty index behavior
+    let empty_base = RowMatrix::<f32>::new(0, 16, vec![]).unwrap();
+    let empty_index = HnswIndex::new(&empty_base, Metric::L2Squared, cfg1);
+    let fp_empty = empty_index.graph_fingerprint();
+    assert_ne!(fp_empty, fp1);
+    assert_ne!(fp_empty, 0);
+}
+
+#[test]
+fn test_hnsw_build_instrumentation_zero_cost_and_metrics() {
+    let (base, _) = generate_synthetic_sift(100, 5, 16, 4, 42).unwrap();
+    let cfg = HnswConfig {
+        seed: 42,
+        ..Default::default()
+    };
+    let index = HnswIndex::build(&base, Metric::L2Squared, cfg).unwrap();
+
+    #[cfg(feature = "instrument")]
+    {
+        let stats = index
+            .build_stats()
+            .expect("build_stats must be Some when instrument enabled");
+        assert_eq!(stats.inserts_count, 100);
+        assert!(stats.distance_evals_total > 0);
+        assert_eq!(
+            stats.distance_evals_total,
+            stats.distance_evals_search
+                + stats.distance_evals_heuristic
+                + stats.distance_evals_shrink
+        );
+        assert!(stats.search_layer_calls > 0);
+        assert!(stats.heuristic_calls > 0);
+        assert!(stats.dist_evals_per_insert_mean > 0.0);
+        assert!(stats.dist_evals_per_insert_max >= stats.dist_evals_per_insert_min);
+        assert!(stats.total_build_time_s >= 0.0);
+    }
+
+    #[cfg(not(feature = "instrument"))]
+    {
+        assert!(index.build_stats().is_none());
+    }
+}
+

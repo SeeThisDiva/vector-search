@@ -159,6 +159,8 @@ impl Ord for Candidate {
 pub struct VisitedTracker {
     tags: Vec<u32>,
     curr_tag: u32,
+    #[cfg(feature = "instrument")]
+    pub distance_evals: u64,
 }
 
 impl VisitedTracker {
@@ -168,6 +170,8 @@ impl VisitedTracker {
         Self {
             tags: vec![0; capacity],
             curr_tag: 1,
+            #[cfg(feature = "instrument")]
+            distance_evals: 0,
         }
     }
 
@@ -234,6 +238,8 @@ pub struct HeuristicScratch {
     pub outer_neighbors: Vec<usize>,
     /// Visited/seen set for candidate deduplication.
     pub seen: HashSet<usize>,
+    #[cfg(feature = "instrument")]
+    pub distance_evals: u64,
 }
 
 impl HeuristicScratch {
@@ -248,6 +254,8 @@ impl HeuristicScratch {
             e_cands: Vec::with_capacity(64),
             outer_neighbors: Vec::with_capacity(64),
             seen: HashSet::with_capacity(256),
+            #[cfg(feature = "instrument")]
+            distance_evals: 0,
         }
     }
 
@@ -323,6 +331,55 @@ impl HnswNode {
     }
 }
 
+/// FNV-1a 64 offset basis constant.
+pub const FNV_OFFSET_BASIS_64: u64 = 0xcbf29ce484222325;
+/// FNV-1a 64 prime constant.
+pub const FNV_PRIME_64: u64 = 0x100000001b3;
+
+/// Updates an FNV-1a 64-bit hash with a `u64` value in little-endian byte order.
+#[inline]
+pub fn fnv1a_64_update_u64(hash: &mut u64, val: u64) {
+    for b in val.to_le_bytes() {
+        *hash = (*hash ^ (b as u64)).wrapping_mul(FNV_PRIME_64);
+    }
+}
+
+/// Comprehensive profiling counters and phase-level time split for HNSW index construction.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct HnswBuildStats {
+    // Distance evaluations
+    pub distance_evals_total: u64,
+    pub distance_evals_search: u64,
+    pub distance_evals_heuristic: u64,
+    pub distance_evals_shrink: u64,
+
+    // Per-insert distance evaluation distribution
+    pub inserts_count: usize,
+    pub dist_evals_per_insert_mean: f64,
+    pub dist_evals_per_insert_min: u64,
+    pub dist_evals_per_insert_max: u64,
+
+    // Call counts
+    pub search_layer_calls: u64,
+    pub heuristic_calls: u64,
+    pub heuristic_insert_calls: u64,
+    pub heuristic_shrink_calls: u64,
+    pub shrink_calls: u64,
+
+    // Phase-level time split (seconds)
+    pub time_search_layer_s: f64,
+    pub time_heuristic_s: f64,
+    pub time_shrink_s: f64,
+    pub time_other_overhead_s: f64,
+    pub total_build_time_s: f64,
+
+    // Phase-level percentages
+    pub pct_search_layer: f64,
+    pub pct_heuristic: f64,
+    pub pct_shrink: f64,
+    pub pct_other_overhead: f64,
+}
+
 /// Hierarchical Navigable Small World (HNSW) Approximate Nearest Neighbor index.
 pub struct HnswIndex<'a> {
     matrix: &'a RowMatrix<f32>,
@@ -334,6 +391,8 @@ pub struct HnswIndex<'a> {
     rng: DeterministicRng,
     visited_tracker: VisitedTracker,
     heuristic_scratch: HeuristicScratch,
+    #[cfg(feature = "instrument")]
+    pub build_stats: HnswBuildStats,
 }
 
 impl<'a> HnswIndex<'a> {
@@ -353,6 +412,8 @@ impl<'a> HnswIndex<'a> {
             rng,
             visited_tracker,
             heuristic_scratch,
+            #[cfg(feature = "instrument")]
+            build_stats: HnswBuildStats::default(),
         }
     }
 
@@ -360,10 +421,90 @@ impl<'a> HnswIndex<'a> {
     pub fn build(matrix: &'a RowMatrix<f32>, metric: Metric, config: HnswConfig) -> Result<Self> {
         config.validate()?;
         let mut index = Self::new(matrix, metric, config);
+        #[cfg(feature = "instrument")]
+        let t_build_start = std::time::Instant::now();
+
         for id in 0..matrix.rows() {
             index.insert(id)?;
         }
+
+        #[cfg(feature = "instrument")]
+        {
+            let elapsed = t_build_start.elapsed().as_secs_f64();
+            index.finalize_build_stats(elapsed);
+        }
+
         Ok(index)
+    }
+
+    /// Returns the build instrumentation statistics, if the `instrument` feature was enabled during build.
+    #[cfg(feature = "instrument")]
+    #[must_use]
+    pub fn build_stats(&self) -> Option<&HnswBuildStats> {
+        Some(&self.build_stats)
+    }
+
+    /// Returns the build instrumentation statistics, if the `instrument` feature was enabled during build.
+    #[cfg(not(feature = "instrument"))]
+    #[must_use]
+    pub fn build_stats(&self) -> Option<&HnswBuildStats> {
+        None
+    }
+
+    /// Finalizes build statistics with the measured total build time.
+    #[cfg(feature = "instrument")]
+    pub fn finalize_build_stats(&mut self, total_build_time_s: f64) {
+        self.build_stats.total_build_time_s = total_build_time_s;
+        self.build_stats.distance_evals_total = self.build_stats.distance_evals_search
+            + self.build_stats.distance_evals_heuristic
+            + self.build_stats.distance_evals_shrink;
+        if self.build_stats.inserts_count > 0 {
+            self.build_stats.dist_evals_per_insert_mean =
+                self.build_stats.distance_evals_total as f64 / self.build_stats.inserts_count as f64;
+        }
+        let phase_time_sum = self.build_stats.time_search_layer_s
+            + self.build_stats.time_heuristic_s
+            + self.build_stats.time_shrink_s;
+        self.build_stats.time_other_overhead_s = (total_build_time_s - phase_time_sum).max(0.0);
+
+        if total_build_time_s > 0.0 {
+            self.build_stats.pct_search_layer =
+                (self.build_stats.time_search_layer_s / total_build_time_s) * 100.0;
+            self.build_stats.pct_heuristic =
+                (self.build_stats.time_heuristic_s / total_build_time_s) * 100.0;
+            self.build_stats.pct_shrink =
+                (self.build_stats.time_shrink_s / total_build_time_s) * 100.0;
+            self.build_stats.pct_other_overhead =
+                (self.build_stats.time_other_overhead_s / total_build_time_s) * 100.0;
+        }
+    }
+
+    /// 64-bit FNV-1a fingerprint of the graph structure.
+    ///
+    /// Computes hash over:
+    /// - `num_vectors as u64`
+    /// - For each `node_id in 0..num_vectors`:
+    ///   - `node_layer(node_id) as u64`
+    ///   - For each layer `lc in 0..=max_l`:
+    ///     - For each neighbor `&nid in neighbors(lc, node_id)`:
+    ///       - `nid as u64`
+    ///
+    /// Defined strictly on public logical accessors so it remains invariant
+    /// across underlying storage representations (e.g. u32 IDs, compact arrays).
+    #[must_use]
+    pub fn graph_fingerprint(&self) -> u64 {
+        let mut hash = FNV_OFFSET_BASIS_64;
+        fnv1a_64_update_u64(&mut hash, self.num_vectors() as u64);
+        for i in 0..self.num_vectors() {
+            let max_l = self.node_layer(i);
+            fnv1a_64_update_u64(&mut hash, max_l as u64);
+            for lc in 0..=max_l {
+                for &nid in self.neighbors(lc, i) {
+                    fnv1a_64_update_u64(&mut hash, nid as u64);
+                }
+            }
+        }
+        hash
     }
 
     /// Number of indexed vectors in the graph.
@@ -628,6 +769,9 @@ impl<'a> HnswIndex<'a> {
         tracker.mark_visited(ep);
 
         let d_ep = self.compute_distance(query, ep);
+        #[cfg(feature = "instrument")]
+        let mut dist_evals = 1_u64;
+
         let cand_ep = Candidate {
             distance: d_ep,
             id: ep,
@@ -655,6 +799,10 @@ impl<'a> HnswIndex<'a> {
 
                             let furthest_now = *w.peek().expect("W never empty");
                             let d_neighbor = self.compute_distance(query, neighbor_id);
+                            #[cfg(feature = "instrument")]
+                            {
+                                dist_evals += 1;
+                            }
                             let cand_neighbor = Candidate {
                                 distance: d_neighbor,
                                 id: neighbor_id,
@@ -674,6 +822,11 @@ impl<'a> HnswIndex<'a> {
             }
         }
 
+        #[cfg(feature = "instrument")]
+        {
+            tracker.distance_evals += dist_evals;
+        }
+
         w
     }
 
@@ -689,6 +842,9 @@ impl<'a> HnswIndex<'a> {
         keep_pruned: bool,
         scratch: &mut HeuristicScratch,
     ) {
+        #[cfg(feature = "instrument")]
+        let mut dist_evals = 0_u64;
+
         scratch.w_set.clear();
         scratch.seen.clear();
 
@@ -707,6 +863,10 @@ impl<'a> HnswIndex<'a> {
                         for &adj_id in &node.neighbors[lc] {
                             if adj_id != base_id && scratch.seen.insert(adj_id) {
                                 let d_adj = self.compute_node_distance(adj_id, base_id);
+                                #[cfg(feature = "instrument")]
+                                {
+                                    dist_evals += 1;
+                                }
                                 scratch.w_set.push(Candidate {
                                     distance: d_adj,
                                     id: adj_id,
@@ -736,6 +896,10 @@ impl<'a> HnswIndex<'a> {
             let mut is_diverse = true;
             for &r_id in &scratch.r {
                 let d_e_r = self.compute_node_distance(e.id, r_id);
+                #[cfg(feature = "instrument")]
+                {
+                    dist_evals += 1;
+                }
                 if d_e_r <= e.distance {
                     is_diverse = false;
                     break;
@@ -757,6 +921,11 @@ impl<'a> HnswIndex<'a> {
                 }
                 scratch.r.push(pruned_cand.id);
             }
+        }
+
+        #[cfg(feature = "instrument")]
+        {
+            scratch.distance_evals += dist_evals;
         }
     }
 
@@ -814,10 +983,21 @@ impl<'a> HnswIndex<'a> {
         );
         self.nodes.push(new_node);
 
+        #[cfg(feature = "instrument")]
+        let dist_evals_before = self.build_stats.distance_evals_search
+            + self.build_stats.distance_evals_heuristic
+            + self.build_stats.distance_evals_shrink;
+
         // Case 1: First node insertion (empty graph)
         let Some(mut curr_ep) = self.enter_point else {
             self.enter_point = Some(q_id);
             self.top_layer = l;
+            #[cfg(feature = "instrument")]
+            {
+                self.build_stats.inserts_count += 1;
+                self.build_stats.dist_evals_per_insert_min = 0;
+                self.build_stats.dist_evals_per_insert_max = 0;
+            }
             return Ok(());
         };
 
@@ -829,7 +1009,21 @@ impl<'a> HnswIndex<'a> {
         // Phase A: Top-down greedy zoom-in (ef = 1) from l_top down to l + 1
         if l < l_top {
             for lc in (l + 1..=l_top).rev() {
+                #[cfg(feature = "instrument")]
+                let search_evals_before = tracker.distance_evals;
+                #[cfg(feature = "instrument")]
+                let t_search = std::time::Instant::now();
+
                 let w = self.search_layer(q_vec, curr_ep, 1, lc, &mut tracker);
+
+                #[cfg(feature = "instrument")]
+                {
+                    self.build_stats.time_search_layer_s += t_search.elapsed().as_secs_f64();
+                    self.build_stats.distance_evals_search +=
+                        tracker.distance_evals - search_evals_before;
+                    self.build_stats.search_layer_calls += 1;
+                }
+
                 if let Some(best) = w.iter().min_by(|a, b| a.cmp(b)) {
                     curr_ep = best.id;
                 }
@@ -845,6 +1039,11 @@ impl<'a> HnswIndex<'a> {
                 self.config.effective_m_max()
             };
 
+            #[cfg(feature = "instrument")]
+            let search_evals_before = tracker.distance_evals;
+            #[cfg(feature = "instrument")]
+            let t_search = std::time::Instant::now();
+
             let w = self.search_layer(
                 q_vec,
                 curr_ep,
@@ -853,7 +1052,21 @@ impl<'a> HnswIndex<'a> {
                 &mut tracker,
             );
 
+            #[cfg(feature = "instrument")]
+            {
+                self.build_stats.time_search_layer_s += t_search.elapsed().as_secs_f64();
+                self.build_stats.distance_evals_search +=
+                    tracker.distance_evals - search_evals_before;
+                self.build_stats.search_layer_calls += 1;
+            }
+
             let candidates: Vec<Candidate> = w.into_sorted_vec();
+
+            #[cfg(feature = "instrument")]
+            let heur_evals_before = scratch.distance_evals;
+            #[cfg(feature = "instrument")]
+            let t_heur = std::time::Instant::now();
+
             self.select_neighbors_heuristic_with_scratch(
                 q_id,
                 &candidates,
@@ -863,6 +1076,15 @@ impl<'a> HnswIndex<'a> {
                 self.config.keep_pruned,
                 &mut scratch,
             );
+
+            #[cfg(feature = "instrument")]
+            {
+                self.build_stats.time_heuristic_s += t_heur.elapsed().as_secs_f64();
+                self.build_stats.distance_evals_heuristic +=
+                    scratch.distance_evals - heur_evals_before;
+                self.build_stats.heuristic_calls += 1;
+                self.build_stats.heuristic_insert_calls += 1;
+            }
 
             scratch.outer_neighbors.clear();
             scratch.outer_neighbors.extend_from_slice(&scratch.r);
@@ -879,6 +1101,13 @@ impl<'a> HnswIndex<'a> {
 
                 // Prune neighbor e if its degree exceeds layer cap
                 if self.nodes[e].neighbors[lc].len() > m_layer {
+                    #[cfg(feature = "instrument")]
+                    let t_shrink = std::time::Instant::now();
+                    #[cfg(feature = "instrument")]
+                    let cand_dist_evals = self.nodes[e].neighbors[lc].len() as u64;
+                    #[cfg(feature = "instrument")]
+                    let heur_evals_before = scratch.distance_evals;
+
                     e_cands.clear();
 
                     for &adj_id in &self.nodes[e].neighbors[lc] {
@@ -900,6 +1129,16 @@ impl<'a> HnswIndex<'a> {
                     );
                     self.nodes[e].neighbors[lc].clear();
                     self.nodes[e].neighbors[lc].extend_from_slice(&scratch.r);
+
+                    #[cfg(feature = "instrument")]
+                    {
+                        self.build_stats.time_shrink_s += t_shrink.elapsed().as_secs_f64();
+                        let heur_evals = scratch.distance_evals - heur_evals_before;
+                        self.build_stats.distance_evals_shrink += cand_dist_evals + heur_evals;
+                        self.build_stats.shrink_calls += 1;
+                        self.build_stats.heuristic_calls += 1;
+                        self.build_stats.heuristic_shrink_calls += 1;
+                    }
                 }
             }
 
@@ -917,6 +1156,25 @@ impl<'a> HnswIndex<'a> {
         if l > l_top {
             self.top_layer = l;
             self.enter_point = Some(q_id);
+        }
+
+        #[cfg(feature = "instrument")]
+        {
+            let dist_evals_after = self.build_stats.distance_evals_search
+                + self.build_stats.distance_evals_heuristic
+                + self.build_stats.distance_evals_shrink;
+            let delta = dist_evals_after - dist_evals_before;
+            if self.build_stats.inserts_count == 0 {
+                self.build_stats.dist_evals_per_insert_min = delta;
+                self.build_stats.dist_evals_per_insert_max = delta;
+            } else {
+                self.build_stats.dist_evals_per_insert_min =
+                    self.build_stats.dist_evals_per_insert_min.min(delta);
+                self.build_stats.dist_evals_per_insert_max =
+                    self.build_stats.dist_evals_per_insert_max.max(delta);
+            }
+            self.build_stats.inserts_count += 1;
+            self.build_stats.distance_evals_total = dist_evals_after;
         }
 
         Ok(())
