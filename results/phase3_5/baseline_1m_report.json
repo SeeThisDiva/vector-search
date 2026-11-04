@@ -1,0 +1,267 @@
+{
+  "phase": 3,
+  "phase_name": "Phase 3: HNSW SIFT1M Scaling, Memory Profiling & Ground Truth Benchmarking",
+  "generated_at": "2026-11-04T14:01:00Z",
+  "hardware": {
+    "summary": "12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)",
+    "cpu_model": "12th Gen Intel(R) Core(TM) i7-12650H",
+    "logical_cores": 16,
+    "total_ram_gb": 15.78,
+    "os": "windows",
+    "arch": "x86_64"
+  },
+  "dataset": {
+    "preset": "sift1m",
+    "source_kind": "authentic_sift1m",
+    "source_description": "Authentic Texmex SIFT1M (data\\sift1m)",
+    "is_authentic_sift": true,
+    "base_path": "data\\sift1m\\sift_base.fvecs",
+    "query_path": "data\\sift1m\\sift_query.fvecs",
+    "groundtruth_path": "data\\sift1m\\sift_groundtruth.ivecs",
+    "num_base": 1000000,
+    "num_query": 10000,
+    "dim": 128,
+    "k": 10,
+    "seed": 42,
+    "metric": "l2"
+  },
+  "hnsw_config": {
+    "m": 16,
+    "m_max0": 32,
+    "ef_construction": 100,
+    "seed": 42,
+    "heuristic": "select_neighbors_heuristic_with_scratch"
+  },
+  "index_build": {
+    "num_vectors": 1000000,
+    "build_time_s": 511.270923,
+    "build_qps": 1955.91,
+    "max_layer": 5,
+    "entry_point": 829262,
+    "graph_fingerprint": 1851956783727773773,
+    "graph_fingerprint_hex": "0x19b378e1f978084d"
+  },
+  "build_instrumentation": {
+    "distance_evaluations": {
+      "total": 3744913479,
+      "search_layer": 1715511861,
+      "heuristic": 282127479,
+      "shrink": 1747274139,
+      "per_insert_mean": 3744.91,
+      "per_insert_min": 0,
+      "per_insert_max": 14098
+    },
+    "call_counts": {
+      "search_layer_calls": 5111179,
+      "heuristic_calls": 8631013,
+      "heuristic_insert_calls": 1066671,
+      "heuristic_shrink_calls": 7564342,
+      "shrink_calls": 7564342
+    },
+    "phase_time_split": {
+      "search_layer_s": 403.009306,
+      "search_layer_pct": 78.83,
+      "heuristic_s": 24.555598,
+      "heuristic_pct": 4.80,
+      "shrink_s": 72.567091,
+      "shrink_pct": 14.19,
+      "other_overhead_s": 11.138863,
+      "other_overhead_pct": 2.18,
+      "total_build_time_s": 511.270858
+    }
+  },
+  "memory_profile": {
+    "peak_rss_mb": 845.75,
+    "peak_rss_bytes": 886833152,
+    "peak_rss_measurement_method": "windows_powershell_peak_working_set_64: powershell -NoProfile -NonInteractive -Command (Get-Process -Id <benchmark process id>).PeakWorkingSet64",
+    "is_peak_rss_os_measured": true,
+    "bytes_per_vector_breakdown": {
+      "raw_vector_bytes_per_vector": 512.00,
+      "graph_bytes_per_vector": 342.67,
+      "graph_only_bytes_per_vector": 338.67,
+      "total_bytes_per_vector": 854.67,
+      "raw_vector_total_bytes": 512000000,
+      "raw_vector_total_mb": 488.28,
+      "graph_total_bytes": 342668320,
+      "graph_total_mb": 326.79,
+      "graph_only_total_bytes": 338668320,
+      "graph_only_total_mb": 322.98,
+      "total_footprint_bytes": 854668320,
+      "total_footprint_mb": 815.08
+    },
+    "graph_components_bytes": {
+      "node_structs_bytes": 40000000,
+      "layer0_edges_bytes": 264000000,
+      "upper_layers_edges_bytes": 9068072,
+      "outer_neighbors_headers_bytes": 25600248,
+      "visited_tracker_tags_bytes": 4000000,
+      "heuristic_scratch_bytes": 18368
+    }
+  },
+  "multi_scale_baseline_summary": [
+    {
+      "measured_this_run": false,
+      "scale_vectors": 10000,
+      "build_time_s": 1.482878,
+      "build_qps": 6743.64,
+      "peak_rss_mb": 13.64,
+      "raw_vector_bytes_per_vector": 512.00,
+      "graph_bytes_per_vector": 342.98,
+      "graph_only_bytes_per_vector": 338.98,
+      "total_bytes_per_vector": 854.98,
+      "graph_memory_bytes": 3429760,
+      "graph_only_memory_bytes": 3389760,
+      "recall_at_10": 0.997500
+    },
+    {
+      "measured_this_run": false,
+      "scale_vectors": 100000,
+      "build_time_s": 28.623980,
+      "build_qps": 3493.57,
+      "peak_rss_mb": 88.60,
+      "raw_vector_bytes_per_vector": 512.00,
+      "graph_bytes_per_vector": 342.66,
+      "graph_only_bytes_per_vector": 338.66,
+      "total_bytes_per_vector": 854.66,
+      "graph_memory_bytes": 34266240,
+      "graph_only_memory_bytes": 33866240,
+      "recall_at_10": 0.981400
+    },
+    {
+      "measured_this_run": true,
+      "scale_vectors": 1000000,
+      "build_time_s": 511.270923,
+      "build_qps": 1955.91,
+      "peak_rss_mb": 845.75,
+      "raw_vector_bytes_per_vector": 512.00,
+      "graph_bytes_per_vector": 342.67,
+      "graph_only_bytes_per_vector": 338.67,
+      "total_bytes_per_vector": 854.67,
+      "graph_memory_bytes": 342668320,
+      "graph_only_memory_bytes": 338668320,
+      "recall_at_10": 0.947030
+    }
+  ],
+  "ef_search_sweep": [
+    {
+      "ef_search": 10,
+      "recall_at_10": 0.733150,
+      "num_runs": 5,
+      "latency": {
+        "mean_ms": 0.094511,
+        "p50_ms": 0.091500,
+        "p95_ms": 0.133700,
+        "p99_ms": 0.160002,
+        "qps": 10564.97,
+        "mean_ms_min": 0.089655,
+        "mean_ms_max": 0.104712,
+        "mean_ms_spread": 0.015057,
+        "p99_ms_min": 0.154900,
+        "p99_ms_max": 0.214916,
+        "p99_ms_spread": 0.060016
+      },
+      "run_mean_latencies_ms": [0.091271, 0.089655, 0.094796, 0.094511, 0.104712],
+      "run_p99_latencies_ms": [0.160002, 0.154900, 0.169704, 0.157802, 0.214916],
+      "monotonic_passed": true
+    },
+    {
+      "ef_search": 20,
+      "recall_at_10": 0.849490,
+      "num_runs": 5,
+      "latency": {
+        "mean_ms": 0.140212,
+        "p50_ms": 0.138900,
+        "p95_ms": 0.188200,
+        "p99_ms": 0.221201,
+        "qps": 7124.55,
+        "mean_ms_min": 0.137075,
+        "mean_ms_max": 0.143138,
+        "mean_ms_spread": 0.006063,
+        "p99_ms_min": 0.216502,
+        "p99_ms_max": 0.237304,
+        "p99_ms_spread": 0.020802
+      },
+      "run_mean_latencies_ms": [0.143138, 0.142707, 0.140212, 0.140027, 0.137075],
+      "run_p99_latencies_ms": [0.237304, 0.220400, 0.222000, 0.221201, 0.216502],
+      "monotonic_passed": true
+    },
+    {
+      "ef_search": 50,
+      "recall_at_10": 0.947030,
+      "num_runs": 5,
+      "latency": {
+        "mean_ms": 0.272180,
+        "p50_ms": 0.278100,
+        "p95_ms": 0.338400,
+        "p99_ms": 0.381205,
+        "qps": 3671.77,
+        "mean_ms_min": 0.270197,
+        "mean_ms_max": 0.276421,
+        "mean_ms_spread": 0.006224,
+        "p99_ms_min": 0.379007,
+        "p99_ms_max": 0.395003,
+        "p99_ms_spread": 0.015996
+      },
+      "run_mean_latencies_ms": [0.276421, 0.272180, 0.272781, 0.270197, 0.271368],
+      "run_p99_latencies_ms": [0.395003, 0.381101, 0.383203, 0.379007, 0.381205],
+      "monotonic_passed": true
+    },
+    {
+      "ef_search": 100,
+      "recall_at_10": 0.980610,
+      "num_runs": 5,
+      "latency": {
+        "mean_ms": 0.486302,
+        "p50_ms": 0.501550,
+        "p95_ms": 0.602700,
+        "p99_ms": 0.670002,
+        "qps": 2055.56,
+        "mean_ms_min": 0.484145,
+        "mean_ms_max": 0.494232,
+        "mean_ms_spread": 0.010087,
+        "p99_ms_min": 0.666701,
+        "p99_ms_max": 0.692312,
+        "p99_ms_spread": 0.025611
+      },
+      "run_mean_latencies_ms": [0.484598, 0.489563, 0.484145, 0.486302, 0.494232],
+      "run_p99_latencies_ms": [0.666701, 0.670002, 0.668802, 0.674602, 0.692312],
+      "monotonic_passed": true
+    },
+    {
+      "ef_search": 200,
+      "recall_at_10": 0.993760,
+      "num_runs": 5,
+      "latency": {
+        "mean_ms": 0.893349,
+        "p50_ms": 0.923300,
+        "p95_ms": 1.127910,
+        "p99_ms": 1.282604,
+        "qps": 1119.15,
+        "mean_ms_min": 0.884983,
+        "mean_ms_max": 0.913206,
+        "mean_ms_spread": 0.028223,
+        "p99_ms_min": 1.240305,
+        "p99_ms_max": 1.327802,
+        "p99_ms_spread": 0.087497
+      },
+      "run_mean_latencies_ms": [0.893349, 0.902148, 0.913206, 0.893108, 0.884983],
+      "run_p99_latencies_ms": [1.282604, 1.312603, 1.327802, 1.245701, 1.240305],
+      "monotonic_passed": true
+    }
+  ],
+  "verification_status": {
+    "authentic_sift1m_verified": true,
+    "official_ground_truth_matched": true,
+    "official_gt_check_queries": 100,
+    "official_gt_recall_at_k": 0.999000,
+    "official_gt_exact_id_matches": 991,
+    "monotonic_scaling_verified": true,
+    "reproducibility_checked": true,
+    "reproducibility_verified": true,
+    "forbid_unsafe_code_enforced": true,
+    "std_only_enforced": true,
+    "phase3_completed": true,
+    "terminal_stopping_enforced": true,
+    "phase4_initiated": false
+  }
+}

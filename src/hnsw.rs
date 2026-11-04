@@ -459,8 +459,9 @@ impl<'a> HnswIndex<'a> {
             + self.build_stats.distance_evals_heuristic
             + self.build_stats.distance_evals_shrink;
         if self.build_stats.inserts_count > 0 {
-            self.build_stats.dist_evals_per_insert_mean =
-                self.build_stats.distance_evals_total as f64 / self.build_stats.inserts_count as f64;
+            self.build_stats.dist_evals_per_insert_mean = self.build_stats.distance_evals_total
+                as f64
+                / self.build_stats.inserts_count as f64;
         }
         let phase_time_sum = self.build_stats.time_search_layer_s
             + self.build_stats.time_heuristic_s
@@ -479,10 +480,11 @@ impl<'a> HnswIndex<'a> {
         }
     }
 
-    /// 64-bit FNV-1a fingerprint of the graph structure.
+    /// 64-bit FNV-1a fingerprint of the graph structure and navigational entry point.
     ///
     /// Computes hash over:
     /// - `num_vectors as u64`
+    /// - `enter_point as u64` (or `u64::MAX` if empty)
     /// - For each `node_id in 0..num_vectors`:
     ///   - `node_layer(node_id) as u64`
     ///   - For each layer `lc in 0..=max_l`:
@@ -495,6 +497,8 @@ impl<'a> HnswIndex<'a> {
     pub fn graph_fingerprint(&self) -> u64 {
         let mut hash = FNV_OFFSET_BASIS_64;
         fnv1a_64_update_u64(&mut hash, self.num_vectors() as u64);
+        let ep_val = self.enter_point.map(|ep| ep as u64).unwrap_or(u64::MAX);
+        fnv1a_64_update_u64(&mut hash, ep_val);
         for i in 0..self.num_vectors() {
             let max_l = self.node_layer(i);
             fnv1a_64_update_u64(&mut hash, max_l as u64);

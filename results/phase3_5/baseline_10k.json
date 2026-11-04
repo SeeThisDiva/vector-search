@@ -1,0 +1,129 @@
+{
+"phase": "3.5_baseline_profile",
+"generated_at": "2026-11-04T13:48:26Z",
+"provenance": {
+"git_commit": "170b9d7",
+"git_dirty": true,
+"rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+"cargo_profile": "release"
+},
+"environment": {
+"os": "windows",
+"cpu_model": "12th Gen Intel(R) Core(TM) i7-12650H",
+"logical_cores": 16,
+"total_ram_gb": 15.78,
+"power_mode": "best_performance",
+"processor_affinity_mask": "0x0004"
+},
+"dataset": {
+"preset": "sift1m",
+"source_kind": "authentic_sift1m",
+"source_description": "Authentic Texmex SIFT1M (data)",
+"is_authentic_sift": true,
+"base_path": "data\\sift1m\\sift_base.fvecs",
+"query_path": "data\\sift1m\\sift_query.fvecs",
+"scale_vectors": 10000,
+"dim": 128,
+"metric": "l2"
+},
+"hnsw_config": {
+"m": 16,
+"m_max0": 32,
+"ef_construction": 100,
+"seed": 42,
+"extend_candidates": false,
+"keep_pruned": true
+},
+"index_build": {
+"scale_vectors": 10000,
+"build_runs": 3,
+"build_times_s": [1.467980, 2.002020, 2.169203],
+"build_time_s": 2.002020,
+"build_qps": 4994.95,
+"max_layer": 3,
+"entry_point": 3015,
+"graph_fingerprint": 17954944087381888698,
+"graph_fingerprint_hex": "0xf92cc684a265ceba"
+},
+"memory_profile": {
+"peak_rss_mb": 22.12,
+"peak_rss_bytes": 23199744,
+"peak_rss_measurement_method": "powershell_peak_working_set_64",
+"is_peak_rss_os_measured": true,
+"raw_vector_bytes_per_vector": 512.00,
+"graph_bytes_per_vector": 342.98,
+"graph_only_bytes_per_vector": 338.98,
+"total_bytes_per_vector": 854.98,
+"graph_memory_bytes": 3429760,
+"graph_only_memory_bytes": 3389760,
+"graph_memory_mb": 3.27,
+"graph_components_bytes": {
+"node_structs_bytes": 400000,
+"layer0_edges_bytes": 2640000,
+"upper_layers_edges_bytes": 93296,
+"outer_neighbors_headers_bytes": 256464,
+"visited_tracker_tags_bytes": 40000,
+"heuristic_scratch_bytes": 18368
+}
+},
+  "build_instrumentation": {
+    "feature_instrument_enabled": true,
+    "distance_evaluations_total": 20397704,
+    "distance_evaluations_per_insert_mean": 2039.77,
+    "search_layer_calls": 36647,
+    "heuristic_calls": 84450,
+    "shrink_calls": 73768,
+    "time_split_seconds": {
+      "search_layer_s": 1.1458,
+      "heuristic_s": 0.2262,
+      "shrink_s": 0.6961,
+      "other_s": 0.1011
+    }
+  },
+"ef_search_evaluations": [
+    {
+      "ef_search": 50,
+      "recall_at_10": 0.997500,
+      "num_runs": 5,
+      "latency": {
+        "mean_ms": 0.103833,
+        "p50_ms": 0.102750,
+        "p95_ms": 0.133005,
+        "p99_ms": 0.175621,
+        "qps": 9613.51,
+        "mean_ms_spread": 0.016626,
+        "p99_ms_spread": 0.138178
+      }
+    },
+    {
+      "ef_search": 100,
+      "recall_at_10": 0.999800,
+      "num_runs": 5,
+      "latency": {
+        "mean_ms": 0.156029,
+        "p50_ms": 0.153350,
+        "p95_ms": 0.216835,
+        "p99_ms": 0.282663,
+        "qps": 6401.30,
+        "mean_ms_spread": 0.038205,
+        "p99_ms_spread": 0.330402
+      }
+    }
+],
+"fixed_query_set_verification": {
+"num_queries": 1000,
+"k": 10,
+"ef_search": 100,
+"query_results_hash": 10167137189980373305,
+"query_results_hash_hex": "0x8d18ed680f718139",
+"golden_fixture_file": "results/phase3_5\\golden_10k.json"
+},
+"verification_status": {
+"reproducibility_checked": true,
+"reproducibility_verified": true,
+"golden_fingerprint_matched": true,
+"golden_query_results_matched": true,
+"forbid_unsafe_code_enforced": true,
+"std_only_enforced": true
+}
+}

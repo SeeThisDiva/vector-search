@@ -1151,7 +1151,10 @@ pub fn profile_single_sift1m_scale(
 }
 
 fn format_scale_profile_kv(p: &BaselineScaleProfile) -> String {
-    let fp_str = p.graph_fingerprint.map(|v| v.to_string()).unwrap_or_default();
+    let fp_str = p
+        .graph_fingerprint
+        .map(|v| v.to_string())
+        .unwrap_or_default();
     format!(
         "SCALE_PROFILE_BEGIN\n\
          measured_this_run={}\n\
@@ -1556,7 +1559,8 @@ pub fn compute_query_results_hash(indices: &RowMatrix<i32>, distances: &RowMatri
     hash
 }
 
-/// Verifies an `HnswIndex` against a golden fixture JSON file (`graph_fingerprint` and `query_results_hash`).
+/// Verifies an `HnswIndex` against a golden fixture JSON file (`graph_fingerprint`, `query_results_hash`,
+/// and detailed candidate IDs and distance bits in `results`).
 pub fn verify_index_against_golden_fixture(
     index: &HnswIndex<'_>,
     queries: &RowMatrix<f32>,
@@ -1577,18 +1581,133 @@ pub fn verify_index_against_golden_fixture(
         )));
     }
 
-    if let Some(expected_qhash) = extract_json_u64(&content, "query_results_hash") {
-        let expected_nq = extract_json_usize(&content, "num_queries").unwrap_or(1000);
-        if queries.rows() >= expected_nq && expected_nq > 0 {
-            let q_slice = queries.slice_first_rows(expected_nq);
-            let mut tracker = crate::hnsw::VisitedTracker::new(index.num_vectors());
-            let timed = index.search_batch_timed_with_tracker(&q_slice, 10, 100, &mut tracker)?;
-            let actual_qhash = compute_query_results_hash(&timed.result.indices, &timed.result.distances);
-            if actual_qhash != expected_qhash {
+    let expected_qhash = extract_json_u64(&content, "query_results_hash");
+    let expected_nq = extract_json_usize(&content, "num_queries").unwrap_or(1000);
+    let results = parse_golden_results(&content);
+    let max_result_k = results
+        .iter()
+        .map(|r| r.indices.len().max(r.distance_bits.len()))
+        .max()
+        .unwrap_or(0);
+    let k = extract_json_usize(&content, "k").unwrap_or_else(|| 10.max(max_result_k));
+    let ef_search = extract_json_usize(&content, "ef_search").unwrap_or_else(|| 100.max(k));
+
+    let max_result_qid = results
+        .iter()
+        .map(|r| r.query_id)
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(0);
+
+    let num_to_search = if expected_qhash.is_some() {
+        expected_nq
+    } else {
+        0
+    }
+    .max(max_result_qid);
+
+    if num_to_search > 0 {
+        if queries.rows() == 0 {
+            return Err(VectorSearchError::VerificationFailed(format!(
+                "No query vectors provided for golden verification vs {}",
+                golden_path.display()
+            )));
+        }
+
+        // Fail closed if expected_qhash is present and queries.rows() < expected_nq
+        if expected_qhash.is_some() && queries.rows() < expected_nq {
+            return Err(VectorSearchError::VerificationFailed(format!(
+                "Golden fixture {} requires {} queries for query_results_hash, but only {} queries provided",
+                golden_path.display(),
+                expected_nq,
+                queries.rows()
+            )));
+        }
+
+        // Check if query count meets maximum query_id in results
+        if queries.rows() < max_result_qid {
+            return Err(VectorSearchError::VerificationFailed(format!(
+                "Insufficient queries for golden results verification vs {}: provided {} < required {}",
+                golden_path.display(),
+                queries.rows(),
+                max_result_qid
+            )));
+        }
+
+        let nq_run = num_to_search.min(queries.rows());
+        let q_slice = queries.slice_first_rows(nq_run);
+        let mut tracker = crate::hnsw::VisitedTracker::new(index.num_vectors());
+        let timed = index.search_batch_timed_with_tracker(&q_slice, k, ef_search, &mut tracker)?;
+
+        // 1. Verify query_results_hash over expected_nq queries
+        if let Some(expected_hash) = expected_qhash {
+            let actual_qhash = compute_query_results_hash(
+                &timed.result.indices.slice_first_rows(expected_nq),
+                &timed.result.distances.slice_first_rows(expected_nq),
+            );
+            if actual_qhash != expected_hash {
                 return Err(VectorSearchError::VerificationFailed(format!(
-                    "Golden query_results_hash mismatch vs {}: actual 0x{actual_qhash:016x} != expected 0x{expected_qhash:016x}",
+                    "Golden query_results_hash mismatch vs {}: actual 0x{actual_qhash:016x} != expected 0x{expected_hash:016x}",
                     golden_path.display()
                 )));
+            }
+        }
+
+        // 2. Cross-verify detailed candidate IDs and exact IEEE 754 distance bits in results array
+        if !results.is_empty() {
+            for res in &results {
+                let q = res.query_id;
+                if q >= timed.result.indices.rows() {
+                    return Err(VectorSearchError::VerificationFailed(format!(
+                        "Golden query result index {q} out of range of searched queries {}",
+                        timed.result.indices.rows()
+                    )));
+                }
+                let act_idx_row = timed.result.indices.row(q);
+                let act_dist_row = timed.result.distances.row(q);
+
+                // Verify candidate IDs
+                if !res.indices.is_empty() {
+                    if act_idx_row.len() < res.indices.len() {
+                        return Err(VectorSearchError::VerificationFailed(format!(
+                            "Golden candidate count mismatch vs {} for query {q}: actual {} < expected {}",
+                            golden_path.display(),
+                            act_idx_row.len(),
+                            res.indices.len()
+                        )));
+                    }
+                    for (rank, &expected_id) in res.indices.iter().enumerate() {
+                        let actual_id = act_idx_row[rank];
+                        if actual_id != expected_id {
+                            return Err(VectorSearchError::VerificationFailed(format!(
+                                "Golden candidate ID mismatch vs {} for query {q} at rank {rank}: actual {actual_id} != expected {expected_id}",
+                                golden_path.display()
+                            )));
+                        }
+                    }
+                }
+
+                // Verify exact IEEE 754 distance bits
+                if !res.distance_bits.is_empty() {
+                    if act_dist_row.len() < res.distance_bits.len() {
+                        return Err(VectorSearchError::VerificationFailed(format!(
+                            "Golden distance count mismatch vs {} for query {q}: actual {} < expected {}",
+                            golden_path.display(),
+                            act_dist_row.len(),
+                            res.distance_bits.len()
+                        )));
+                    }
+                    for (rank, &expected_bits) in res.distance_bits.iter().enumerate() {
+                        let actual_bits = act_dist_row[rank].to_bits();
+                        if actual_bits != expected_bits {
+                            return Err(VectorSearchError::VerificationFailed(format!(
+                                "Golden distance bit mismatch vs {} for query {q} at rank {rank}: actual 0x{actual_bits:08x} ({}) != expected 0x{expected_bits:08x}",
+                                golden_path.display(),
+                                act_dist_row[rank]
+                            )));
+                        }
+                    }
+                }
             }
         }
     }
@@ -2613,30 +2732,81 @@ impl Phase3Report {
             out.push_str("  \"build_instrumentation\": {\n");
             out.push_str("    \"distance_evaluations\": {\n");
             out.push_str(&format!("      \"total\": {},\n", bs.distance_evals_total));
-            out.push_str(&format!("      \"search_layer\": {},\n", bs.distance_evals_search));
-            out.push_str(&format!("      \"heuristic\": {},\n", bs.distance_evals_heuristic));
-            out.push_str(&format!("      \"shrink\": {},\n", bs.distance_evals_shrink));
-            out.push_str(&format!("      \"per_insert_mean\": {:.2},\n", bs.dist_evals_per_insert_mean));
-            out.push_str(&format!("      \"per_insert_min\": {},\n", bs.dist_evals_per_insert_min));
-            out.push_str(&format!("      \"per_insert_max\": {}\n", bs.dist_evals_per_insert_max));
+            out.push_str(&format!(
+                "      \"search_layer\": {},\n",
+                bs.distance_evals_search
+            ));
+            out.push_str(&format!(
+                "      \"heuristic\": {},\n",
+                bs.distance_evals_heuristic
+            ));
+            out.push_str(&format!(
+                "      \"shrink\": {},\n",
+                bs.distance_evals_shrink
+            ));
+            out.push_str(&format!(
+                "      \"per_insert_mean\": {:.2},\n",
+                bs.dist_evals_per_insert_mean
+            ));
+            out.push_str(&format!(
+                "      \"per_insert_min\": {},\n",
+                bs.dist_evals_per_insert_min
+            ));
+            out.push_str(&format!(
+                "      \"per_insert_max\": {}\n",
+                bs.dist_evals_per_insert_max
+            ));
             out.push_str("    },\n");
             out.push_str("    \"call_counts\": {\n");
-            out.push_str(&format!("      \"search_layer_calls\": {},\n", bs.search_layer_calls));
-            out.push_str(&format!("      \"heuristic_calls\": {},\n", bs.heuristic_calls));
-            out.push_str(&format!("      \"heuristic_insert_calls\": {},\n", bs.heuristic_insert_calls));
-            out.push_str(&format!("      \"heuristic_shrink_calls\": {},\n", bs.heuristic_shrink_calls));
+            out.push_str(&format!(
+                "      \"search_layer_calls\": {},\n",
+                bs.search_layer_calls
+            ));
+            out.push_str(&format!(
+                "      \"heuristic_calls\": {},\n",
+                bs.heuristic_calls
+            ));
+            out.push_str(&format!(
+                "      \"heuristic_insert_calls\": {},\n",
+                bs.heuristic_insert_calls
+            ));
+            out.push_str(&format!(
+                "      \"heuristic_shrink_calls\": {},\n",
+                bs.heuristic_shrink_calls
+            ));
             out.push_str(&format!("      \"shrink_calls\": {}\n", bs.shrink_calls));
             out.push_str("    },\n");
             out.push_str("    \"phase_time_split\": {\n");
-            out.push_str(&format!("      \"search_layer_s\": {:.6},\n", bs.time_search_layer_s));
-            out.push_str(&format!("      \"search_layer_pct\": {:.2},\n", bs.pct_search_layer));
-            out.push_str(&format!("      \"heuristic_s\": {:.6},\n", bs.time_heuristic_s));
-            out.push_str(&format!("      \"heuristic_pct\": {:.2},\n", bs.pct_heuristic));
+            out.push_str(&format!(
+                "      \"search_layer_s\": {:.6},\n",
+                bs.time_search_layer_s
+            ));
+            out.push_str(&format!(
+                "      \"search_layer_pct\": {:.2},\n",
+                bs.pct_search_layer
+            ));
+            out.push_str(&format!(
+                "      \"heuristic_s\": {:.6},\n",
+                bs.time_heuristic_s
+            ));
+            out.push_str(&format!(
+                "      \"heuristic_pct\": {:.2},\n",
+                bs.pct_heuristic
+            ));
             out.push_str(&format!("      \"shrink_s\": {:.6},\n", bs.time_shrink_s));
             out.push_str(&format!("      \"shrink_pct\": {:.2},\n", bs.pct_shrink));
-            out.push_str(&format!("      \"other_overhead_s\": {:.6},\n", bs.time_other_overhead_s));
-            out.push_str(&format!("      \"other_overhead_pct\": {:.2},\n", bs.pct_other_overhead));
-            out.push_str(&format!("      \"total_build_time_s\": {:.6}\n", bs.total_build_time_s));
+            out.push_str(&format!(
+                "      \"other_overhead_s\": {:.6},\n",
+                bs.time_other_overhead_s
+            ));
+            out.push_str(&format!(
+                "      \"other_overhead_pct\": {:.2},\n",
+                bs.pct_other_overhead
+            ));
+            out.push_str(&format!(
+                "      \"total_build_time_s\": {:.6}\n",
+                bs.total_build_time_s
+            ));
             out.push_str("    }\n");
             out.push_str("  },\n");
         }
@@ -3398,7 +3568,7 @@ pub fn run_phase3_benchmark(config: &Phase3Config) -> Result<Phase3Report> {
     let reproducibility_checked = config.run_repro_check;
     let reproducibility_verified = if config.run_repro_check {
         let repro_b = config.repro_vectors.min(loaded.base.rows());
-        let repro_q = 100.min(loaded.query.rows());
+        let repro_q = 1000.min(loaded.query.rows());
         let (base_repro_slice, is_full_b) = if repro_b == loaded.base.rows() {
             (None, true)
         } else {
@@ -3421,9 +3591,15 @@ pub fn run_phase3_benchmark(config: &Phase3Config) -> Result<Phase3Report> {
             query_repro_slice.as_ref().unwrap()
         };
 
-        let repro_ok =
-            verify_reproducibility_with_metric(b_ref, q_ref, config.metric, &hnsw_cfg, config.k, 50)
-                .is_ok();
+        let repro_ok = verify_reproducibility_with_metric(
+            b_ref,
+            q_ref,
+            config.metric,
+            &hnsw_cfg,
+            config.k,
+            50,
+        )
+        .is_ok();
         let golden_ok = if repro_ok && loaded.source.is_authentic_sift() {
             let golden_file = if repro_b == 10_000 {
                 Some(std::path::Path::new("results/phase3_5/golden_10k.json"))
@@ -3438,7 +3614,7 @@ pub fn run_phase3_benchmark(config: &Phase3Config) -> Result<Phase3Report> {
                         .map_err(|e| eprintln!("[repro-check] Build failed: {e}"))
                         .ok();
                     match index1 {
-                        Some(ref idx) => verify_index_against_golden_fixture(idx, q_ref, gp)
+                        Some(ref idx) => verify_index_against_golden_fixture(idx, &loaded.query, gp)
                             .map_err(|e| eprintln!("[repro-check] Golden verification failed: {e}"))
                             .is_ok(),
                         None => false,
@@ -3735,7 +3911,9 @@ fn extract_json_u64(json: &str, key: &str) -> Option<u64> {
     let pattern = format!("\"{}\":", key);
     let idx = json.find(&pattern)?;
     let rest = json[idx + pattern.len()..].trim_start();
-    let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
     rest[..end].parse::<u64>().ok()
 }
 
@@ -3743,7 +3921,9 @@ fn extract_json_usize(json: &str, key: &str) -> Option<usize> {
     let pattern = format!("\"{}\":", key);
     let idx = json.find(&pattern)?;
     let rest = json[idx + pattern.len()..].trim_start();
-    let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
     rest[..end].parse::<usize>().ok()
 }
 
@@ -3765,6 +3945,40 @@ pub struct GoldenQueryResult {
     pub indices: Vec<i32>,
     pub distance_bits: Vec<u32>,
     pub distances: Vec<f32>,
+}
+
+/// Extracts the detailed query results array from a golden fixture JSON string.
+#[must_use]
+pub fn parse_golden_results(content: &str) -> Vec<GoldenQueryResult> {
+    let mut results = Vec::new();
+    if let Some(res_idx) = content.find("\"results\":") {
+        let res_sub = &content[res_idx..];
+        for block in res_sub.split('{') {
+            if let Some(qid) = extract_json_usize(block, "query_id") {
+                let mut indices = Vec::new();
+                let mut distance_bits = Vec::new();
+                let mut distances = Vec::new();
+
+                if let Some(p) = block.find("\"indices\":") {
+                    indices = parse_number_list::<i32>(&block[p..]);
+                }
+                if let Some(p) = block.find("\"distance_bits\":") {
+                    distance_bits = parse_number_list::<u32>(&block[p..]);
+                }
+                if let Some(p) = block.find("\"distances\":") {
+                    distances = parse_number_list::<f32>(&block[p..]);
+                }
+
+                results.push(GoldenQueryResult {
+                    query_id: qid,
+                    indices,
+                    distance_bits,
+                    distances,
+                });
+            }
+        }
+    }
+    results
 }
 
 /// Authoritative golden fixture capturing graph fingerprint and fixed-query results at scale.
@@ -3794,13 +4008,28 @@ impl GoldenFixture {
         out.push_str("  \"hnsw_config\": {\n");
         out.push_str(&format!("    \"m\": {},\n", self.hnsw_m));
         out.push_str(&format!("    \"m_max0\": {},\n", self.hnsw_m_max0));
-        out.push_str(&format!("    \"ef_construction\": {},\n", self.hnsw_ef_construction));
+        out.push_str(&format!(
+            "    \"ef_construction\": {},\n",
+            self.hnsw_ef_construction
+        ));
         out.push_str(&format!("    \"seed\": {}\n", self.seed));
         out.push_str("  },\n");
-        out.push_str(&format!("  \"graph_fingerprint\": {},\n", self.graph_fingerprint));
-        out.push_str(&format!("  \"graph_fingerprint_hex\": \"{}\",\n", self.graph_fingerprint_hex));
-        out.push_str(&format!("  \"query_results_hash\": {},\n", self.query_results_hash));
-        out.push_str(&format!("  \"query_results_hash_hex\": \"{}\",\n", self.query_results_hash_hex));
+        out.push_str(&format!(
+            "  \"graph_fingerprint\": {},\n",
+            self.graph_fingerprint
+        ));
+        out.push_str(&format!(
+            "  \"graph_fingerprint_hex\": \"{}\",\n",
+            self.graph_fingerprint_hex
+        ));
+        out.push_str(&format!(
+            "  \"query_results_hash\": {},\n",
+            self.query_results_hash
+        ));
+        out.push_str(&format!(
+            "  \"query_results_hash_hex\": \"{}\",\n",
+            self.query_results_hash_hex
+        ));
         out.push_str("  \"query_params\": {\n");
         out.push_str(&format!("    \"num_queries\": {},\n", self.num_queries));
         out.push_str(&format!("    \"k\": {},\n", self.k));
@@ -3810,11 +4039,26 @@ impl GoldenFixture {
         for (i, res) in self.results.iter().enumerate() {
             out.push_str("    {\n");
             out.push_str(&format!("      \"query_id\": {},\n", res.query_id));
-            let idx_str = res.indices.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ");
+            let idx_str = res
+                .indices
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
             out.push_str(&format!("      \"indices\": [{}],\n", idx_str));
-            let bits_str = res.distance_bits.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ");
+            let bits_str = res
+                .distance_bits
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
             out.push_str(&format!("      \"distance_bits\": [{}],\n", bits_str));
-            let dist_str = res.distances.iter().map(|v| format!("{:.6}", v)).collect::<Vec<_>>().join(", ");
+            let dist_str = res
+                .distances
+                .iter()
+                .map(|v| format!("{:.6}", v))
+                .collect::<Vec<_>>()
+                .join(", ");
             out.push_str(&format!("      \"distances\": [{}]\n", dist_str));
             if i + 1 < self.results.len() {
                 out.push_str("    },\n");
@@ -3833,44 +4077,25 @@ impl GoldenFixture {
         let hnsw_m_max0 = extract_json_usize(content, "m_max0").unwrap_or(32);
         let hnsw_ef_construction = extract_json_usize(content, "ef_construction").unwrap_or(100);
         let seed = extract_json_u64(content, "seed").unwrap_or(42);
-        let graph_fingerprint = extract_json_u64(content, "graph_fingerprint")
-            .ok_or_else(|| VectorSearchError::InvalidArgument("Missing graph_fingerprint in golden fixture".to_string()))?;
+        let graph_fingerprint =
+            extract_json_u64(content, "graph_fingerprint").ok_or_else(|| {
+                VectorSearchError::InvalidArgument(
+                    "Missing graph_fingerprint in golden fixture".to_string(),
+                )
+            })?;
         let graph_fingerprint_hex = format!("0x{:016x}", graph_fingerprint);
-        let query_results_hash = extract_json_u64(content, "query_results_hash")
-            .ok_or_else(|| VectorSearchError::InvalidArgument("Missing query_results_hash in golden fixture".to_string()))?;
+        let query_results_hash =
+            extract_json_u64(content, "query_results_hash").ok_or_else(|| {
+                VectorSearchError::InvalidArgument(
+                    "Missing query_results_hash in golden fixture".to_string(),
+                )
+            })?;
         let query_results_hash_hex = format!("0x{:016x}", query_results_hash);
         let num_queries = extract_json_usize(content, "num_queries").unwrap_or(1000);
         let k = extract_json_usize(content, "k").unwrap_or(10);
         let ef_search = extract_json_usize(content, "ef_search").unwrap_or(100);
 
-        let mut results = Vec::new();
-        if let Some(res_idx) = content.find("\"results\":") {
-            let res_sub = &content[res_idx..];
-            for block in res_sub.split('{') {
-                if let Some(qid) = extract_json_usize(block, "query_id") {
-                    let mut indices = Vec::new();
-                    let mut distance_bits = Vec::new();
-                    let mut distances = Vec::new();
-
-                    if let Some(p) = block.find("\"indices\":") {
-                        indices = parse_number_list::<i32>(&block[p..]);
-                    }
-                    if let Some(p) = block.find("\"distance_bits\":") {
-                        distance_bits = parse_number_list::<u32>(&block[p..]);
-                    }
-                    if let Some(p) = block.find("\"distances\":") {
-                        distances = parse_number_list::<f32>(&block[p..]);
-                    }
-
-                    results.push(GoldenQueryResult {
-                        query_id: qid,
-                        indices,
-                        distance_bits,
-                        distances,
-                    });
-                }
-            }
-        }
+        let results = parse_golden_results(content);
 
         Ok(Self {
             scale_vectors,
@@ -3929,7 +4154,10 @@ pub fn generate_golden_fixtures(data_dir: &Path, output_dir: &Path) -> Result<()
             keep_pruned: true,
             seed: 42,
         };
-        println!("[golden-fixture] Building HNSW index for scale {}...", scale);
+        println!(
+            "[golden-fixture] Building HNSW index for scale {}...",
+            scale
+        );
         let start_build = Instant::now();
         let index = HnswIndex::build(&base, Metric::L2Squared, cfg)?;
         let build_dur = start_build.elapsed();
@@ -4040,7 +4268,10 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
 
     for &scale in &[10_000_usize, 100_000_usize] {
         println!("\n{}", "=".repeat(70));
-        println!("[baseline-measurement] Measuring baseline for scale: {} vectors", scale);
+        println!(
+            "[baseline-measurement] Measuring baseline for scale: {} vectors",
+            scale
+        );
         println!("{}", "=".repeat(70));
 
         let base = crate::dataset::read_fvecs_max_rows(&base_path, Some(scale))?;
@@ -4048,14 +4279,12 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
         let num_eval_q = 1000.min(queries.rows());
         let eval_queries = queries.slice_first_rows(num_eval_q);
 
-        println!("[baseline-measurement] Computing exact KNN ground truth for {} queries...", num_eval_q);
-        let exact_res = ExactKnn::search_parallel_with_base(
-            Metric::L2Squared,
-            &base,
-            &eval_queries,
-            10,
-            0,
-        )?;
+        println!(
+            "[baseline-measurement] Computing exact KNN ground truth for {} queries...",
+            num_eval_q
+        );
+        let exact_res =
+            ExactKnn::search_parallel_with_base(Metric::L2Squared, &base, &eval_queries, 10, 0)?;
 
         let cfg = HnswConfig {
             m: 16,
@@ -4072,7 +4301,10 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
         let mut build_times = Vec::with_capacity(3);
         let mut last_index: Option<HnswIndex> = None;
         for run_idx in 1..=3 {
-            println!("[baseline-measurement] Run {}/3 building HNSW index...", run_idx);
+            println!(
+                "[baseline-measurement] Run {}/3 building HNSW index...",
+                run_idx
+            );
             let t0 = Instant::now();
             let idx = HnswIndex::build(&base, Metric::L2Squared, cfg.clone())?;
             let dur = t0.elapsed().as_secs_f64();
@@ -4134,9 +4366,14 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
         let fixed_1k = queries.slice_first_rows(1000.min(queries.rows()));
         let mut tracker = crate::hnsw::VisitedTracker::new(index.num_vectors());
         let timed_1k = index.search_batch_timed_with_tracker(&fixed_1k, 10, 100, &mut tracker)?;
-        let qr_hash = compute_query_results_hash(&timed_1k.result.indices, &timed_1k.result.distances);
+        let qr_hash =
+            compute_query_results_hash(&timed_1k.result.indices, &timed_1k.result.distances);
 
-        let golden_fname = if scale == 10_000 { "golden_10k.json" } else { "golden_100k.json" };
+        let golden_fname = if scale == 10_000 {
+            "golden_10k.json"
+        } else {
+            "golden_100k.json"
+        };
         let golden_path = output_dir.join(golden_fname);
         let golden_exists = golden_path.exists();
         let mut golden_fp_matched = false;
@@ -4165,7 +4402,8 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
                 bs.time_other_overhead_s
             )
         } else {
-            "  \"build_instrumentation\": {\n    \"feature_instrument_enabled\": false\n  },".to_string()
+            "  \"build_instrumentation\": {\n    \"feature_instrument_enabled\": false\n  },"
+                .to_string()
         };
 
         let generated_at = current_utc_rfc3339();
@@ -4272,7 +4510,9 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
             escape_json(&query_path.display().to_string()),
             scale,
             scale,
-            build_times[0], build_times[1], build_times[2],
+            build_times[0],
+            build_times[1],
+            build_times[2],
             median_build_time,
             build_qps,
             max_layer,
@@ -4303,7 +4543,11 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
             golden_qr_matched
         );
 
-        let baseline_fname = if scale == 10_000 { "baseline_10k.json" } else { "baseline_100k.json" };
+        let baseline_fname = if scale == 10_000 {
+            "baseline_10k.json"
+        } else {
+            "baseline_100k.json"
+        };
         let out_file = output_dir.join(baseline_fname);
         fs::write(&out_file, &baseline_json)?;
         println!("[baseline-measurement] Saved: {}", out_file.display());

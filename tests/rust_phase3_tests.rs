@@ -500,4 +500,3 @@ fn test_hnsw_build_instrumentation_zero_cost_and_metrics() {
         assert!(index.build_stats().is_none());
     }
 }
-
