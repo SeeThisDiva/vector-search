@@ -13,11 +13,17 @@ From-scratch HNSW ANN search in Rust (`#![forbid(unsafe_code)]`, std only), benc
 - A check that did not run must never be reported as passed. (This rule exists because of review finding 1 below.)
 
 ## Current verified state
-- `cargo test --release`: 58 pass (12 adversarial + 16 phase1 + 23 phase2 + 7 phase3). Siftsmall tests skip when `data/siftsmall/*.fvecs` is missing (helper: `tests/common/mod.rs`). Phase 3 tests use small synthetic data and need no download.
+- `cargo test --release`: 79 pass (12 `adversarial_hnsw` + 10 `adversarial_graph_fingerprint` + 8 `challenge_m1_p35` + 16 `phase1` + 23 `phase2` + 10 `phase3`). Siftsmall tests skip when `data/siftsmall/*.fvecs` is missing (helper: `tests/common/mod.rs`). Phase 3 and Phase 3.5 tests use small synthetic data and need no download.
 - `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` clean.
 - `pytest`: 27 pass (needs `faiss-cpu`, in `requirements.txt`); `ruff check .` and `mypy src tests` clean. The 4 Rust-parity tests only run when `target/release/phase1` exists, so build it first (`cargo build --release --bin phase1`) or they skip silently and show as 23 passed, 4 skipped.
 - Needs Rust >= 1.88 (`rust-version` in `Cargo.toml`; `as_chunks` and lockfile v4).
-- Git: Phase 1 to 3, the Phase 3 review fixes (`review_fixes.patch`, commit `d4b6fed` + `9e3c1a2`), and the Phase 3 follow-up fixes (isolated per-scale RSS, real 100-query brute-force ground-truth verification, 5-run `efSearch` sweep median & spread, `graph_only_bytes_per_vector`, `search_batch_timed_with_tracker(&self, ...)`, and `HnswConfig::new` unclamped validation) are implemented and `data/phase3_report.json` + `data/baseline_profile_report.json` are regenerated from a real SIFT1M run.
+- Git: Phase 1 to 3, the Phase 3 review fixes (`review_fixes.patch`, commit `d4b6fed` + `9e3c1a2`), the Phase 3 follow-up fixes, and **Phase 3.5 (Milestone M1)** are implemented and verified:
+  - `T1.1` / `T1.4`: Zero-cost `--features instrument` phase timing and distance evaluation counters (`search_layer` 78.83%, `shrink` 14.19%, `heuristic` 4.80% on 1M).
+  - `T1.2` / `T1.3`: Logical `HnswIndex::graph_fingerprint() -> u64` (including `enter_point`) and golden fixtures (`results/phase3_5/golden_10k.json`, `results/phase3_5/golden_100k.json`) with bit-exact distance/ID verification.
+  - `T1.5` (`seen_tags` in `HeuristicScratch`) and `T1.6` (`search_layer` binary heap scratch reuse): tested at 100k, reverted and logged `"no gain"` in `results/phase3_5/LOG.md`.
+  - `T1.7` (`u32` flat adjacency storage in `layer0` and `upper_arena`, 8-byte `HnswNodeMeta`, `HnswIndex::neighbors(layer, node) -> &[u32]`): **KEPT** (`d6d36ff`). Cuts graph-only memory by **56.0%** at 1M (`338.67 -> 148.91 B/vector`, `-180.97 MiB`), cuts isolated 1M Peak RSS from `845.75 MiB` to **`646.05 MiB`** (`-199.70 MiB`), and speeds up 100k 3-run median build time by **10.37%** (`30.299 s -> 27.157 s`) while keeping 100% bit-exact graph fingerprints and query results.
+  - `T1.9` (`HnswConfig::keep_pruned_shrink: Option<bool>`, default `None`, CLI `--no-keep-pruned-shrink`): evaluated at 100k (`21.351 s`, `-29.53%`) and 1M (`415.076 s`, `-18.81%` vs `511.271 s` baseline; `-11.87%` vs `470.966 s` historical Phase 3) and recorded in `results/phase3_5/LOG.md` + `results/phase3_5/exp_no_keep_pruned_shrink_1m.json` for Dev's Gate G1 decision.
+  - `T1.10`: `data/phase3_report.json` (`results/phase3_5/final_1m_report.json`) and `data/baseline_profile_report.json` regenerated from a clean commit on the final code (`366f185`).
 
 ## Review log (Phase 3 review, what happened)
 After Phase 3 was committed, Dev asked for a review of the whole repo and fixes for any flaws. The review read `hnsw.rs` and the Phase 2/3 benchmark code in full and checked them against `docs/HNSW_ALGORITHM.md`, then ran the full test suite before and after the changes.
@@ -65,21 +71,22 @@ Phase 2, siftsmall, M=16, efC=100, k=10 (recall is deterministic with seed 42):
 
 Spec target (recall >= 0.98 at < 0.05 ms mean) is met at ef=20. Latency tables are in the README.
 
-Phase 3, SIFT1M, M=16, efC=100, k=10, official ground truth (verified against brute force on 100 queries), 10,000 queries, median of 5 runs:
+Phase 3 (after Phase 3.5 `T1.7` `u32` flat adjacency), SIFT1M, M=16, efC=100, k=10, official ground truth (verified against brute force on 100 queries), 10,000 queries, median of 5 runs:
 
 | efSearch | Recall@10 | Median Mean (ms) | Mean Spread (ms) | Median p99 (ms) | p99 Spread (ms) | Median QPS |
 |---------:|----------:|-----------------:|-----------------:|----------------:|----------------:|-----------:|
-| 10 | 73.315% | 0.084 | 0.002 | 0.141 | 0.008 | 11,927.2 |
-| 20 | 84.949% | 0.126 | 0.004 | 0.195 | 0.012 | 7,904.3 |
-| 50 | 94.703% | 0.248 | 0.002 | 0.347 | 0.010 | 4,024.2 |
-| 100 | 98.061% | 0.440 | 0.011 | 0.588 | 0.045 | 2,270.0 |
-| 200 | 99.376% | 0.810 | 0.015 | 1.084 | 0.036 | 1,234.5 |
+| 10 | 73.315% | 0.100 | 0.007 | 0.175 | 0.020 | 9,942.1 |
+| 20 | 84.949% | 0.153 | 0.003 | 0.255 | 0.013 | 6,523.0 |
+| 50 | 94.703% | 0.299 | 0.030 | 0.477 | 0.270 | 3,344.9 |
+| 100 | 98.061% | 0.490 | 0.033 | 0.723 | 0.096 | 2,040.4 |
+| 200 | 99.376% | 0.828 | 0.035 | 1.177 | 0.098 | 1,208.0 |
 
-Build 471.0 s (2,123.3 vectors/s). Isolated Peak RSS after build: **13.70 MiB** at 10k, **88.67 MiB** at 100k, **845.84 MiB** at 1M. 854.67 B/vector total: 512.00 B raw + 342.67 B graph total / 338.67 B graph-only (layer-0 edge lists 264 B, node structs 40 B, upper layers 9.07 B, `Vec` headers 25.60 B, visited tags 4.00 B). Recall at fixed efSearch=50 falls with scale (99.75% at 10k, 98.14% at 100k, 94.70% at 1M), so efSearch must grow with N.
+Build 493.8 s (2,025.2 vectors/s; 415.1 s / 2,409.2 vectors/s with `--no-keep-pruned-shrink`; 100k 3-run median dropped from 30.299 s to 27.157 s default / 21.351 s with `--no-keep-pruned-shrink`). Isolated Peak RSS after build: **11.94 MiB** at 10k, **69.21 MiB** at 100k, **646.05 MiB** at 1M (down 199.7 MiB from 845.75 MiB). 664.91 B/vector total: 512.00 B raw + 152.91 B graph total / **148.91 B graph-only** (layer-0 flat `u32` edges 132.00 B, `HnswNodeMeta` structs 8.00 B, upper-layer arena 8.91 B, outer headers 0.00 B, visited tags 4.00 B). Recall at fixed efSearch=50 falls with scale (99.75% at 10k, 98.14% at 100k, 94.70% at 1M), so efSearch must grow with N.
 
 ## Design decisions already made (do not undo)
-- `HnswConfig.m_max`, `m_max0`, `m_l` are `Option` overrides, derived from `m` when `None` (`effective_m_max()`, `effective_m_max0()`, `effective_m_l()`). No sentinel-value guessing.
-- `insert(id)` requires ids in order `0..n`; anything else returns `InvalidArgument`.
+- `HnswConfig.m_max`, `m_max0`, `m_l` are `Option` overrides, derived from `m` when `None` (`effective_m_max()`, `effective_m_max0()`, `effective_m_l()`). `HnswConfig.keep_pruned_shrink` is an `Option<bool>` override defaulting to `None` (which delegates to `keep_pruned` via `effective_keep_pruned_shrink()`). No sentinel-value guessing.
+- `insert(id)` requires ids in order `0..n` and `matrix.rows() <= u32::MAX as usize`; anything else returns `InvalidArgument`.
+- `HnswIndex::neighbors(layer, node)` returns `&[u32]` backed by contiguous flat storage (`layer0: Vec<u32>` with stride `m_max0 + 1` and `upper_arena: Vec<u32>` with stride `m_max + 1`).
 - Phase 2 `overall_phase2_passed` = monotonic recall AND reproducibility (actually run) AND performance target (recall >= 0.98 and mean latency < 0.05 ms at one ef). Speedup vs brute force is reported, not gated.
 - Sweep points with `ef < k` collapse to `ef == k` (the index clamps them).
 - Distance ties break on `(distance, id)` everywhere. Keep it, since parity tests depend on it.
@@ -89,7 +96,7 @@ Build 471.0 s (2,123.3 vectors/s). Isolated Peak RSS after build: **13.70 MiB** 
 - Inner-product mode is only parity-tested. The diversity heuristic assumes distance-like (non-negative) values, which negative dot products violate. Do not report IP recall as validated.
 - `siftsmall` saturates at 100% recall by ef=50, so it says little about graph quality. SIFT1M is the real test.
 - `HnswIndex` borrows the matrix (`&'a RowMatrix<f32>`); there is no deletion or update.
-- Graph storage is `Vec<Vec<Vec<usize>>>` with 8-byte ids and layer-0 capacity `m_max0 + 1` (33 slots), so about 343 B/vector of graph for 128-d vectors.
+- Graph storage uses flat `u32` adjacency (`layer0` stride `m_max0 + 1 = 33` slots, `upper_arena` stride `m_max + 1 = 17` slots, 8-byte `HnswNodeMeta`), costing 148.91 B/vector graph-only (152.91 B/vector incl. visited tags) on SIFT1M.
 
 ## How to move forward
 Order matters. Do not skip ahead, and stop for Dev's review after each numbered step.
@@ -100,13 +107,13 @@ Order matters. Do not skip ahead, and stop for Dev's review after each numbered 
    - per-scale RSS in separate processes (open flaw 1);
    - repeat the efSearch sweep N times and report median and spread (open flaw 3);
    - regenerate `data/phase3_report.json` on Dev's machine and update the README Phase 3 table.
-3. **Profile the 1M build before optimizing.** Build is 471 s (~7.8 min) on an idle machine. Verify with a profiler, do not assume. Candidates, in rough order of expected payoff:
-   - the neighbor heuristic's `HashSet<usize>` (SipHash). Dedup only matters when `extend_candidates` is true; a generation-tagged `Vec<u32>` gives identical output without hashing;
-   - the shrink step: with `keep_pruned = true`, a saturated node is re-pruned back to full degree, so nearly every new reverse edge triggers a full heuristic run. Try `keep_pruned = false` for shrinking only, and measure both build time and recall (this changes the graph, so it is an experiment, not a refactor);
-   - `u32` ids and flat fixed-capacity adjacency (also roughly halves graph memory);
-   - per-query heap allocations in `search_layer`.
-4. **Every optimization must keep `--repro-check` passing and all tests green.** If a change alters the graph, say so and re-record recall; if it does not, add a test that proves identical results before and after.
-5. **Phase 4 (only after Dev confirms Phase 3):** sweep M, efConstruction and efSearch and plot Recall@10 vs p99 latency. Use the same JSON conventions (hardware, dataset source, `measured_this_run`). Sweeps at 1M are slow (~8 min per build at M=16, efC=100), so propose the grid and a time budget to Dev before running anything, and consider 100k for the wide sweep and 1M for the final few points.
+3. **Profile the 1M build before optimizing (Milestone M1 / Phase 3.5):** *(Completed & verified; see `results/phase3_5/LOG.md`)*
+   - Profiled 100k and 1M builds using `--features instrument` (`search_layer` 78.83%, `shrink` 14.19%, `heuristic` 4.80% on 1M);
+   - Tested `T1.5` (`seen_tags` in `HeuristicScratch`) and `T1.6` (`search_layer` heap scratch reuse) at 100k — both showed no improvement beyond baseline noise and were reverted (`"no gain"` logged);
+   - Implemented and kept `T1.7` (`u32` ids and flat fixed-capacity adjacency in `layer0` + `upper_arena`), cutting graph-only memory by 56.0% (`338.67 -> 148.91 B/vector`), 1M Peak RSS by 199.7 MiB (`845.75 -> 646.05 MiB`), and 100k 3-run median build time by 10.37% (`30.299 s -> 27.157 s`);
+   - Implemented and evaluated `T1.9` (`keep_pruned_shrink = Some(false)` behind config flag) at 100k (`21.351 s`, `-29.53%`) and 1M (`415.076 s`, `-18.81%`), recording the full `efSearch` sweep and matched-latency comparison in `results/phase3_5/LOG.md` for Dev's **Gate G1** decision.
+4. **Every optimization keeps `--repro-check` passing and all tests green.** *(Verified: 79 Rust tests + 27 Python tests pass; golden 10k/100k fixtures and 1M `--repro-check` match bit-for-bit.)*
+5. **Phase 4 (only after Dev signs off Phase 3 / Gate G1):** sweep M, efConstruction and efSearch and plot Recall@10 vs p99 latency. Use the same JSON conventions (hardware, dataset source, `measured_this_run`). Sweeps at 1M are slow (~8 min per build at M=16, efC=100), so propose the grid and a time budget to Dev before running anything, and consider 100k for the wide sweep and 1M for the final few points.
 
 ## Commands
 ```bash

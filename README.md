@@ -83,28 +83,28 @@ Measured on `12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM
 
 | efSearch | Recall@10 | Median Mean (ms) | Mean Spread (ms) | Median p50 (ms) | Median p99 (ms) | p99 Spread (ms) | Median QPS |
 |---------:|----------:|-----------------:|-----------------:|----------------:|----------------:|----------------:|-----------:|
-| 10  | 73.315% | 0.084 | 0.002 | 0.082 | 0.141 | 0.008 | 11,927.2 |
-| 20  | 84.949% | 0.126 | 0.004 | 0.126 | 0.195 | 0.012 | 7,904.3 |
-| 50  | 94.703% | 0.248 | 0.002 | 0.254 | 0.347 | 0.010 | 4,024.2 |
-| 100 | 98.061% | 0.440 | 0.011 | 0.456 | 0.588 | 0.045 | 2,270.0 |
-| 200 | 99.376% | 0.810 | 0.015 | 0.841 | 1.084 | 0.036 | 1,234.5 |
+| 10  | 73.315% | 0.100 | 0.007 | 0.097 | 0.175 | 0.020 | 9,942.1 |
+| 20  | 84.949% | 0.153 | 0.003 | 0.150 | 0.255 | 0.013 | 6,523.0 |
+| 50  | 94.703% | 0.299 | 0.030 | 0.299 | 0.477 | 0.270 | 3,344.9 |
+| 100 | 98.061% | 0.490 | 0.033 | 0.501 | 0.723 | 0.096 | 2,040.4 |
+| 200 | 99.376% | 0.828 | 0.035 | 0.861 | 1.177 | 0.098 | 1,208.0 |
 
 | Metric | Value |
 |--------|-------|
-| Build time | 471.0 s (2,123.3 vectors/s), top layer 5, entry point `#829262` |
+| Build time | 493.8 s (2,025.2 vectors/s), top layer 5, entry point `#829262`, fingerprint `0x44044886c62bca5e` (415.1 s / 2,409.2 vectors/s with `--no-keep-pruned-shrink`) |
 | Raw vectors | 512.00 B/vector (488.28 MiB) |
-| Graph-only (excl. visited tags & scratch) | 338.67 B/vector (322.98 MiB) |
-| Graph total (incl. 4 B/vector visited tags) | 342.67 B/vector (326.79 MiB) |
-| Total index footprint | 854.67 B/vector (815.08 MiB) |
-| Peak working set after build (1M) | 845.84 MiB |
+| Graph-only (excl. visited tags & scratch) | 148.91 B/vector (142.01 MiB, down 56.0% from 338.67 B/vector via compact `u32` flat adjacency) |
+| Graph total (incl. 4 B/vector visited tags) | 152.91 B/vector (145.83 MiB) |
+| Total index footprint | 664.91 B/vector (634.11 MiB) |
+| Peak working set after build (1M) | 646.05 MiB (down 199.7 MiB from 845.75 MiB) |
 
 ### Multi-Scale Baseline Profile (Isolated Process per Scale, `measured_this_run = true`)
 
 | Scale ($N$) | Build Time (s) | Build QPS | Isolated Peak RSS (MiB) | Graph-Only (B/vec) | Graph Total (B/vec) | Total (B/vec) | Recall@10 (`ef=50`) |
 |------------:|---------------:|----------:|------------------------:|-------------------:|--------------------:|--------------:|--------------------:|
-| 10,000 | 1.440 | 6,942.5 | 13.70 | 338.98 | 342.98 | 854.98 | 99.750% |
-| 100,000 | 28.611 | 3,495.2 | 88.67 | 338.66 | 342.66 | 854.66 | 98.140% |
-| 1,000,000 | 470.966 | 2,123.3 | 845.84 | 338.67 | 342.67 | 854.67 | 94.703% |
+| 10,000 | 1.494 | 6,693.9 | 11.94 | 146.96 | 150.96 | 662.96 | 99.750% |
+| 100,000 | 28.564 | 3,500.9 | 69.21 | 145.57 | 149.57 | 661.57 | 98.140% |
+| 1,000,000 | 493.783 | 2,025.2 | 646.05 | 148.91 | 152.91 | 664.91 | 94.703% |
 
 Notes:
 - Each scale (`10k`, `100k`, `1M`) is profiled in its own isolated OS process loading only `scale` prefix rows from `sift_base.fvecs`, so `PeakWorkingSet64` reflects only that scale's true memory footprint.
@@ -139,12 +139,14 @@ cargo run --release --bin phase3 -- --dataset sift1m --json-out data/phase3_repo
 │   ├── benchmark.rs           # End-to-end Phase 1 benchmark pipeline & JSON reporter
 │   └── hnsw_phase1/           # Python reference implementation & FAISS comparison helpers
 ├── tests/
-│   ├── rust_phase1_tests.rs   # Rust integration & edge-case test suite
-│   ├── rust_phase2_tests.rs   # HNSW correctness, topology & recall tests
-│   ├── adversarial_hnsw_tests.rs # HNSW stress / boundary / reproducibility tests
-│   ├── rust_phase3_tests.rs   # Phase 3 report semantics + parallel-search input validation
-│   ├── test_phase1.py         # Python reference unit tests
-│   └── test_rust_parity.py    # Cross-language Rust <-> Python <-> FAISS parity tests
+│   ├── rust_phase1_tests.rs   # Rust integration & edge-case test suite (16 tests)
+│   ├── rust_phase2_tests.rs   # HNSW correctness, topology & recall tests (23 tests)
+│   ├── adversarial_hnsw_tests.rs # HNSW stress / boundary / reproducibility tests (12 tests)
+│   ├── adversarial_graph_fingerprint_tests.rs # Logical graph fingerprint & mutation tests (10 tests)
+│   ├── challenge_m1_p35_tests.rs # Phase 3.5 instrumentation, golden & layout tests (8 tests)
+│   ├── rust_phase3_tests.rs   # Phase 3 report semantics + parallel-search input validation (10 tests)
+│   ├── test_phase1.py         # Python reference unit tests (23 tests)
+│   └── test_rust_parity.py    # Cross-language Rust <-> Python <-> FAISS parity tests (4 tests)
 └── run_phase1.py              # Python reference runner
 ```
 

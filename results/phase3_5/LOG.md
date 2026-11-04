@@ -42,7 +42,7 @@
 - **Peak RSS (Process OS Working Set)**: **845.75 MiB** (886.83 MB)
 - **Graph Footprint**: **342.67 B/vector total** (**338.67 B/vector graph-only**, excluding scratch & visited tracker)
 - **Graph Topology**: Max Layer = 5, Entry Point Node = #829262
-- **Graph Fingerprint (1M)**: `0x19b378e1f978084d` (`1851956783727773773`)
+- **Graph Fingerprint (1M)**: `0x19b378e1f978084d` (`1851956783727773773`, pre-`enter_point` hash) / `0x44044886c62bca5e` (`4901122038173518430`, with `enter_point` in `graph_fingerprint()`)
 - **Official Ground Truth Check**: PASSED (100.0% ExactKNN match on 100 sample queries)
 - **Bit-Exact Reproducibility Check**: PASSED
 
@@ -129,6 +129,7 @@ Based on the empirical profile above, the candidate optimizations are ordered st
 | Candidate T1.5 (`seen_tags`) | T1.5 | 100k | 30.855 s (31.033 s prealloc) | +0.556 s | -1.83% | 129.02 MiB | 338.66 | `0x80af03bd7aebaade` / 98.14% | **REVERTED (`no gain`)** — `search_layer` already uses `VisitedTracker`; `HeuristicScratch::seen` only runs on $\le 100$ items in `heuristic` (4.8% of build time), so replacing `HashSet` with `seen_tags` did not improve median build time beyond baseline noise. |
 | Candidate T1.6 (`search_layer` heap reuse) | T1.6 | 100k | 31.080 s (`c` reuse) / 43.120 s (`c`+`w` reuse) | +0.781 s | -2.58% | 128.48 MiB | 338.66 | `0x80af03bd7aebaade` / 98.14% | **REVERTED (`no gain`)** — thread-local allocator reuse of `BinaryHeap` in `search_layer` is already L1-hot; reusing `c_scratch` (`31.080 s`) or `c_scratch`+`w_scratch` (`43.120 s`) did not improve median build time vs baseline (`30.299 s`). |
 | Candidate T1.7 (`u32` flat adjacency) | T1.7 | 100k | **27.157 s** (min 27.068 s) | **-3.141 s** | **+10.37% faster** | **88.55 MiB** (-31.1%) | **145.57** (-57.0%) | `0x80af03bd7aebaade` / 98.14% | **KEPT** — cuts graph-only memory from 338.66 to 145.57 B/vec, improves 100k build median by 3.141 s (10.37%, $>7.4\times$ baseline spread), and speeds up query QPS by 15.3%. |
+| Final 1M Confirmation (`366f185`, T1.7 default) | T1.10 | 1M | **493.783 s** (`2,025.2 vec/s`) | **-17.488 s** vs 511.271 s | **+3.42% faster** (`1.035x`) | **646.05 MiB** (**-23.6% / -199.7 MiB**) | **148.91** (**-56.0%**) | `0x44044886c62bca5e` / 94.703% | **KEPT (Official Phase 3 Default)** — 100% bit-exact recall (`73.315%`, `84.949%`, `94.703%`, `98.061%`, `99.376%`), cuts graph-only memory from 338.67 to 148.91 B/vec (-180.97 MiB) and isolated Peak RSS from 845.75 to 646.05 MiB. |
 | Candidate T1.9 (`keep_pruned_shrink=false`) | T1.9 | 100k | **21.351 s** | **-8.948 s** | **+29.53% faster** | **77.21 MiB** (-39.9%) | **145.57** | `0xeecb25668ae17f19` / 98.70% | **EXPERIMENT (Flagged, default unchanged)** — cuts 100k build time by an additional 21.4% beyond T1.7. |
 | Candidate T1.9 (`keep_pruned_shrink=false`) | T1.9 | 1M | **415.076 s** | **-96.195 s** vs 511.271 s (`-55.90 s` vs 470.97 s) | **+18.81% faster** | **645.89 MiB** (-23.6%) | **148.91** (-56.0%) | `0xf59eb0d017b09d4a` / 94.30% | **EXPERIMENT (Flagged, default unchanged)** — Dev decision required (Gate G1). See Section 4.1 below for full `efSearch` sweep and matched-latency comparison. |
 
@@ -157,12 +158,23 @@ Based on the empirical profile above, the candidate optimizations are ordered st
 
 ---
 
-## 5. Final Confirmation & Speedup Summary
+## 5. Final Confirmation & Speedup Summary (T1.10)
 
-- **Status**: Milestone 1 complete. Baseline measurements, golden fixtures (`golden_10k.json`, `golden_100k.json`), and instrumentation ledger frozen.
+- **Status**: Milestone 1 (Phase 3.5) complete. All candidates profiled, tested one per commit, verified against golden fixtures, and confirmed on full `SIFT1M` (`1,000,000` vectors) on clean commit `366f185`.
 - **Milestone 1 Deliverables Attested**:
-  1. `graph_fingerprint() -> u64` logical accessor hash implemented and covered by unit tests.
-  2. Cargo feature `instrument` implemented with zero-cost when disabled.
-  3. Golden fixtures generated and validated with bit-exact reproducibility.
-  4. 100k baseline measured (median 36.244 s across 3 runs, spread 10.211 s) and 1M single baseline measured (511.271 s, 845.75 MiB peak RSS, 94.70% recall at efSearch=50).
-  5. `results/phase3_5/baseline_10k.json`, `results/phase3_5/baseline_100k.json`, and `results/phase3_5/LOG.md` fully populated.
+  1. `graph_fingerprint() -> u64` logical accessor hash (including `enter_point`) implemented and covered by unit & adversarial tests.
+  2. Cargo feature `instrument` implemented with zero-cost when disabled (`size_of::<HnswIndex>() == 480` without `instrument`, `672` with `instrument`).
+  3. Golden fixtures (`results/phase3_5/golden_10k.json`, `results/phase3_5/golden_100k.json`) generated and validated with 100% bit-exact reproducibility (`graph_fingerprint`, `query_results_hash`, and IEEE 754 `f32::to_bits` distances).
+  4. **Preserving Candidates Tested**:
+     - `T1.5` (`seen_tags` in `HeuristicScratch`): tested, reverted (`30.855 s` vs `30.299 s` baseline), logged `"no gain"`.
+     - `T1.6` (`search_layer` binary heap scratch reuse): tested, reverted (`31.080 s` vs `30.299 s` baseline), logged `"no gain"`.
+     - `T1.7` (`u32` flat adjacency storage in `layer0` & `upper_arena`, 8-byte `HnswNodeMeta`, `HnswIndex::neighbors(layer, node) -> &[u32]`): **KEPT** (`d6d36ff`).
+       - **100k 3-run median build time**: **27.157 s** vs **30.299 s** baseline (**-3.141 s / +10.37% faster**, $>7.4\times$ baseline spread).
+       - **Graph-only memory**: **338.67 B/vector $\to$ 148.91 B/vector** at 1M (**-56.03%**, `-180.97 MiB`); **338.66 $\to$ 145.57 B/vector** at 100k (**-57.02%**); **338.98 $\to$ 146.96 B/vector** at 10k (**-56.65%**).
+       - **Total index memory**: **854.67 B/vector $\to$ 664.91 B/vector** at 1M (**-22.20%**, `815.08 MiB -> 634.11 MiB`).
+       - **Isolated Peak RSS**: **13.70 $\to$ 11.94 MiB** at 10k (**-12.8%**), **88.67 $\to$ 69.21 MiB** at 100k (**-21.9%**), **845.75 $\to$ 646.05 MiB** at 1M (**-23.61% / -199.70 MiB**).
+       - **1M Clean-Commit Build Time (`data/phase3_report.json` / `results/phase3_5/final_1m_report.json`)**: **493.783 s** (`2,025.18 vec/s`), **0.9658x** vs the freshly measured `511.271 s` baseline (`-17.488 s` / `1.035x` speedup; `1.0484x` vs the `470.966 s` historical reference on an isolated single build).
+       - **Recall@10**: 100% bit-for-bit identical across all scales and `efSearch` values (`73.315%`, `84.949%`, `94.703%`, `98.061%`, `99.376%`).
+  5. **Graph-Changing Experiment (`T1.9`, `keep_pruned_shrink = Some(false)`)**:
+     - Implemented behind `HnswConfig::keep_pruned_shrink: Option<bool>` (default `None`, preserving `keep_pruned = true`) and `--no-keep-pruned-shrink` CLI flag (`366f185`).
+     - Cuts 100k build time to **21.351 s** (**-29.53%** vs `30.299 s` baseline) and 1M build time to **415.076 s** (**-18.81% / -96.195 s** vs `511.271 s` baseline; **-11.87% / -55.890 s** vs `470.966 s` historical Phase 3), with `-0.08%` recall difference at `0.272 ms` (`ef=50` budget) and **`+0.06%` higher recall** at `0.486 ms` (`ef=100` budget). Ready for Dev's Gate G1 decision.
