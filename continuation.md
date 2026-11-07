@@ -13,7 +13,7 @@ From-scratch HNSW ANN search in Rust (`#![forbid(unsafe_code)]`, std only), benc
 - A check that did not run must never be reported as passed. (This rule exists because of review finding 1 below.)
 
 ## Current verified state
-- `cargo test --release`: 79 pass (12 `adversarial_hnsw` + 10 `adversarial_graph_fingerprint` + 8 `challenge_m1_p35` + 16 `phase1` + 23 `phase2` + 10 `phase3`). Siftsmall tests skip when `data/siftsmall/*.fvecs` is missing (helper: `tests/common/mod.rs`). Phase 3 and Phase 3.5 tests use small synthetic data and need no download.
+- `cargo test --release`: 80 pass (12 `adversarial_hnsw` + 10 `adversarial_graph_fingerprint` + 8 `challenge_m1_p35` + 16 `phase1` + 23 `phase2` + 11 `phase3`). Siftsmall tests skip when `data/siftsmall/*.fvecs` is missing (helper: `tests/common/mod.rs`). Phase 3 and Phase 3.5 tests use small synthetic data and need no download.
 - `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` clean.
 - `pytest`: 27 pass (needs `faiss-cpu`, in `requirements.txt`); `ruff check .` and `mypy src tests` clean. The 4 Rust-parity tests only run when `target/release/phase1` exists, so build it first (`cargo build --release --bin phase1`) or they skip silently and show as 23 passed, 4 skipped.
 - Needs Rust >= 1.88 (`rust-version` in `Cargo.toml`; `as_chunks` and lockfile v4).
@@ -112,7 +112,7 @@ Order matters. Do not skip ahead, and stop for Dev's review after each numbered 
    - Tested `T1.5` (`seen_tags` in `HeuristicScratch`) and `T1.6` (`search_layer` heap scratch reuse) at 100k — both showed no improvement beyond baseline noise and were reverted (`"no gain"` logged);
    - Implemented and kept `T1.7` (`u32` ids and flat fixed-capacity adjacency in `layer0` + `upper_arena`), cutting graph-only memory by 56.0% (`338.67 -> 148.91 B/vector`), 1M Peak RSS by 199.7 MiB (`845.75 -> 646.05 MiB`), and 100k 3-run median build time by 10.37% (`30.299 s -> 27.157 s`);
    - Implemented and evaluated `T1.9` (`keep_pruned_shrink = Some(false)` behind config flag) at 100k (`21.351 s`, `-29.53%`) and 1M (`415.076 s`, `-18.81%`), recording the full `efSearch` sweep and matched-latency comparison in `results/phase3_5/LOG.md` for Dev's **Gate G1** decision.
-4. **Every optimization keeps `--repro-check` passing and all tests green.** *(Verified: 79 Rust tests + 27 Python tests pass; golden 10k/100k fixtures and 1M `--repro-check` match bit-for-bit.)*
+4. **Every optimization keeps `--repro-check` passing and all tests green.** *(Verified: 80 Rust tests + 27 Python tests pass; golden 10k/100k fixtures and 1M `--repro-check` match bit-for-bit.)*
 5. **Phase 4 (only after Dev signs off Phase 3 / Gate G1):** sweep M, efConstruction and efSearch and plot Recall@10 vs p99 latency. Use the same JSON conventions (hardware, dataset source, `measured_this_run`). Sweeps at 1M are slow (~8 min per build at M=16, efC=100), so propose the grid and a time budget to Dev before running anything, and consider 100k for the wide sweep and 1M for the final few points.
 
 ## Commands

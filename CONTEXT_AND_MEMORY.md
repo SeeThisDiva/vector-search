@@ -55,7 +55,7 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 │   ├── adversarial_hnsw_tests.rs # 12 Rust HNSW stress & boundary tests (PASSING)
 │   ├── adversarial_graph_fingerprint_tests.rs # 10 Rust graph fingerprint & mutation tests (PASSING)
 │   ├── challenge_m1_p35_tests.rs # 8 Rust Phase 3.5 instrumentation, golden & layout tests (PASSING)
-│   ├── rust_phase3_tests.rs    # 10 Rust Phase 3 report semantics, GT check & sweep tests (PASSING)
+│   ├── rust_phase3_tests.rs    # 11 Rust Phase 3 report semantics, GT check & sweep tests (PASSING)
 │   ├── test_phase1.py          # 23 Python reference tests (PASSING)
 │   └── test_rust_parity.py     # 4 Rust <-> Python <-> FAISS parity tests (PASSING)
 ├── results/phase3_5/           # Phase 3.5 golden fixtures, baseline/final reports & LOG.md
@@ -81,50 +81,17 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 6. **Self-Verification Invariant**: `Recall@k(GT, GT) == 1.000000` (100.0%) strictly verified.
 7. **FAISS Parity Alignment**: `1000/1000` (100.0%) exact neighbor ID match against `faiss.IndexFlatL2`.
 8. **Test Suite Status**:
-   - `cargo test`: **79/79 PASS** (16 Phase 1 + 23 Phase 2 + 12 adversarial_hnsw + 10 adversarial_graph_fingerprint + 8 challenge_m1_p35 + 10 Phase 3; siftsmall tests skip if `data/*.fvecs` is absent)
+   - `cargo test`: **80/80 PASS** (16 Phase 1 + 23 Phase 2 + 12 adversarial_hnsw + 10 adversarial_graph_fingerprint + 8 challenge_m1_p35 + 11 Phase 3; siftsmall tests skip if `data/*.fvecs` is absent)
    - `pytest`: **27/27 PASS** (with `faiss-cpu` installed; the FAISS parity test skips otherwise)
 
 ---
 
-## 5. Phase 2 Implementation Guide (completed; Phase 3 results are in `continuation.md`)
+## 5. Phase 2 Verified Acceptance Results
 
-### Objective
-Implement the core **HNSW index** (insert + approximate search) from scratch in Rust, and verify recall against the Phase 1 brute-force ground truth on 10,000 128-d vectors (`siftsmall` or synthetic).
-
-### Required Architecture & Components for Phase 2
-
-1. **Graph Representation (`src/hnsw/graph.rs` or `src/hnsw.rs`)**:
-   - Layered adjacency list: Each vector ID ($0 \dots N-1$) has an assigned top level $l_{max}$.
-   - For each level $l \in [0, l_{max}]$, store neighbor IDs: `Vec<u32>` (capped at $M_{max}$ for $l > 0$, $M_{max0} = 2M$ for $l = 0$).
-   - Global state: `enter_point: Option<u32>`, `max_level: usize`.
-
-2. **Layer Sampling (`src/rng.rs` / `src/hnsw.rs`)**:
-   - Formula: $l = \lfloor -\ln(U) \cdot m_L \rfloor$ where $U \sim (0, 1)$ via `Xoshiro256**` and $m_L = 1.0 / \ln(M)$.
-
-3. **Routing & Beam Search (`SEARCH-LAYER`)**:
-   - Priority queues:
-     - $C$: Min-Heap of `(distance, node_id)` (candidates to visit).
-     - $W$: Max-Heap of `(distance, node_id)` (current best $ef$ elements).
-     - $V$: Visited set (`BitSet` or `Vec<bool>` sized to capacity $N$ for fast $O(1)$ lookups without allocations).
-   - Early exit condition: If closest candidate $c \in C$ has $d(c, q) > \text{worst}(W)$, break.
-
-4. **Neighbor Selection (`SELECT-NEIGHBORS-HEURISTIC`)**:
-   - Given candidate pool $C$ found by `SEARCH-LAYER(q, ef=efConstruction)`:
-   - Sort candidates ascending by distance to $q$.
-   - Iterate candidates $e$: Add $e$ to selected set $R$ iff $\forall n \in R, d(e, q) < d(e, n)$.
-   - Shrink bidirectional connections of added neighbors if their degree exceeds $M_{layer}$.
-
-5. **K-NN Search (`src/hnsw/search.rs`)**:
-   - Top-down greedy walk with $ef=1$ from $l_{top}$ down to layer 1:
-     - At each layer $l \ge 1$, greedily step to the closest neighbor of current entry point until no neighbor is closer to $q$.
-   - Base layer search: Run `SEARCH-LAYER` at layer 0 with $ef = efSearch$.
-   - Return top-$k$ nearest elements sorted ascending by distance.
-
-### Acceptance Criteria for Phase 2
 - [x] Build HNSW index on 10,000 vectors (`M=16`, `efConstruction=100`, `m_L=1/ln(16)`).
 - [x] Query 100 test vectors with $k=10$.
-- [x] Monotonic recall scaling: Demonstrate that as $efSearch$ increases ($10 \to 50 \to 100 \to 200$), `Recall@10` scales monotonically from $\sim 0.80$ to $\ge 0.98+$.
-- [x] Latency: mean query latency $< 0.05$ ms at Recall@10 $\ge 0.98$. Enforced by `overall_phase2_passed` (`PHASE2_TARGET_*` in `benchmark.rs`); met at efSearch=20 (98.6% recall). Speedup vs brute force is reported but not gated (the "10x" figure assumed a ~0.25 ms baseline; it is ~10x at ef=20 and ~5x at ef=50).
+- [x] Monotonic recall scaling: Demonstrated that as $efSearch$ increases ($10 \to 50 \to 100 \to 200$), `Recall@10` scales monotonically from $\sim 0.80$ to $\ge 0.98+$.
+- [x] Latency: mean query latency $< 0.05$ ms at Recall@10 $\ge 0.98$ (met at efSearch=20, 98.6% recall).
 - [x] All tests pass under `#![forbid(unsafe_code)]` with zero warnings.
 
 ---

@@ -144,7 +144,7 @@ cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/p
 │   ├── adversarial_hnsw_tests.rs # HNSW stress / boundary / reproducibility tests (12 tests)
 │   ├── adversarial_graph_fingerprint_tests.rs # Logical graph fingerprint & mutation tests (10 tests)
 │   ├── challenge_m1_p35_tests.rs # Phase 3.5 instrumentation, golden & layout tests (8 tests)
-│   ├── rust_phase3_tests.rs   # Phase 3 report semantics + parallel-search input validation (10 tests)
+│   ├── rust_phase3_tests.rs   # Phase 3 report semantics + parallel-search input validation (11 tests)
 │   ├── test_phase1.py         # Python reference unit tests (23 tests)
 │   └── test_rust_parity.py    # Cross-language Rust <-> Python <-> FAISS parity tests (4 tests)
 └── run_phase1.py              # Python reference runner
