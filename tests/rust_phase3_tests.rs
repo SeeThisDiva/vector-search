@@ -4,8 +4,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use vector_search::benchmark::{
-    run_phase2_benchmark, run_phase3_benchmark, summarize_repeated_latencies, Phase1DatasetMode,
-    Phase2Config, Phase3Config,
+    detect_provenance, detect_provenance_with_commands, run_phase1_benchmark, run_phase2_benchmark,
+    run_phase3_benchmark, summarize_repeated_latencies, BaselineMultiScaleReport, Phase1Config,
+    Phase1DatasetMode, Phase2Config, Phase3Config,
 };
 use vector_search::dataset::{
     generate_synthetic_sift, read_fvecs_max_rows, read_ivecs_max_rows, write_fvecs, write_ivecs,
@@ -544,4 +545,86 @@ fn test_keep_pruned_shrink_config_override() {
     let res = idx_shrink_false.search_batch(&queries, 5, 40).unwrap();
     assert_eq!(res.indices.rows(), 10);
     assert_eq!(res.indices.cols(), 5);
+}
+
+#[test]
+fn test_report_provenance_fields_and_unknown_fallback() {
+    // 1. Live provenance detection succeeds in this repository
+    let live_prov = detect_provenance();
+    assert!(!live_prov.git_commit.is_empty());
+    assert!(!live_prov.rustc_version.is_empty());
+    assert!(!live_prov.power_mode.is_empty());
+    assert!(!live_prov.processor_affinity_mask.is_empty());
+
+    // 2. Fallback path when git / rustc binaries are unavailable returns "unknown" and dirty=false
+    let fallback_prov = detect_provenance_with_commands(
+        "__nonexistent_git_binary_for_t04_test__",
+        "__nonexistent_rustc_binary_for_t04_test__",
+    );
+    assert_eq!(fallback_prov.git_commit, "unknown");
+    assert!(!fallback_prov.git_dirty);
+    assert_eq!(fallback_prov.rustc_version, "unknown");
+
+    // 3. All report writers (Phase 1, Phase 2, BaselineMultiScaleReport, Phase 3) emit
+    //    git_commit, git_dirty, rustc_version, and environment in JSON
+    let cfg1 = Phase1Config {
+        dataset_mode: Phase1DatasetMode::Synthetic {
+            num_base: 100,
+            num_query: 10,
+            dim: 8,
+            num_clusters: 4,
+        },
+        k: 5,
+        allow_download: false,
+        save_files: false,
+        ..Default::default()
+    };
+    let rep1 = run_phase1_benchmark(&cfg1).expect("phase 1 must run");
+    let json1 = rep1.to_json_string();
+    let rep2 = run_phase2_benchmark(&small_phase2_config(false)).expect("phase 2 must run");
+    let json2 = rep2.to_json_string();
+    let rep3 = run_phase3_benchmark(&small_config(false)).expect("phase 3 must run");
+    let json3 = rep3.to_json_string();
+
+    let multi_rep = BaselineMultiScaleReport {
+        hardware: rep3.hardware.clone(),
+        dataset_source: rep3.dataset_source.clone(),
+        hnsw_m: rep3.hnsw_m,
+        hnsw_m_max0: rep3.hnsw_m_max0,
+        hnsw_ef_construction: rep3.hnsw_ef_construction,
+        seed: rep3.seed,
+        metric: rep3.metric,
+        peak_rss_measurement_method: "test".to_string(),
+        scale_profiles: rep3.multi_scale_baseline_summary.clone(),
+    };
+    let json_multi = multi_rep.to_json_string();
+
+    for (name, json) in [
+        ("Phase1Report", &json1),
+        ("Phase2Report", &json2),
+        ("BaselineMultiScaleReport", &json_multi),
+        ("Phase3Report", &json3),
+    ] {
+        assert!(
+            json.contains("\"git_commit\":"),
+            "{name} missing git_commit"
+        );
+        assert!(json.contains("\"git_dirty\":"), "{name} missing git_dirty");
+        assert!(
+            json.contains("\"rustc_version\":"),
+            "{name} missing rustc_version"
+        );
+        assert!(
+            json.contains("\"environment\": {"),
+            "{name} missing environment block"
+        );
+        assert!(
+            json.contains("\"power_mode\":"),
+            "{name} missing power_mode"
+        );
+        assert!(
+            json.contains("\"processor_affinity_mask\":"),
+            "{name} missing processor_affinity_mask"
+        );
+    }
 }

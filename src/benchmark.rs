@@ -89,6 +89,168 @@ pub struct OfficialGtComparison {
     pub total_compared: usize,
 }
 
+/// Provenance and runtime environment metadata recorded in every benchmark JSON report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportProvenance {
+    pub git_commit: String,
+    pub git_dirty: bool,
+    pub rustc_version: String,
+    pub power_mode: String,
+    pub processor_affinity_mask: String,
+}
+
+impl ReportProvenance {
+    /// Appends `git_commit`, `git_dirty`, `rustc_version`, and the `environment` block
+    /// to an in-progress top-level JSON object (with 2-space indentation).
+    pub fn append_json_fields(&self, out: &mut String, hardware: &HardwareInfo) {
+        out.push_str(&format!(
+            "  \"git_commit\": \"{}\",\n",
+            escape_json(&self.git_commit)
+        ));
+        out.push_str(&format!("  \"git_dirty\": {},\n", self.git_dirty));
+        out.push_str(&format!(
+            "  \"rustc_version\": \"{}\",\n",
+            escape_json(&self.rustc_version)
+        ));
+        out.push_str("  \"environment\": {\n");
+        out.push_str(&format!("    \"os\": \"{}\",\n", escape_json(&hardware.os)));
+        out.push_str(&format!(
+            "    \"arch\": \"{}\",\n",
+            escape_json(&hardware.arch)
+        ));
+        out.push_str(&format!(
+            "    \"cpu_model\": \"{}\",\n",
+            escape_json(&hardware.cpu_model)
+        ));
+        out.push_str(&format!(
+            "    \"logical_cores\": {},\n",
+            hardware.logical_cores
+        ));
+        match hardware.total_ram_gb {
+            Some(ram) => out.push_str(&format!("    \"total_ram_gb\": {ram:.2},\n")),
+            None => out.push_str("    \"total_ram_gb\": null,\n"),
+        }
+        out.push_str(&format!(
+            "    \"power_mode\": \"{}\",\n",
+            escape_json(&self.power_mode)
+        ));
+        out.push_str(&format!(
+            "    \"processor_affinity_mask\": \"{}\"\n",
+            escape_json(&self.processor_affinity_mask)
+        ));
+        out.push_str("  },\n");
+    }
+}
+
+/// Detects provenance (`git_commit`, `git_dirty`, `rustc_version`) and environment settings
+/// using the specified command binaries, falling back to `"unknown"` when a binary is unavailable
+/// or exits non-zero.
+#[must_use]
+pub fn detect_provenance_with_commands(git_bin: &str, rustc_bin: &str) -> ReportProvenance {
+    let git_commit = std::process::Command::new(git_bin)
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s)
+                }
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let git_dirty = if git_commit == "unknown" {
+        false
+    } else {
+        std::process::Command::new(git_bin)
+            .args(["status", "--porcelain"])
+            .output()
+            .ok()
+            .map(|o| o.status.success() && !o.stdout.is_empty())
+            .unwrap_or(false)
+    };
+
+    let rustc_version = std::process::Command::new(rustc_bin)
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s)
+                }
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let power_mode = std::env::var("VECTOR_SEARCH_POWER_MODE")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(detect_os_power_mode);
+
+    let processor_affinity_mask = std::env::var("VECTOR_SEARCH_AFFINITY_MASK")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "not_set".to_string());
+
+    ReportProvenance {
+        git_commit,
+        git_dirty,
+        rustc_version,
+        power_mode,
+        processor_affinity_mask,
+    }
+}
+
+fn detect_os_power_mode() -> String {
+    if cfg!(target_os = "windows") {
+        if let Ok(out) = std::process::Command::new("powercfg")
+            .arg("/getactivescheme")
+            .output()
+        {
+            if out.status.success() {
+                let s = String::from_utf8_lossy(&out.stdout).to_ascii_lowercase();
+                if s.contains("high performance")
+                    || s.contains("ultimate performance")
+                    || s.contains("8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c")
+                    || s.contains("e9a42b02-d5df-448d-aa00-03f14749eb61")
+                {
+                    return "high_performance".to_string();
+                } else if s.contains("balanced")
+                    || s.contains("381b4222-f694-41f0-9685-ff5bb260df2e")
+                {
+                    return "balanced".to_string();
+                } else if s.contains("power saver")
+                    || s.contains("a1841308-3541-4fab-bc81-f71556f20b4a")
+                {
+                    return "power_saver".to_string();
+                }
+            }
+        }
+    }
+    "unknown".to_string()
+}
+
+/// Returns the cached provenance and environment snapshot for the current process.
+#[must_use]
+pub fn detect_provenance() -> ReportProvenance {
+    static PROVENANCE: std::sync::OnceLock<ReportProvenance> = std::sync::OnceLock::new();
+    PROVENANCE
+        .get_or_init(|| detect_provenance_with_commands("git", "rustc"))
+        .clone()
+}
+
 /// Complete structured Phase 1 benchmark report.
 #[derive(Debug, Clone)]
 pub struct Phase1Report {
@@ -119,6 +281,7 @@ impl Phase1Report {
     pub fn to_json_string(&self) -> String {
         let mut out = String::with_capacity(2048);
         out.push_str("{\n");
+        detect_provenance().append_json_fields(&mut out, &self.hardware);
 
         // Hardware block
         out.push_str("  \"hardware\": {\n");
@@ -543,6 +706,7 @@ impl Phase2Report {
         let mut out = String::with_capacity(4096);
         out.push_str("{\n");
         out.push_str("  \"phase\": 2,\n");
+        detect_provenance().append_json_fields(&mut out, &self.hardware);
         out.push_str("  \"hardware\": {\n");
         out.push_str(&format!(
             "    \"summary\": \"{}\",\n",
@@ -876,6 +1040,7 @@ impl BaselineMultiScaleReport {
         let mut out = String::with_capacity(4096);
         out.push_str("{\n");
         out.push_str("  \"phase\": \"2_baseline_profile\",\n");
+        detect_provenance().append_json_fields(&mut out, &self.hardware);
         out.push_str("  \"hardware\": {\n");
         out.push_str(&format!(
             "    \"summary\": \"{}\",\n",
@@ -2636,6 +2801,7 @@ impl Phase3Report {
             "  \"generated_at\": \"{}\",\n",
             escape_json(&self.generated_at)
         ));
+        detect_provenance().append_json_fields(&mut out, &self.hardware);
 
         // Hardware
         out.push_str("  \"hardware\": {\n");
@@ -4263,21 +4429,10 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
 
     fs::create_dir_all(output_dir)?;
     let hw = detect_hardware();
-    let git_commit = std::process::Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|_| "f479748".to_string());
-    let git_dirty = std::process::Command::new("git")
-        .args(["status", "--porcelain"])
-        .output()
-        .map(|o| !o.stdout.is_empty())
-        .unwrap_or(false);
-    let rustc_version = std::process::Command::new("rustc")
-        .arg("--version")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|_| "rustc 1.88.x".to_string());
+    let prov = detect_provenance();
+    let git_commit = prov.git_commit;
+    let git_dirty = prov.git_dirty;
+    let rustc_version = prov.rustc_version;
 
     for &scale in &[10_000_usize, 100_000_usize] {
         println!("\n{}", "=".repeat(70));
