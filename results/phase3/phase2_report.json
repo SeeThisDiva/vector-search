@@ -1,0 +1,133 @@
+{
+  "phase": 2,
+  "git_commit": "027b2d5",
+  "git_dirty": false,
+  "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "environment": {
+    "os": "windows",
+    "arch": "x86_64",
+    "cpu_model": "12th Gen Intel(R) Core(TM) i7-12650H",
+    "logical_cores": 16,
+    "total_ram_gb": 15.78,
+    "power_mode": "balanced",
+    "processor_affinity_mask": "not_set"
+  },
+  "hardware": {
+    "summary": "12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)",
+    "cpu_model": "12th Gen Intel(R) Core(TM) i7-12650H",
+    "logical_cores": 16,
+    "total_ram_gb": 15.78,
+    "os": "windows",
+    "arch": "x86_64"
+  },
+  "dataset": {
+    "source_kind": "authentic_siftsmall",
+    "source_description": "Authentic Texmex siftsmall (data\\siftsmall)",
+    "is_authentic_sift": true,
+    "num_base": 10000,
+    "num_query": 100,
+    "dim": 128,
+    "k": 10,
+    "seed": 42,
+    "metric": "l2"
+  },
+  "hnsw_config": {
+    "m": 16,
+    "m_max0": 32,
+    "ef_construction": 100,
+    "seed": 42
+  },
+  "index_build": {
+    "build_time_s": 1.413548,
+    "num_vectors": 10000,
+    "max_layer": 3,
+    "entry_point": 3015,
+    "graph_fingerprint": 9131534679052300448,
+    "graph_fingerprint_hex": "0x7eb9ba68df12b0a0"
+  },
+  "exact_knn_baseline": {
+    "mean_ms": 0.247657,
+    "p50_ms": 0.244150,
+    "p95_ms": 0.264035,
+    "p99_ms": 0.317117,
+    "qps": 4033.169,
+    "self_verified": true,
+    "official_gt_matched": true
+  },
+  "ef_search_sweep": [
+    {
+      "ef_search": 10,
+      "recall_at_k": 0.951000,
+      "latency": {
+        "mean_ms": 0.018357,
+        "p50_ms": 0.017600,
+        "p95_ms": 0.024115,
+        "p99_ms": 0.027019,
+        "qps": 53885.117
+      },
+      "speedup_vs_exact": 13.49,
+      "monotonic_passed": true
+    },
+    {
+      "ef_search": 20,
+      "recall_at_k": 0.986000,
+      "latency": {
+        "mean_ms": 0.027308,
+        "p50_ms": 0.027450,
+        "p95_ms": 0.034355,
+        "p99_ms": 0.036759,
+        "qps": 36334.569
+      },
+      "speedup_vs_exact": 9.07,
+      "monotonic_passed": true
+    },
+    {
+      "ef_search": 50,
+      "recall_at_k": 1.000000,
+      "latency": {
+        "mean_ms": 0.056846,
+        "p50_ms": 0.057400,
+        "p95_ms": 0.074890,
+        "p99_ms": 0.082104,
+        "qps": 17523.569
+      },
+      "speedup_vs_exact": 4.36,
+      "monotonic_passed": true
+    },
+    {
+      "ef_search": 100,
+      "recall_at_k": 1.000000,
+      "latency": {
+        "mean_ms": 0.096457,
+        "p50_ms": 0.098150,
+        "p95_ms": 0.128360,
+        "p99_ms": 0.134609,
+        "qps": 10341.582
+      },
+      "speedup_vs_exact": 2.57,
+      "monotonic_passed": true
+    },
+    {
+      "ef_search": 200,
+      "recall_at_k": 1.000000,
+      "latency": {
+        "mean_ms": 0.164986,
+        "p50_ms": 0.168450,
+        "p95_ms": 0.211615,
+        "p99_ms": 0.241539,
+        "qps": 6052.756
+      },
+      "speedup_vs_exact": 1.50,
+      "monotonic_passed": true
+    }
+  ],
+  "verification_status": {
+    "monotonic_scaling_verified": true,
+    "performance_target_met": true,
+    "performance_target_ef": 20,
+    "performance_target": { "min_recall": 0.98, "max_mean_latency_ms": 0.05 },
+    "reproducibility_checked": true,
+    "reproducibility_verified": true,
+    "overall_phase2_passed": true
+  }
+}

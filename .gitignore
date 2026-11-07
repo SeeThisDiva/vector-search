@@ -55,6 +55,7 @@ data/**/*.ivecs
 data/**/*.tar.gz
 data/**/*.part
 data/**/*.json
+!results/**/*.json
 
 # Operating System files
 .DS_Store

@@ -63,23 +63,23 @@ Recall is deterministic (seed 42). Latencies are single-threaded and measured on
 
 | efSearch | Recall@10 | Mean latency (ms) | p99 (ms) | Speedup vs brute force |
 |---------:|----------:|------------------:|---------:|-----------------------:|
-| 10  | 95.1%  | 0.024 | 0.035 | 10.3x |
-| 20  | 98.6%  | 0.042 | 0.060 | 5.9x  |
-| 50  | 100.0% | 0.066 | 0.100 | 3.7x  |
-| 100 | 100.0% | 0.108 | 0.147 | 2.3x  |
-| 200 | 100.0% | 0.186 | 0.254 | 1.3x  |
+| 10  | 95.1%  | 0.018 | 0.027 | 13.5x |
+| 20  | 98.6%  | 0.027 | 0.037 | 9.1x  |
+| 50  | 100.0% | 0.057 | 0.082 | 4.4x  |
+| 100 | 100.0% | 0.096 | 0.135 | 2.6x  |
+| 200 | 100.0% | 0.165 | 0.242 | 1.5x  |
 
 Acceptance target: some efSearch reaches Recall@10 >= 0.98 at < 0.05 ms mean latency (met at efSearch=20). `siftsmall` is easy (recall saturates by efSearch=50), so treat these as a correctness check; Phase 3 on `SIFT1M` is the real test.
 
 ```bash
-cargo run --release --bin phase2 -- --dataset siftsmall --json-out data/phase2_report.json
+cargo run --release --bin phase2 -- --dataset siftsmall --json-out results/phase3/phase2_report.json
 ```
 
 ---
 
 ## Phase 3 Results (`SIFT1M` 1,000,000 $\times$ 128-d, `M=16`, `efConstruction=100`, $k=10$)
 
-Measured on `12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)`, official Texmex ground truth (verified against brute-force `ExactKnn` on 100 queries), 10,000 queries, single-threaded search, **5 repetitions per `efSearch`** (reporting median and min–max spread). Source: `data/phase3_report.json` and `data/baseline_profile_report.json` (gitignored, regenerate with the command below).
+Measured on `12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)`, official Texmex ground truth (verified against brute-force `ExactKnn` on 100 queries), 10,000 queries, single-threaded search, **5 repetitions per `efSearch`** (reporting median and min–max spread). Source: `results/phase3/phase3_report.json` and `results/phase3/baseline_profile_report.json` (committed; see `results/CLAIMS.md`).
 
 | efSearch | Recall@10 | Median Mean (ms) | Mean Spread (ms) | Median p50 (ms) | Median p99 (ms) | p99 Spread (ms) | Median QPS |
 |---------:|----------:|-----------------:|-----------------:|----------------:|----------------:|----------------:|-----------:|
@@ -112,7 +112,7 @@ Notes:
 - Recall at fixed `efSearch=50` drops with scale (`99.75%` at 10k, `98.14%` at 100k, `94.70%` at 1M), so `efSearch` must grow with $N$.
 
 ```bash
-cargo run --release --bin phase3 -- --dataset sift1m --json-out data/phase3_report.json
+cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/phase3_report.json
 ```
 
 ---

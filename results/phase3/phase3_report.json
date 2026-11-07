@@ -1,0 +1,238 @@
+{
+  "phase": 3,
+  "phase_name": "Phase 3: HNSW SIFT1M Scaling, Memory Profiling & Ground Truth Benchmarking",
+  "generated_at": "2026-11-04T19:51:27Z",
+  "hardware": {
+    "summary": "12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)",
+    "cpu_model": "12th Gen Intel(R) Core(TM) i7-12650H",
+    "logical_cores": 16,
+    "total_ram_gb": 15.78,
+    "os": "windows",
+    "arch": "x86_64"
+  },
+  "dataset": {
+    "preset": "sift1m",
+    "source_kind": "authentic_sift1m",
+    "source_description": "Authentic Texmex SIFT1M (data\\sift1m)",
+    "is_authentic_sift": true,
+    "base_path": "data\\sift1m\\sift_base.fvecs",
+    "query_path": "data\\sift1m\\sift_query.fvecs",
+    "groundtruth_path": "data\\sift1m\\sift_groundtruth.ivecs",
+    "num_base": 1000000,
+    "num_query": 10000,
+    "dim": 128,
+    "k": 10,
+    "seed": 42,
+    "metric": "l2"
+  },
+  "hnsw_config": {
+    "m": 16,
+    "m_max0": 32,
+    "ef_construction": 100,
+    "seed": 42,
+    "heuristic": "select_neighbors_heuristic_with_scratch"
+  },
+  "index_build": {
+    "num_vectors": 1000000,
+    "build_time_s": 493.782889,
+    "build_qps": 2025.18,
+    "max_layer": 5,
+    "entry_point": 829262,
+    "graph_fingerprint": 4901122038173518430,
+    "graph_fingerprint_hex": "0x44044886c62bca5e"
+  },
+  "memory_profile": {
+    "peak_rss_mb": 646.05,
+    "peak_rss_bytes": 677437440,
+    "peak_rss_measurement_method": "windows_powershell_peak_working_set_64: powershell -NoProfile -NonInteractive -Command (Get-Process -Id <benchmark process id>).PeakWorkingSet64",
+    "is_peak_rss_os_measured": true,
+    "bytes_per_vector_breakdown": {
+      "raw_vector_bytes_per_vector": 512.00,
+      "graph_bytes_per_vector": 152.91,
+      "graph_only_bytes_per_vector": 148.91,
+      "total_bytes_per_vector": 664.91,
+      "raw_vector_total_bytes": 512000000,
+      "raw_vector_total_mb": 488.28,
+      "graph_total_bytes": 152912896,
+      "graph_total_mb": 145.83,
+      "graph_only_total_bytes": 148912896,
+      "graph_only_total_mb": 142.01,
+      "total_footprint_bytes": 664912896,
+      "total_footprint_mb": 634.11
+    },
+    "graph_components_bytes": {
+      "node_structs_bytes": 8000000,
+      "layer0_edges_bytes": 132000000,
+      "upper_layers_edges_bytes": 8912896,
+      "outer_neighbors_headers_bytes": 0,
+      "visited_tracker_tags_bytes": 4000000,
+      "heuristic_scratch_bytes": 18368
+    }
+  },
+  "multi_scale_baseline_summary": [
+    {
+      "measured_this_run": true,
+      "scale_vectors": 10000,
+      "build_time_s": 1.493908,
+      "build_qps": 6693.85,
+      "peak_rss_mb": 11.94,
+      "raw_vector_bytes_per_vector": 512.00,
+      "graph_bytes_per_vector": 150.96,
+      "graph_only_bytes_per_vector": 146.96,
+      "total_bytes_per_vector": 662.96,
+      "graph_memory_bytes": 1509632,
+      "graph_only_memory_bytes": 1469632,
+      "recall_at_10": 0.997500
+    },
+    {
+      "measured_this_run": true,
+      "scale_vectors": 100000,
+      "build_time_s": 28.563818,
+      "build_qps": 3500.93,
+      "peak_rss_mb": 69.21,
+      "raw_vector_bytes_per_vector": 512.00,
+      "graph_bytes_per_vector": 149.57,
+      "graph_only_bytes_per_vector": 145.57,
+      "total_bytes_per_vector": 661.57,
+      "graph_memory_bytes": 14957056,
+      "graph_only_memory_bytes": 14557056,
+      "recall_at_10": 0.981400
+    },
+    {
+      "measured_this_run": true,
+      "scale_vectors": 1000000,
+      "build_time_s": 493.782889,
+      "build_qps": 2025.18,
+      "peak_rss_mb": 646.05,
+      "raw_vector_bytes_per_vector": 512.00,
+      "graph_bytes_per_vector": 152.91,
+      "graph_only_bytes_per_vector": 148.91,
+      "total_bytes_per_vector": 664.91,
+      "graph_memory_bytes": 152912896,
+      "graph_only_memory_bytes": 148912896,
+      "recall_at_10": 0.947030
+    }
+  ],
+  "ef_search_sweep": [
+    {
+      "ef_search": 10,
+      "recall_at_10": 0.733150,
+      "num_runs": 5,
+      "latency": {
+        "mean_ms": 0.100350,
+        "p50_ms": 0.097200,
+        "p95_ms": 0.144705,
+        "p99_ms": 0.175203,
+        "qps": 9942.10,
+        "mean_ms_min": 0.097272,
+        "mean_ms_max": 0.104575,
+        "mean_ms_spread": 0.007304,
+        "p99_ms_min": 0.173500,
+        "p99_ms_max": 0.193304,
+        "p99_ms_spread": 0.019804
+      },
+      "run_mean_latencies_ms": [0.097946, 0.100350, 0.103584, 0.097272, 0.104575],
+      "run_p99_latencies_ms": [0.175203, 0.173701, 0.183503, 0.173500, 0.193304],
+      "monotonic_passed": true
+    },
+    {
+      "ef_search": 20,
+      "recall_at_10": 0.849490,
+      "num_runs": 5,
+      "latency": {
+        "mean_ms": 0.153094,
+        "p50_ms": 0.150300,
+        "p95_ms": 0.211105,
+        "p99_ms": 0.254701,
+        "qps": 6523.01,
+        "mean_ms_min": 0.150658,
+        "mean_ms_max": 0.153945,
+        "mean_ms_spread": 0.003287,
+        "p99_ms_min": 0.251103,
+        "p99_ms_max": 0.264601,
+        "p99_ms_spread": 0.013498
+      },
+      "run_mean_latencies_ms": [0.150658, 0.153337, 0.153945, 0.152344, 0.153094],
+      "run_p99_latencies_ms": [0.251103, 0.254701, 0.254701, 0.264601, 0.258505],
+      "monotonic_passed": true
+    },
+    {
+      "ef_search": 50,
+      "recall_at_10": 0.947030,
+      "num_runs": 5,
+      "latency": {
+        "mean_ms": 0.298723,
+        "p50_ms": 0.299400,
+        "p95_ms": 0.396105,
+        "p99_ms": 0.476917,
+        "qps": 3344.90,
+        "mean_ms_min": 0.294396,
+        "mean_ms_max": 0.324483,
+        "mean_ms_spread": 0.030087,
+        "p99_ms_min": 0.442505,
+        "p99_ms_max": 0.712737,
+        "p99_ms_spread": 0.270232
+      },
+      "run_mean_latencies_ms": [0.296288, 0.304356, 0.294396, 0.298723, 0.324483],
+      "run_p99_latencies_ms": [0.442505, 0.712737, 0.476917, 0.468803, 0.608405],
+      "monotonic_passed": true
+    },
+    {
+      "ef_search": 100,
+      "recall_at_10": 0.980610,
+      "num_runs": 5,
+      "latency": {
+        "mean_ms": 0.489827,
+        "p50_ms": 0.501200,
+        "p95_ms": 0.633515,
+        "p99_ms": 0.723405,
+        "qps": 2040.44,
+        "mean_ms_min": 0.462482,
+        "mean_ms_max": 0.495370,
+        "mean_ms_spread": 0.032888,
+        "p99_ms_min": 0.668602,
+        "p99_ms_max": 0.764703,
+        "p99_ms_spread": 0.096101
+      },
+      "run_mean_latencies_ms": [0.495370, 0.489827, 0.490283, 0.488300, 0.462482],
+      "run_p99_latencies_ms": [0.764703, 0.728501, 0.723405, 0.712303, 0.668602],
+      "monotonic_passed": true
+    },
+    {
+      "ef_search": 200,
+      "recall_at_10": 0.993760,
+      "num_runs": 5,
+      "latency": {
+        "mean_ms": 0.827589,
+        "p50_ms": 0.860700,
+        "p95_ms": 1.050525,
+        "p99_ms": 1.177406,
+        "qps": 1207.98,
+        "mean_ms_min": 0.817058,
+        "mean_ms_max": 0.851699,
+        "mean_ms_spread": 0.034641,
+        "p99_ms_min": 1.140601,
+        "p99_ms_max": 1.238616,
+        "p99_ms_spread": 0.098015
+      },
+      "run_mean_latencies_ms": [0.827589, 0.817058, 0.821523, 0.851699, 0.851548],
+      "run_p99_latencies_ms": [1.177406, 1.140601, 1.160308, 1.238616, 1.222605],
+      "monotonic_passed": true
+    }
+  ],
+  "verification_status": {
+    "authentic_sift1m_verified": true,
+    "official_ground_truth_matched": true,
+    "official_gt_check_queries": 100,
+    "official_gt_recall_at_k": 0.999000,
+    "official_gt_exact_id_matches": 991,
+    "monotonic_scaling_verified": true,
+    "reproducibility_checked": true,
+    "reproducibility_verified": true,
+    "forbid_unsafe_code_enforced": true,
+    "std_only_enforced": true,
+    "phase3_completed": true,
+    "terminal_stopping_enforced": true,
+    "phase4_initiated": false
+  }
+}
