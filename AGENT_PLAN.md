@@ -133,13 +133,13 @@ Status boxes: tick when merged and gate passed.
 
 ### M0. Close Phase 3 (small, do first)
 
-- [ ] **T0.1 Line endings.** Class: MEASUREMENT-ONLY. Add `.gitattributes` (provided in `refine_small.patch`), run `git add --renormalize .`, confirm `git status` is clean and `git diff --ignore-cr-at-eol` is empty. Do not commit a whole-file rewrite of `hnsw.rs`, `README.md`, `CLAUDE.md`, `CONTEXT_AND_MEMORY.md`.
-- [ ] **T0.2 RSS label.** Apply the two string fixes in `benchmark.rs` (`$PID` label). Add one README line explaining why the process shells out to PowerShell (`forbid(unsafe_code)` rules out `GetProcessMemoryInfo`).
-- [ ] **T0.3 Commit reports.** Move `phase2_report.json`, `phase3_report.json`, `baseline_profile_report.json` into `results/phase3/`, un-ignore them (`!results/**/*.json`), and update README source lines to the new paths. Verify each README Phase 2 and Phase 3 number against the JSON and start `results/CLAIMS.md`.
-- [ ] **T0.4 Provenance fields.** Class: MEASUREMENT-ONLY. Add `git_commit`, `git_dirty`, `rustc_version` and an `environment` block (power mode if detectable, affinity if set) to all report writers. Fall back to `"unknown"` when git is not available. Tests: report JSON contains the fields; fallback path covered.
-- [ ] **T0.5 Docs hygiene.** Remove the personal Windows path from `CONTEXT_AND_MEMORY.md`; delete its stale "Phase 2 Implementation Guide" section (Phase 2 is done; keep the acceptance results as one line); fix "513-line" to the real line count or remove the number; fix the "Phase 2" wording in `CLAUDE.md`. Dev decides whether agent handoff files stay in the public repo (open question, section 7).
-- [ ] **T0.6 CI strictness.** In `.github/workflows/ci.yml` run pytest with `-rs` and fail if any parity test is skipped. Confirm CI is green on a fresh clone after pushing.
-- [ ] **Gate G0: Dev signs off Phase 3.**
+- [x] **T0.1 Line endings.** Class: MEASUREMENT-ONLY. Add `.gitattributes` (provided in `refine_small.patch`), run `git add --renormalize .`, confirm `git status` is clean and `git diff --ignore-cr-at-eol` is empty. Do not commit a whole-file rewrite of `hnsw.rs`, `README.md`, `CLAUDE.md`, `CONTEXT_AND_MEMORY.md`.
+- [x] **T0.2 RSS label.** Apply the two string fixes in `benchmark.rs` (`$PID` label). Add one README line explaining why the process shells out to PowerShell (`forbid(unsafe_code)` rules out `GetProcessMemoryInfo`).
+- [x] **T0.3 Commit reports.** Move `phase2_report.json`, `phase3_report.json`, `baseline_profile_report.json` into `results/phase3/`, un-ignore them (`!results/**/*.json`), and update README source lines to the new paths. Verify each README Phase 2 and Phase 3 number against the JSON and start `results/CLAIMS.md`.
+- [x] **T0.4 Provenance fields.** Class: MEASUREMENT-ONLY. Add `git_commit`, `git_dirty`, `rustc_version` and an `environment` block (power mode if detectable, affinity if set) to all report writers. Fall back to `"unknown"` when git is not available. Tests: report JSON contains the fields; fallback path covered.
+- [x] **T0.5 Docs hygiene.** Remove the personal Windows path from `CONTEXT_AND_MEMORY.md`; delete its stale "Phase 2 Implementation Guide" section (Phase 2 is done; keep the acceptance results as one line); fix "513-line" to the real line count or remove the number; fix the "Phase 2" wording in `CLAUDE.md`. Dev decides whether agent handoff files stay in the public repo (open question, section 7).
+- [x] **T0.6 CI strictness.** In `.github/workflows/ci.yml` run pytest with `-rs` and fail if any parity test is skipped. Confirm CI is green on a fresh clone after pushing.
+- [x] **Gate G0: Dev signs off Phase 3.**
 
 ### M1. Profile first, then speed up the 1M build (call it Phase 3.5)
 
@@ -163,7 +163,7 @@ Fast loop: do all iteration at 100k (about 29 s per build on the current code). 
   - Acceptance: fingerprint equal (it is defined on logical content), fixed-query results bit-identical, `graph_only_bytes_per_vector` reported before and after, build and query time not worse beyond noise.
 - [ ] **T1.8 Optional, only if the profile shows distance computation dominates.** Class: PRESERVING. Make the metric a compile-time generic (or function pointer chosen once) so `compute_distance` does not branch on `Metric` per call. Check the 8-way unrolled L2 kernel for bounds-check overhead using `as_chunks` and fixed-size array patterns (safe Rust only). Same acceptance as T1.5. Skip if the profile does not support it.
 - [x] **T1.9 Graph-changing experiment: no backfill when shrinking (`keep_pruned = false` in the shrink step only).** Class: GRAPH-CHANGING. Add a config field (for example `keep_pruned_shrink`) defaulting to the current behavior, so Phase 3 results stay reproducible. Measure at 100k, then 1M if promising: build time, recall-vs-latency over the efSearch sweep (compare at matched recall, not at equal efSearch), average degree, memory. Report honestly if recall at equal latency gets worse. Do not change the default. Hand the data to Dev.
-- [ ] **Gate G1 (Dev):** review `LOG.md`. Decide whether T1.9 becomes the default. If yes, regenerate the Phase 2/3 reports and README tables from a fresh run and keep the old ones under `results/phase3/legacy_keep_pruned/`.
+- [x] **Gate G1 (Dev):** review `LOG.md`. Decide whether T1.9 becomes the default. If yes, regenerate the Phase 2/3 reports and README tables from a fresh run and keep the old ones under `results/phase3/legacy_keep_pruned/`.
 - [x] **T1.10 Final 1M confirmation.** Benchmarker runs the Phase 3 command on the final commit (protocol in section 4) and regenerates the Phase 3 JSON and README table. Compare with the 471.0 s baseline and report the real ratio. If any `PRESERVING` change altered recall at all, that is a bug; find it.
 
 Memory side effect to keep in mind: Phase 6 (quantization) and Phase 7 (FAISS comparison) both benefit from the compact layout, so T1.7 should land before them.

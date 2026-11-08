@@ -61,4 +61,9 @@ jobs:
 
       - name: Run Pytest & Cross-Language Parity Suite
         run: |
-          python -m pytest tests/ --cov=src --cov-report=term-missing
+          set -o pipefail
+          python -m pytest tests/ -rs --cov=src --cov-report=term-missing | tee pytest_output.txt
+          if grep -Eq "SKIPPED|skipped" pytest_output.txt; then
+            echo "ERROR: Skipped test detected in pytest output (parity tests must never skip in CI)." >&2
+            exit 1
+          fi
