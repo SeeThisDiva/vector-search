@@ -1,7 +1,7 @@
 # Phase 4 Parameter Sweep Proposal & Time-Budget Analysis
 
 **Author:** Argon Lead Architect & Engineering Specialist  
-**Status:** Complete — Pending **Gate G2** Approval by Dev  
+**Status:** Approved by Dev at **Gate G2** (2026-11-08)  
 **Date:** 2026-11-08  
 **Anchored Pilot Evidence:** [`results/phase4/pilot/scale_100000_m16_efc100.json`](./pilot/scale_100000_m16_efc100.json) and [`results/phase4/pilot/summary.json`](./pilot/summary.json)  
 **Clean Git Commit:** `26a9807` (`git_dirty: false`)  
@@ -214,8 +214,8 @@ The flat $u32$ adjacency architecture introduced in Phase 3.5 provides strict, p
 
 ## 7. Gate G2 Decision Checklist for Dev
 
-Before benchmarker execution begins on Milestone `T2.3`, Dev's approval is requested on the following 3 points:
+Dev approved the proposal on 2026-11-08 with the following decisions:
 
-1. [ ] **Grid Cardinality**: Approve the 23-configuration Cartesian grid in [`results/phase4/grid_100k.grid`](./grid_100k.grid) (filtered by $\text{efConstruction} \ge M$), or request adding $(M=48, \text{efC}=48)$ as a 24th configuration?
-2. [ ] **`efSearch` Sweep Ladder**: Keep the full 12-point ladder ($\text{efSearch} \in \{10, 20, 30, 40, 50, 70, 100, 150, 200, 300, 400, 600\}$) with an expected wall-clock runtime of **$\approx 1.58\text{ hours}$**, or cap at $\text{efSearch}=400$ to complete in **$\approx 1.26\text{ hours}$**?
-3. [ ] **Proceed to Execution**: Approve proceeding to `T2.3` (100k sweep execution), `T2.4` (Pareto frontier plotting in Python), and `T2.5` (1M finals on 3–4 Pareto frontier points).
+1. [x] **Grid Cardinality**: Approved 23 Cartesian configurations in [`results/phase4/grid_100k.grid`](./grid_100k.grid) (filtered by $\text{efConstruction} \ge M$).
+2. [x] **`efSearch` Sweep Ladder**: Approved full 12-point ladder ($\text{efSearch} \in \{10, 20, 30, 40, 50, 70, 100, 150, 200, 300, 400, 600\}$) with expected wall-clock runtime $\approx 1.58\text{ hours}$.
+3. [x] **Proceed to Execution**: Approved proceeding to Milestone `T2.3` (100k sweep runner execution), `T2.4` (Pareto frontier plotting in Python), and `T2.5` (1M finals on 3–4 Pareto frontier points). Gate G2 is formally closed.

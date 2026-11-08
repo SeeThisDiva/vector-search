@@ -114,7 +114,7 @@ Order matters. Do not skip ahead, and stop for Dev's review after each numbered 
    - Implemented and kept `T1.7` (`u32` ids and flat fixed-capacity adjacency in `layer0` + `upper_arena`), cutting graph-only memory by 56.0% (`338.67 -> 148.91 B/vector`), 1M Peak RSS by 199.7 MiB (`845.75 -> 646.05 MiB`), and 100k 3-run median build time by 10.37% (`30.299 s -> 27.157 s`);
    - Implemented and evaluated `T1.9` (`keep_pruned_shrink = Some(false)` behind config flag) at 100k (`21.351 s`, `-29.53%`) and 1M (`415.076 s`, `-18.81%`), recording the full `efSearch` sweep and matched-latency comparison in `results/phase3_5/LOG.md` for Dev's **Gate G1** decision.
 4. **Every optimization keeps `--repro-check` passing and all tests green.** *(Verified: 84 Rust tests + 27 Python tests pass; golden 10k/100k fixtures and 1M `--repro-check` match bit-for-bit.)*
-5. **Phase 4:** T2.1 (proposal & pilot) and T2.2 (resumable sweep runner + CLI) are complete. Paused at **Gate G2** awaiting Dev's sign-off of `results/phase4/PROPOSAL.md` before launching `T2.3` (100k sweep), `T2.4` (Pareto plots), and `T2.5` (1M finals).
+5. **Phase 4:** T2.1 (proposal & pilot) and T2.2 (resumable sweep runner + CLI) are complete. **Gate G2** approved by Dev (23 configurations, full 12-point ladder, ~95 min budget approved). Proceeding to **T2.3** (100k sweep execution), **T2.4** (Pareto plots), and **T2.5** (1M finals).
 
 ## Commands
 ```bash
