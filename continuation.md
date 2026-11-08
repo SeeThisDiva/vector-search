@@ -3,7 +3,7 @@
 Read this first, then `CLAUDE.md` and `CONTEXT_AND_MEMORY.md`. This file is the most recent state; if they disagree, this wins.
 
 ## Project in one line
-From-scratch HNSW ANN search in Rust (`#![forbid(unsafe_code)]`, std only), benchmarked against brute force and FAISS. Phases 1, 2 and 3 are implemented. **Phase 3 has been code-reviewed (see "Review log"), but Dev has not signed it off. Do not start Phase 4 until he confirms.**
+From-scratch HNSW ANN search in Rust (`#![forbid(unsafe_code)]`, std only), benchmarked against brute force and FAISS. Phases 1–3.5 and M0 closed. Phase 4 `T2.1` (100k pilot + `results/phase4/PROPOSAL.md`) and `T2.2` (resumable sweep runner + CLI) are complete. **Paused at Gate G2 awaiting Dev's approval of the grid and budget.**
 
 ## Working agreement
 - Dev designs, agents code. Do not start a later phase until the current one is reviewed.
@@ -24,6 +24,7 @@ From-scratch HNSW ANN search in Rust (`#![forbid(unsafe_code)]`, std only), benc
   - `T1.7` (`u32` flat adjacency storage in `layer0` and `upper_arena`, 8-byte `HnswNodeMeta`, `HnswIndex::neighbors(layer, node) -> &[u32]`): **KEPT** (`d6d36ff`). Cuts graph-only memory by **56.0%** at 1M (`338.67 -> 148.91 B/vector`, `-180.97 MiB`), cuts isolated 1M Peak RSS from `845.75 MiB` to **`646.05 MiB`** (`-199.70 MiB`), and speeds up 100k 3-run median build time by **10.37%** (`30.299 s -> 27.157 s`) while keeping 100% bit-exact graph fingerprints and query results.
   - `T1.9` (`HnswConfig::keep_pruned_shrink: Option<bool>`, default `None`, CLI `--no-keep-pruned-shrink`): evaluated at 100k (`21.351 s`, `-29.53%`) and 1M (`415.076 s`, `-18.81%` vs `511.271 s` baseline; `-11.87%` vs `470.966 s` historical Phase 3) and recorded in `results/phase3_5/LOG.md` + `results/phase3_5/exp_no_keep_pruned_shrink_1m.json` for Dev's Gate G1 decision.
   - `T1.10`: `data/phase3_report.json` (`results/phase3_5/final_1m_report.json`) and `data/baseline_profile_report.json` regenerated from a clean commit on the final code (`366f185`).
+  - `T2.1` / `T2.2`: Measured 100k pilot ($M=16, \text{efC}=100$, commit `26a9807`: build 26.066 s, 12-point sweep 173.49 s, Recall@10 0.82103 to 0.99702), wrote `results/phase4/PROPOSAL.md` (23-config grid, ~95 min expected 100k budget, ~93 min 1M finals budget), implemented resumable `phase4` runner & CLI (84 Rust tests, 27 Python tests).
 
 ## Review log (Phase 3 review, what happened)
 After Phase 3 was committed, Dev asked for a review of the whole repo and fixes for any flaws. The review read `hnsw.rs` and the Phase 2/3 benchmark code in full and checked them against `docs/HNSW_ALGORITHM.md`, then ran the full test suite before and after the changes.
@@ -113,7 +114,7 @@ Order matters. Do not skip ahead, and stop for Dev's review after each numbered 
    - Implemented and kept `T1.7` (`u32` ids and flat fixed-capacity adjacency in `layer0` + `upper_arena`), cutting graph-only memory by 56.0% (`338.67 -> 148.91 B/vector`), 1M Peak RSS by 199.7 MiB (`845.75 -> 646.05 MiB`), and 100k 3-run median build time by 10.37% (`30.299 s -> 27.157 s`);
    - Implemented and evaluated `T1.9` (`keep_pruned_shrink = Some(false)` behind config flag) at 100k (`21.351 s`, `-29.53%`) and 1M (`415.076 s`, `-18.81%`), recording the full `efSearch` sweep and matched-latency comparison in `results/phase3_5/LOG.md` for Dev's **Gate G1** decision.
 4. **Every optimization keeps `--repro-check` passing and all tests green.** *(Verified: 84 Rust tests + 27 Python tests pass; golden 10k/100k fixtures and 1M `--repro-check` match bit-for-bit.)*
-5. **Phase 4 (only after Dev signs off Phase 3 / Gate G1):** sweep M, efConstruction and efSearch and plot Recall@10 vs p99 latency. Use the same JSON conventions (hardware, dataset source, `measured_this_run`). Sweeps at 1M are slow (~8 min per build at M=16, efC=100), so propose the grid and a time budget to Dev before running anything, and consider 100k for the wide sweep and 1M for the final few points.
+5. **Phase 4:** T2.1 (proposal & pilot) and T2.2 (resumable sweep runner + CLI) are complete. Paused at **Gate G2** awaiting Dev's sign-off of `results/phase4/PROPOSAL.md` before launching `T2.3` (100k sweep), `T2.4` (Pareto plots), and `T2.5` (1M finals).
 
 ## Commands
 ```bash

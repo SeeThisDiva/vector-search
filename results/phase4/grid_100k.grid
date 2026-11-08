@@ -1,0 +1,9 @@
+# Phase 4 Wide Parameter Sweep Grid (100k SIFT1M prefix)
+# Cartesian product of M x efConstruction filtered by efConstruction >= M (23 configs)
+scale = 100000
+k = 10
+sweep_runs = 3
+seed = 42
+ef_search = 10, 20, 30, 40, 50, 70, 100, 150, 200, 300, 400, 600
+m = 8, 12, 16, 24, 32, 48
+ef_construction = 40, 100, 200, 400

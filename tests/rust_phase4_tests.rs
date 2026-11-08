@@ -103,6 +103,18 @@ seed = 99
     let mut bad_grid2 = spec_seed.clone();
     bad_grid2.sweep_runs = 0;
     assert!(bad_grid2.validate().is_err());
+
+    // 10. Canonical 100k grid file from repository
+    let grid_100k_path = std::path::Path::new("results/phase4/grid_100k.grid");
+    let grid_100k =
+        Phase4GridSpec::from_file(grid_100k_path).expect("grid_100k.grid must parse cleanly");
+    assert_eq!(
+        grid_100k.configs.len(),
+        23,
+        "100k grid must contain exactly 23 valid configs (efConstruction >= M)"
+    );
+    assert_eq!(grid_100k.scale_vectors, Some(100_000));
+    assert_eq!(grid_100k.ef_search_list.len(), 12);
 }
 
 #[test]

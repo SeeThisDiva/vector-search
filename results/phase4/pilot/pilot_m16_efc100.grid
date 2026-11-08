@@ -1,0 +1,8 @@
+# Phase 4 Pilot Configuration (M=16, efConstruction=100 at 100k SIFT1M prefix)
+scale = 100000
+k = 10
+sweep_runs = 3
+seed = 42
+ef_search = 10, 20, 30, 40, 50, 70, 100, 150, 200, 300, 400, 600
+m = 16
+ef_construction = 100

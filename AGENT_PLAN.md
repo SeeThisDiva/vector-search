@@ -172,7 +172,7 @@ Memory side effect to keep in mind: Phase 6 (quantization) and Phase 7 (FAISS co
 
 Do not start until G1 is signed.
 
-- [ ] **T2.1 Propose the grid and a time budget (no runs).** Agent writes `results/phase4/PROPOSAL.md` with the grid, a pilot-based time estimate, and disk use. Starting proposal for Dev to edit:
+- [x] **T2.1 Propose the grid and a time budget (no runs).** Agent writes `results/phase4/PROPOSAL.md` with the grid, a pilot-based time estimate, and disk use. Starting proposal for Dev to edit:
   - 100k wide sweep: M in {8, 12, 16, 24, 32, 48} and efConstruction in {40, 100, 200, 400}, 24 indexes, subject to `efConstruction >= M`.
   - efSearch for every index: {10, 20, 30, 40, 50, 70, 100, 150, 200, 300, 400, 600}, k=10, 10,000 queries, 3 repetitions.
   - 1M final: 3 to 4 configs picked from the 100k Pareto frontier (include M=16, efC=100 as the Phase 3 reference), 5 repetitions, one build each.

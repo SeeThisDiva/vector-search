@@ -4,8 +4,8 @@ See [`CONTEXT_AND_MEMORY.md`](./CONTEXT_AND_MEMORY.md) and [`continuation.md`](.
 
 ## Quick Reference
 - **Mission**: HNSW Approximate Nearest Neighbor Search from scratch in Rust (`#![forbid(unsafe_code)]`) vs FAISS.
-- **Current State**: Phases 1, 2, 3, and 3.5 (Milestone M1) are implemented and verified (84 `cargo test`, 27 `pytest`). Phase 3 / 3.5 on SIFT1M (M=16, efC=100, compact `u32` flat adjacency): build 493.8 s (2,025.2 vec/s; 415.1 s / 2,409.2 vec/s with `--no-keep-pruned-shrink`; 100k 3-run median 27.157 s vs 30.299 s baseline), 664.91 B/vector total (512.00 B raw + 152.91 B graph incl. visited tags / 148.91 B graph-only, down 56.0% from 338.67 B), Peak RSS 646.05 MiB (11.94 MiB at 10k, 69.21 MiB at 100k in isolated child processes), Recall@10 94.703% at efSearch=50 (0.299 ms median mean) and 98.061% at efSearch=100 (0.490 ms median mean) across 5 sweep repetitions. Phase 3 / Gate G1 is awaiting Dev's sign-off; do not start Phase 4 before that.
-- **Next Task**: Dev reviews Phase 3.5 (`results/phase3_5/LOG.md`) and decides Gate G1 (`keep_pruned_shrink = Some(false)` default vs flag), then Phase 4 (parameter sweep).
+- **Current State**: Milestone M0 (`T0.1`–`T0.6`, Gates `G0`/`G1`) closed; Phase 4 `T2.1` (100k pilot + `results/phase4/PROPOSAL.md`) and `T2.2` (`phase4` sweep runner + CLI) implemented and verified (84 `cargo test`, 27 `pytest`). Phase 4 100k pilot ($M=16, \text{efC}=100$, commit `26a9807`): build 26.066 s (3,836.41 vec/s), graph-only 145.57 B/vec (13.88 MiB), Peak RSS 77.61 MiB, Recall@10 from 0.82103 (ef=10) to 0.99702 (ef=600), 12-point sweep 173.49 s (2.89 min).
+- **Next Task**: Dev reviews Phase 4 proposal (`results/phase4/PROPOSAL.md`) and decides **Gate G2** (approves 23-config 100k grid and time budget), then proceed to `T2.3` (100k sweep execution).
 - **Needs**: Rust >= 1.88 (`rust-version` in `Cargo.toml`). `data/*.fvecs` is gitignored; siftsmall-dependent tests skip when it is missing.
 - **Specs**: See `docs/HNSW_ALGORITHM.md` (Algorithms 1–5).
 - **Run Tests**: `cargo test --release` and `pytest`.
