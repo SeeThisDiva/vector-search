@@ -120,7 +120,7 @@ cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/p
 ## Repository Structure
 
 ```text
-├── Cargo.toml                 # Rust crate manifest (vector_search lib + phase1/phase2/phase3 CLIs)
+├── Cargo.toml                 # Rust crate manifest (vector_search lib + phase1/phase2/phase3/phase4 CLIs)
 ├── docs/
 │   └── HNSW_ALGORITHM.md      # HNSW mathematical derivations, layer theory & pseudocode
 ├── src/
@@ -129,6 +129,7 @@ cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/p
 │   ├── hnsw.rs                # HNSW index (insert, search-layer, heuristic selection, k-NN)
 │   ├── bin/phase2.rs          # Rust Phase 2 CLI runner (`phase2`)
 │   ├── bin/phase3.rs          # Rust Phase 3 CLI runner (`phase3`, SIFT1M)
+│   ├── bin/phase4.rs          # Rust Phase 4 CLI runner (`phase4`, parameter sweep)
 │   ├── matrix.rs              # Contiguous row-major RowMatrix<T> storage
 │   ├── distance.rs            # 8-way unrolled L2^2, Euclidean, and Inner Product kernels
 │   ├── rng.rs                 # Deterministic SplitMix64 + Xoshiro256** PRNG
@@ -137,6 +138,7 @@ cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/p
 │   ├── recall.rs              # Recall@k harness, self-verification & latency percentiles
 │   ├── hardware.rs            # Cross-platform CPU / RAM / OS hardware probe
 │   ├── benchmark.rs           # End-to-end Phase 1 benchmark pipeline & JSON reporter
+│   ├── phase4.rs              # Phase 4 resumable parameter sweep runner & prefix GT caching
 │   └── hnsw_phase1/           # Python reference implementation & FAISS comparison helpers
 ├── tests/
 │   ├── rust_phase1_tests.rs   # Rust integration & edge-case test suite (16 tests)
@@ -145,6 +147,7 @@ cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/p
 │   ├── adversarial_graph_fingerprint_tests.rs # Logical graph fingerprint & mutation tests (10 tests)
 │   ├── challenge_m1_p35_tests.rs # Phase 3.5 instrumentation, golden & layout tests (8 tests)
 │   ├── rust_phase3_tests.rs   # Phase 3 report semantics + parallel-search input validation (11 tests)
+│   ├── rust_phase4_tests.rs   # Phase 4 grid parsing, GT caching & resumable sweep tests (4 tests)
 │   ├── test_phase1.py         # Python reference unit tests (23 tests)
 │   └── test_rust_parity.py    # Cross-language Rust <-> Python <-> FAISS parity tests (4 tests)
 └── run_phase1.py              # Python reference runner

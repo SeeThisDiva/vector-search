@@ -39,6 +39,7 @@ pub struct Phase4IndexConfig {
     pub keep_pruned: bool,
     pub keep_pruned_shrink: Option<bool>,
     pub seed: u64,
+    pub explicit_seed: bool,
 }
 
 impl Default for Phase4IndexConfig {
@@ -51,6 +52,7 @@ impl Default for Phase4IndexConfig {
             keep_pruned: true,
             keep_pruned_shrink: None,
             seed: 42,
+            explicit_seed: false,
         }
     }
 }
@@ -123,6 +125,46 @@ impl Default for Phase4GridSpec {
 }
 
 impl Phase4GridSpec {
+    /// Validates all parameters and configurations in the grid specification.
+    pub fn validate(&self) -> Result<()> {
+        if self.configs.is_empty() {
+            return Err(VectorSearchError::InvalidArgument(
+                "Grid specification resulted in 0 configurations".to_string(),
+            ));
+        }
+
+        if self.k == 0 {
+            return Err(VectorSearchError::InvalidArgument(
+                "k must be >= 1".to_string(),
+            ));
+        }
+        if self.sweep_runs == 0 {
+            return Err(VectorSearchError::InvalidArgument(
+                "sweep_runs must be >= 1".to_string(),
+            ));
+        }
+
+        if self.ef_search_list.is_empty() {
+            return Err(VectorSearchError::InvalidArgument(
+                "ef_search_list cannot be empty".to_string(),
+            ));
+        }
+        for &ef in &self.ef_search_list {
+            if ef == 0 {
+                return Err(VectorSearchError::InvalidArgument(
+                    "ef_search values must be >= 1".to_string(),
+                ));
+            }
+        }
+
+        // Validate each configuration
+        for cfg in &self.configs {
+            cfg.to_hnsw_config().validate()?;
+        }
+
+        Ok(())
+    }
+
     /// Parses a grid specification from a file on disk.
     pub fn from_file(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)?;
@@ -239,6 +281,7 @@ impl Phase4GridSpec {
                             keep_pruned: true,
                             keep_pruned_shrink: None,
                             seed,
+                            explicit_seed: false,
                         });
                     }
                 }
@@ -248,51 +291,26 @@ impl Phase4GridSpec {
         // Add explicit configs
         configs.extend(explicit_configs);
 
-        if configs.is_empty() {
-            return Err(VectorSearchError::InvalidArgument(
-                "Grid specification resulted in 0 configurations".to_string(),
-            ));
-        }
-
-        if k == 0 {
-            return Err(VectorSearchError::InvalidArgument(
-                "k must be >= 1".to_string(),
-            ));
-        }
-        if sweep_runs == 0 {
-            return Err(VectorSearchError::InvalidArgument(
-                "sweep_runs must be >= 1".to_string(),
-            ));
+        // Inherit final grid seed for any config without explicit per-config seed
+        for cfg in &mut configs {
+            if !cfg.explicit_seed {
+                cfg.seed = seed;
+            }
         }
 
         let final_ef_search_list = ef_search_list
             .unwrap_or_else(|| vec![10, 20, 30, 40, 50, 70, 100, 150, 200, 300, 400, 600]);
-        if final_ef_search_list.is_empty() {
-            return Err(VectorSearchError::InvalidArgument(
-                "ef_search_list cannot be empty".to_string(),
-            ));
-        }
-        for &ef in &final_ef_search_list {
-            if ef == 0 {
-                return Err(VectorSearchError::InvalidArgument(
-                    "ef_search values must be >= 1".to_string(),
-                ));
-            }
-        }
 
-        // Validate each configuration
-        for cfg in &configs {
-            cfg.to_hnsw_config().validate()?;
-        }
-
-        Ok(Self {
+        let spec = Self {
             scale_vectors,
             k,
             sweep_runs,
             seed,
             ef_search_list: final_ef_search_list,
             configs,
-        })
+        };
+        spec.validate()?;
+        Ok(spec)
     }
 }
 
@@ -333,7 +351,7 @@ fn parse_explicit_config_line(
     let mut ef_construction: Option<usize> = None;
     let mut keep_pruned = true;
     let mut keep_pruned_shrink: Option<bool> = None;
-    let mut seed = default_seed;
+    let mut seed: Option<u64> = None;
 
     for part in val.split(',') {
         let p = part.trim();
@@ -386,11 +404,11 @@ fn parse_explicit_config_line(
                 keep_pruned_shrink = Some(parse_bool(v, line_num, "keep_pruned_shrink")?);
             }
             "seed" => {
-                seed = v.parse().map_err(|e| {
+                seed = Some(v.parse().map_err(|e| {
                     VectorSearchError::InvalidArgument(format!(
                         "Line {line_num}: invalid seed '{v}': {e}"
                     ))
-                })?;
+                })?);
             }
             unknown => {
                 return Err(VectorSearchError::InvalidArgument(format!(
@@ -411,6 +429,9 @@ fn parse_explicit_config_line(
         ))
     })?;
 
+    let explicit_seed = seed.is_some();
+    let seed = seed.unwrap_or(default_seed);
+
     Ok(Phase4IndexConfig {
         m,
         m_max,
@@ -419,6 +440,7 @@ fn parse_explicit_config_line(
         keep_pruned,
         keep_pruned_shrink,
         seed,
+        explicit_seed,
     })
 }
 
@@ -482,23 +504,53 @@ pub fn load_or_compute_phase4_ground_truth(
         ));
     }
 
-    // Case A: Official SIFT1M ground truth (authentic SIFT corpus, exactly 1M base vectors)
-    if loaded.source.is_authentic_sift() && num_base == 1_000_000 {
-        if let Some(ref official) = loaded.official_ground_truth {
-            if official.rows() >= num_queries && official.cols() >= k {
-                let matrix = slice_ground_truth_matrix(official, num_queries, k)?;
-                return Ok(Phase4GroundTruth {
-                    matrix,
-                    ground_truth_source: "official_texmex_sift1m_groundtruth_ivecs".to_string(),
-                    ground_truth_cache_path: None,
-                    ground_truth_cache_hit: true,
-                });
+    // Case A: Official SIFT1M or siftsmall ground truth
+    if loaded.source.is_authentic_sift() {
+        let is_full_sift1m = num_base == 1_000_000
+            && loaded
+                .official_ground_truth
+                .as_ref()
+                .is_some_and(|g| g.rows() == 10_000);
+        let is_full_siftsmall = num_base == 10_000
+            && loaded
+                .official_ground_truth
+                .as_ref()
+                .is_some_and(|g| g.rows() == 100);
+        if is_full_sift1m || is_full_siftsmall {
+            if let Some(ref official) = loaded.official_ground_truth {
+                if official.rows() >= num_queries && official.cols() >= k {
+                    let matrix = slice_ground_truth_matrix(official, num_queries, k)?;
+                    let source_name = if is_full_sift1m {
+                        "official_texmex_sift1m_groundtruth_ivecs"
+                    } else {
+                        "official_texmex_siftsmall_groundtruth_ivecs"
+                    };
+                    return Ok(Phase4GroundTruth {
+                        matrix,
+                        ground_truth_source: source_name.to_string(),
+                        ground_truth_cache_path: None,
+                        ground_truth_cache_hit: true,
+                    });
+                }
             }
         }
     }
 
     // Case B: Prefix scale or synthetic/custom dataset
-    let cache_filename = format!("gt_{num_base}_k100.ivecs");
+    let cache_filename = match &loaded.source {
+        DatasetSource::AuthenticSiftSmall { .. } | DatasetSource::AuthenticSift1M { .. } => {
+            format!("gt_{num_base}_k100.ivecs")
+        }
+        DatasetSource::Synthetic { seed } => {
+            format!("gt_synthetic_seed{seed}_{num_base}_k100.ivecs")
+        }
+        DatasetSource::SyntheticFallback { seed, .. } => {
+            format!("gt_synthetic_seed{seed}_{num_base}_k100.ivecs")
+        }
+        DatasetSource::CustomFiles { .. } => {
+            format!("gt_custom_{num_base}_k100.ivecs")
+        }
+    };
     let cache_path = data_cache_dir.join(cache_filename);
     let cache_k = 100.max(k).min(num_base);
 
@@ -557,14 +609,24 @@ pub fn load_or_compute_phase4_ground_truth(
     })
 }
 
-/// Checks whether an existing per-index report file matches the current git commit, scale, and config.
+/// Checks whether an existing per-index report file matches the current git commit, scale, dataset, and config.
 #[must_use]
+#[allow(clippy::too_many_arguments)]
 pub fn can_resume_existing_report(
     report_path: &Path,
     expected_commit: &str,
+    source_kind: &str,
     scale_vectors: usize,
+    num_query: usize,
+    k: usize,
+    sweep_runs: usize,
+    ef_search_list: &[usize],
+    current_git_dirty: bool,
     idx_cfg: &Phase4IndexConfig,
 ) -> bool {
+    if expected_commit == "unknown" {
+        return false;
+    }
     if !report_path.is_file() {
         return false;
     }
@@ -572,11 +634,23 @@ pub fn can_resume_existing_report(
         Ok(c) => c,
         Err(_) => return false,
     };
+    if !current_git_dirty && content.contains("\"git_dirty\": true") {
+        return false;
+    }
     content.contains("\"measured_this_run\": true")
         && content.contains(&format!("\"git_commit\": \"{expected_commit}\""))
+        && content.contains(&format!("\"source_kind\": \"{source_kind}\""))
         && content.contains(&format!("\"scale_vectors\": {scale_vectors}"))
+        && content.contains(&format!("\"num_query\": {num_query}"))
+        && content.contains(&format!("\"k\": {k}"))
+        && content.contains(&format!("\"sweep_runs\": {sweep_runs}"))
         && content.contains(&format!("\"m\": {}", idx_cfg.m))
         && content.contains(&format!("\"ef_construction\": {}", idx_cfg.ef_construction))
+        && content.contains(&format!("\"seed\": {}", idx_cfg.seed))
+        && ef_search_list
+            .iter()
+            .all(|ef| content.contains(&format!("\"ef_search\": {ef},")))
+        && content.matches("\"ef_search\":").count() == ef_search_list.len()
 }
 
 /// Complete configuration for a Phase 4 sweep execution.
@@ -737,6 +811,10 @@ impl Phase4IndexReport {
             "    \"source_description\": \"{}\",\n",
             escape_json(&self.dataset_source.to_string())
         ));
+        out.push_str(&format!(
+            "    \"is_authentic_sift\": {},\n",
+            self.dataset_source.is_authentic_sift()
+        ));
         out.push_str(&format!("    \"scale_vectors\": {},\n", self.scale_vectors));
         out.push_str(&format!("    \"num_base\": {},\n", self.num_base));
         out.push_str(&format!("    \"num_query\": {},\n", self.num_query));
@@ -812,6 +890,7 @@ impl Phase4IndexReport {
             "    \"peak_rss_mb\": {:.2},\n",
             self.memory_profile.peak_rss_mb
         ));
+        out.push_str("    \"peak_rss_scope\": \"process_lifetime_high_water_mark\",\n");
         out.push_str(&format!(
             "    \"graph_only_bytes_per_vector\": {:.2},\n",
             self.memory_profile.graph_only_bytes_per_vector
@@ -1001,6 +1080,7 @@ pub struct Phase4SweepSummary {
     pub rustc_version: String,
     pub provenance: ReportProvenance,
     pub hardware: HardwareInfo,
+    pub dataset_source: DatasetSource,
     pub scale_vectors: usize,
     pub ground_truth_source: String,
     pub ground_truth_cache_hit: bool,
@@ -1050,7 +1130,11 @@ impl Phase4SweepSummary {
         out.push_str("  },\n");
 
         out.push_str("  \"dataset\": {\n");
-        out.push_str(&format!("    \"scale_vectors\": {}\n", self.scale_vectors));
+        out.push_str(&format!("    \"scale_vectors\": {},\n", self.scale_vectors));
+        out.push_str(&format!(
+            "    \"is_authentic_sift\": {}\n",
+            self.dataset_source.is_authentic_sift()
+        ));
         out.push_str("  },\n");
 
         out.push_str(&format!("  \"scale_vectors\": {},\n", self.scale_vectors));
@@ -1234,7 +1318,18 @@ pub fn run_phase4_sweep(config: &Phase4SweepConfig) -> Result<Phase4SweepSummary
         let report_path = config.output_dir.join(&report_filename);
 
         if config.resume
-            && can_resume_existing_report(&report_path, &current_commit, num_base, idx_cfg)
+            && can_resume_existing_report(
+                &report_path,
+                &current_commit,
+                loaded.source.kind_tag(),
+                num_base,
+                num_query,
+                config.grid.k,
+                config.grid.sweep_runs,
+                &config.grid.ef_search_list,
+                prov.git_dirty,
+                idx_cfg,
+            )
         {
             resumed_skipped_count += 1;
             let entry = parse_resumed_summary_entry(&report_path, idx_cfg, &report_filename);
@@ -1395,6 +1490,7 @@ pub fn run_phase4_sweep(config: &Phase4SweepConfig) -> Result<Phase4SweepSummary
         rustc_version: prov.rustc_version.clone(),
         provenance: prov,
         hardware,
+        dataset_source: loaded.source,
         scale_vectors: num_base,
         ground_truth_source: gt.ground_truth_source,
         ground_truth_cache_hit: gt.ground_truth_cache_hit,
@@ -1421,6 +1517,39 @@ fn parse_resumed_summary_entry(
     let graph_only_bytes_per_vector =
         extract_json_f64_field(&content, "graph_only_bytes_per_vector");
 
+    let mut best_recall: Option<f64> = None;
+    let mut best_qps: Option<f64> = None;
+
+    if let Some(pos) = content.find("\"ef_search_sweep\":") {
+        let sweep_str = &content[pos..];
+        for (i, part) in sweep_str.split("\"recall_at_k\":").enumerate() {
+            if i == 0 {
+                continue;
+            }
+            let trimmed = part.trim_start();
+            let val_str: String = trimmed
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '+')
+                .collect();
+            if let Ok(r) = val_str.parse::<f64>() {
+                best_recall = Some(best_recall.map_or(r, |b| b.max(r)));
+            }
+        }
+        for (i, part) in sweep_str.split("\"qps\":").enumerate() {
+            if i == 0 {
+                continue;
+            }
+            let trimmed = part.trim_start();
+            let val_str: String = trimmed
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '+')
+                .collect();
+            if let Ok(q) = val_str.parse::<f64>() {
+                best_qps = Some(best_qps.map_or(q, |b| b.max(q)));
+            }
+        }
+    }
+
     Phase4IndexSummaryEntry {
         m: idx_cfg.m,
         ef_construction: idx_cfg.ef_construction,
@@ -1433,8 +1562,8 @@ fn parse_resumed_summary_entry(
         build_qps,
         peak_rss_mb,
         graph_only_bytes_per_vector,
-        best_recall: None,
-        best_qps: None,
+        best_recall,
+        best_qps,
     }
 }
 
@@ -1572,6 +1701,7 @@ pub fn run_phase4_cli(args: &[String]) -> Result<Phase4SweepSummary> {
                     rustc_version: "none".to_string(),
                     provenance: detect_provenance(),
                     hardware: detect_hardware(),
+                    dataset_source: DatasetSource::Synthetic { seed: 42 },
                     scale_vectors: 0,
                     ground_truth_source: "none".to_string(),
                     ground_truth_cache_hit: false,
@@ -1751,6 +1881,7 @@ pub fn run_phase4_cli(args: &[String]) -> Result<Phase4SweepSummary> {
                         keep_pruned: true,
                         keep_pruned_shrink: None,
                         seed,
+                        explicit_seed: false,
                     });
                 }
             }
@@ -1787,10 +1918,17 @@ pub fn run_phase4_cli(args: &[String]) -> Result<Phase4SweepSummary> {
     }
     if let Some(s) = cli_seed {
         grid.seed = s;
+        for cfg in &mut grid.configs {
+            if !cfg.explicit_seed {
+                cfg.seed = s;
+            }
+        }
     }
     if let Some(ef_list) = cli_ef_search_list {
         grid.ef_search_list = ef_list;
     }
+
+    grid.validate()?;
 
     let dataset_mode = match dataset_str.to_ascii_lowercase().as_str() {
         "siftsmall" => Phase1DatasetMode::Sift(SiftPreset::SiftSmall),

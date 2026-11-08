@@ -13,9 +13,12 @@ use std::fs;
 use std::path::PathBuf;
 
 use vector_search::benchmark::Phase1DatasetMode;
+use vector_search::dataset::{DatasetSource, LoadedDataset};
 use vector_search::distance::Metric;
+use vector_search::matrix::RowMatrix;
 use vector_search::phase4::{
-    run_phase4_sweep, Phase4GridSpec, Phase4IndexConfig, Phase4SweepConfig,
+    can_resume_existing_report, load_or_compute_phase4_ground_truth, run_phase4_sweep,
+    Phase4GridSpec, Phase4IndexConfig, Phase4SweepConfig,
 };
 
 #[test]
@@ -80,6 +83,26 @@ config = m:32, ef_construction:150, keep_pruned_shrink:false
         Phase4GridSpec::parse_str("ef_search = 10, 0, 50\nconfig = m:8, ef_construction:20")
             .is_err()
     );
+
+    // 8. Seed ordering inheritance: config preceding seed inherits grid seed unless explicitly specified
+    let seed_order_text = r#"
+config = m:16, ef_construction:100
+config = m:8, ef_construction:40, seed:77
+seed = 99
+"#;
+    let spec_seed =
+        Phase4GridSpec::parse_str(seed_order_text).expect("Seed ordering grid must parse");
+    assert_eq!(spec_seed.seed, 99);
+    assert_eq!(spec_seed.configs[0].seed, 99);
+    assert_eq!(spec_seed.configs[1].seed, 77);
+
+    // 9. Explicit validate() method
+    let mut bad_grid = spec_seed.clone();
+    bad_grid.k = 0;
+    assert!(bad_grid.validate().is_err());
+    let mut bad_grid2 = spec_seed.clone();
+    bad_grid2.sweep_runs = 0;
+    assert!(bad_grid2.validate().is_err());
 }
 
 #[test]
@@ -127,10 +150,10 @@ fn test_phase4_prefix_ground_truth_disk_caching() {
 
     let summary1 = run_phase4_sweep(&cfg1).expect("Run 1 must succeed");
     assert!(!summary1.ground_truth_cache_hit);
-    let gt_cache_file = data_dir.join("gt_250_k100.ivecs");
+    let gt_cache_file = data_dir.join("gt_synthetic_seed42_250_k100.ivecs");
     assert!(
         gt_cache_file.is_file(),
-        "gt_250_k100.ivecs must exist after run 1"
+        "gt_synthetic_seed42_250_k100.ivecs must exist after run 1"
     );
 
     let cfg2 = Phase4SweepConfig {
@@ -140,7 +163,7 @@ fn test_phase4_prefix_ground_truth_disk_caching() {
             dim: 16,
             num_clusters: 4,
         },
-        data_cache_dir: data_dir,
+        data_cache_dir: data_dir.clone(),
         output_dir: out_dir2,
         grid,
         metric: Metric::L2Squared,
@@ -156,6 +179,28 @@ fn test_phase4_prefix_ground_truth_disk_caching() {
     assert_eq!(
         summary1.configs[0].best_recall,
         summary2.configs[0].best_recall
+    );
+
+    // Verify Authentic SIFT prefix derivation produces exact "gt_<scale>_k100.ivecs"
+    let fake_authentic = LoadedDataset {
+        base: RowMatrix::new(2, 4, vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]).unwrap(),
+        query: RowMatrix::new(1, 4, vec![1.0, 0.0, 0.0, 0.0]).unwrap(),
+        official_ground_truth: None,
+        source: DatasetSource::AuthenticSift1M {
+            dir: PathBuf::from("data/sift"),
+        },
+        load_time_s: 0.01,
+    };
+    let authentic_gt =
+        load_or_compute_phase4_ground_truth(&fake_authentic, 1, Metric::L2Squared, &data_dir, true)
+            .expect("Authentic SIFT prefix GT computation must succeed");
+    assert!(
+        data_dir.join("gt_2_k100.ivecs").is_file(),
+        "Authentic SIFT prefix GT must produce gt_<scale>_k100.ivecs"
+    );
+    assert_eq!(
+        authentic_gt.ground_truth_cache_path,
+        Some(data_dir.join("gt_2_k100.ivecs"))
     );
 
     let _ = fs::remove_dir_all(&tmp_dir);
@@ -215,9 +260,77 @@ fn test_phase4_resumable_sweep_skips_matching_commit_and_rebuilds_mismatched() {
     let s2 = run_phase4_sweep(&cfg).expect("Sweep 2 must succeed");
     assert_eq!(s2.newly_measured_count, 0);
     assert_eq!(s2.resumed_skipped_count, 2);
+    assert!(
+        s2.configs[0].best_recall.is_some(),
+        "Resumed entry must retain best_recall"
+    );
+    assert!(
+        s2.configs[0].best_qps.is_some(),
+        "Resumed entry must retain best_qps"
+    );
+    let recall_diff =
+        (s2.configs[0].best_recall.unwrap() - s1.configs[0].best_recall.unwrap()).abs();
+    assert!(recall_diff < 1e-5, "Resumed recall must match original");
+    let qps_diff = (s2.configs[0].best_qps.unwrap() - s1.configs[0].best_qps.unwrap()).abs();
+    assert!(qps_diff < 1e-1, "Resumed QPS must match original");
+
+    // Mismatched commit: "unknown" commit override must never resume
+    let mut cfg_unknown = cfg.clone();
+    cfg_unknown.expected_commit_override = Some("unknown".to_string());
+    let s_unknown = run_phase4_sweep(&cfg_unknown).expect("Sweep must succeed");
+    assert_eq!(s_unknown.newly_measured_count, 2);
+    assert_eq!(s_unknown.resumed_skipped_count, 0);
+
+    // Changing sweep_runs must trigger rebuild (smoke run does not block full run)
+    let mut cfg_runs = cfg.clone();
+    cfg_runs.grid.sweep_runs = 2;
+    let s_runs = run_phase4_sweep(&cfg_runs).expect("Sweep must succeed");
+    assert_eq!(s_runs.newly_measured_count, 2);
+    assert_eq!(s_runs.resumed_skipped_count, 0);
+
+    // Changing max_queries must trigger rebuild
+    let mut cfg_queries = cfg.clone();
+    cfg_queries.max_queries = Some(10);
+    let s_queries = run_phase4_sweep(&cfg_queries).expect("Sweep must succeed");
+    assert_eq!(s_queries.newly_measured_count, 2);
+    assert_eq!(s_queries.resumed_skipped_count, 0);
+
+    // Dirty-tree report must not be resumed by a clean-tree runner
+    let cfg1_file = out_dir.join("scale_200_m8_efc20.json");
+    let c1_clean = fs::read_to_string(&cfg1_file).unwrap();
+    let c1_dirty = c1_clean.replace("\"git_dirty\": false", "\"git_dirty\": true");
+    fs::write(&cfg1_file, c1_dirty).unwrap();
+    let can_resume_dirty = can_resume_existing_report(
+        &cfg1_file,
+        "abc1234",
+        "synthetic",
+        200,
+        10,
+        10,
+        1,
+        &cfg.grid.ef_search_list,
+        false, // current runner is clean
+        &cfg.grid.configs[0],
+    );
+    assert!(
+        !can_resume_dirty,
+        "Clean runner must not resume dirty-tree report"
+    );
+
+    // Re-run original clean cfg to re-establish matching report
+    let _ = run_phase4_sweep(&cfg).expect("Sweep must succeed");
+
+    // Changing ef_search_list must trigger rebuild
+    let mut cfg_ef = cfg.clone();
+    cfg_ef.grid.ef_search_list = vec![10, 20, 30];
+    let s_ef = run_phase4_sweep(&cfg_ef).expect("Sweep must succeed");
+    assert_eq!(s_ef.newly_measured_count, 2);
+    assert_eq!(s_ef.resumed_skipped_count, 0);
+
+    // Re-run original clean cfg to re-establish matching report for commit test
+    let _ = run_phase4_sweep(&cfg).expect("Sweep must succeed");
 
     // Modifying config 1's report to have mismatched git_commit: "old0000"
-    let cfg1_file = out_dir.join("scale_200_m8_efc20.json");
     let c1_content = fs::read_to_string(&cfg1_file).unwrap();
     let corrupted =
         c1_content.replace("\"git_commit\": \"abc1234\"", "\"git_commit\": \"old0000\"");
@@ -296,6 +409,8 @@ fn test_phase4_report_json_schema_and_provenance() {
         "\"ef_search_sweep\"",
         "\"warmup_performed\"",
         "\"measured_this_run\"",
+        "\"is_authentic_sift\"",
+        "\"peak_rss_scope\"",
     ];
 
     for field in &required_fields {
@@ -320,6 +435,7 @@ fn test_phase4_report_json_schema_and_provenance() {
         "\"total_configs\"",
         "\"newly_measured_count\"",
         "\"resumed_skipped_count\"",
+        "\"is_authentic_sift\"",
         "\"configs\"",
     ];
 

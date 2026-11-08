@@ -31,7 +31,7 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 ## 3. Current Repository Architecture & File Map
 
 ```text
-├── Cargo.toml                  # Rust crate manifest: 'vector-search' v0.1.0, binaries 'phase1', 'phase2', 'phase3'
+├── Cargo.toml                  # Rust crate manifest: 'vector-search' v0.1.0, binaries 'phase1', 'phase2', 'phase3', 'phase4'
 ├── docs/
 │   └── HNSW_ALGORITHM.md       # Authoritative math & pseudocode spec (Algorithms 1-5)
 ├── src/
@@ -40,6 +40,7 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 │   ├── hnsw.rs                 # HNSW multi-layer graph index (Algorithms 1-5, compact u32 flat adjacency)
 │   ├── bin/phase2.rs           # CLI entry point for Phase 2 runner (`phase2`)
 │   ├── bin/phase3.rs           # CLI entry point for Phase 3 SIFT1M runner (`phase3`)
+│   ├── bin/phase4.rs           # CLI entry point for Phase 4 parameter sweep runner (`phase4`)
 │   ├── matrix.rs               # Contiguous row-major RowMatrix<f32>
 │   ├── distance.rs             # 8-way unrolled L2^2, Euclidean, Inner Product kernels
 │   ├── rng.rs                  # Deterministic SplitMix64 + Xoshiro256** PRNG
@@ -48,6 +49,7 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 │   ├── recall.rs               # Recall@k, verify_self_recall, latency percentiles
 │   ├── hardware.rs             # System CPU / RAM / OS hardware detection
 │   ├── benchmark.rs            # End-to-end benchmark orchestrator & JSON reporter
+│   ├── phase4.rs               # Phase 4 resumable parameter sweep runner & prefix GT caching
 │   └── hnsw_phase1/            # Python reference implementation & BLAS GEMM baseline
 ├── tests/
 │   ├── rust_phase1_tests.rs    # 16 Rust Phase 1 integration & edge-case tests (PASSING)
@@ -56,6 +58,7 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 │   ├── adversarial_graph_fingerprint_tests.rs # 10 Rust graph fingerprint & mutation tests (PASSING)
 │   ├── challenge_m1_p35_tests.rs # 8 Rust Phase 3.5 instrumentation, golden & layout tests (PASSING)
 │   ├── rust_phase3_tests.rs    # 11 Rust Phase 3 report semantics, GT check & sweep tests (PASSING)
+│   ├── rust_phase4_tests.rs    # 4 Rust Phase 4 grid parsing, GT caching & sweep tests (PASSING)
 │   ├── test_phase1.py          # 23 Python reference tests (PASSING)
 │   └── test_rust_parity.py     # 4 Rust <-> Python <-> FAISS parity tests (PASSING)
 ├── results/phase3_5/           # Phase 3.5 golden fixtures, baseline/final reports & LOG.md
@@ -81,7 +84,7 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 6. **Self-Verification Invariant**: `Recall@k(GT, GT) == 1.000000` (100.0%) strictly verified.
 7. **FAISS Parity Alignment**: `1000/1000` (100.0%) exact neighbor ID match against `faiss.IndexFlatL2`.
 8. **Test Suite Status**:
-   - `cargo test`: **80/80 PASS** (16 Phase 1 + 23 Phase 2 + 12 adversarial_hnsw + 10 adversarial_graph_fingerprint + 8 challenge_m1_p35 + 11 Phase 3; siftsmall tests skip if `data/*.fvecs` is absent)
+   - `cargo test`: **84/84 PASS** (16 Phase 1 + 23 Phase 2 + 12 adversarial_hnsw + 10 adversarial_graph_fingerprint + 8 challenge_m1_p35 + 11 Phase 3 + 4 Phase 4; siftsmall tests skip if `data/*.fvecs` is absent)
    - `pytest`: **27/27 PASS** (with `faiss-cpu` installed; the FAISS parity test skips otherwise)
 
 ---
