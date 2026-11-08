@@ -20,5 +20,6 @@ pub mod exact_knn;
 pub mod hardware;
 pub mod hnsw;
 pub mod matrix;
+pub mod phase4;
 pub mod recall;
 pub mod rng;
