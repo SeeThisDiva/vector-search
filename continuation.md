@@ -3,7 +3,7 @@
 Read this first, then `CLAUDE.md` and `CONTEXT_AND_MEMORY.md`. This file is the most recent state; if they disagree, this wins.
 
 ## Project in one line
-From-scratch HNSW ANN search in Rust (`#![forbid(unsafe_code)]`, std only), benchmarked against brute force and FAISS. Phases 1–3.5 and M0 closed. Phase 4 `T2.1` (100k pilot + `results/phase4/PROPOSAL.md`) and `T2.2` (resumable sweep runner + CLI) are complete. **Paused at Gate G2 awaiting Dev's approval of the grid and budget.**
+From-scratch HNSW ANN search in Rust (`#![forbid(unsafe_code)]`, std only), benchmarked against brute force and FAISS. Milestones M0, M1 (Phase 3.5), and M2 (Phase 4) are complete (`T0.1`–`T2.6`). **Paused at Gate G3 awaiting Dev's sign-off before Milestone M3 (Phase 5: Filtered Search).**
 
 ## Working agreement
 - Dev designs, agents code. Do not start a later phase until the current one is reviewed.
@@ -130,6 +130,9 @@ Tip for quick iteration: release builds use `lto = "thin"` and `codegen-units = 
 ## Housekeeping checklist
 - [x] Apply and commit the review patch.
 - [x] Regenerate `data/phase3_report.json` with the fixed binary and confirm it has `reproducibility_checked`, `measured_this_run` and a computed `phase3_completed`.
+- [x] Dev signs off Phase 3 (Gate G0).
+- [x] Dev signs off Phase 3.5 optimization decisions (Gate G1).
+- [x] Dev approves Phase 4 grid & time budget (Gate G2).
+- [ ] Dev signs off Phase 4 evaluation & Pareto write-up (Gate G3).
 - [ ] CI: confirm green on a fresh clone after pushing.
-- [ ] Dev signs off Phase 3.
 - [x] Update `CLAUDE.md`, `CONTEXT_AND_MEMORY.md` and README test counts whenever tests are added.

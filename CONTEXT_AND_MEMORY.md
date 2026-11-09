@@ -11,9 +11,10 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 ### Build Roadmap (7 Phases — Stop After Each)
 - [x] **Phase 1: Brute-Force Exact $k$-NN Ground Truth & Recall Harness** *(COMPLETED & VERIFIED)*
 - [x] **Phase 2: HNSW Insert + Search, Correctness-Checked on 10k Vectors** *(COMPLETED & VERIFIED)*
-- [x] **Phase 3: Scale to 1M Vectors (`SIFT1M`), Profile Memory & Build Time** *(IMPLEMENTED, AWAITING DEV'S REVIEW; do not start Phase 4 before that)*
-- [ ] **Phase 4: Parameter Sweep ($M$, $efConstruction$, $efSearch$), Plot Recall@10 vs. p99 Latency**
-- [ ] **Phase 5: Filtered Search with Metadata Predicates (Including Selective Filters)**
+- [x] **Phase 3: Scale to 1M Vectors (`SIFT1M`), Profile Memory & Build Time** *(COMPLETED & VERIFIED — Gate G0)*
+- [x] **Phase 3.5: Memory Optimization & Adjacency Flattening** *(COMPLETED & VERIFIED — Gate G1)*
+- [x] **Phase 4: Parameter Sweep ($M$, $efConstruction$, $efSearch$), Plot Recall@10 vs. p99 Latency** *(COMPLETED & VERIFIED — Paused at Gate G3)*
+- [ ] **Phase 5: Filtered Search with Metadata Predicates (Including Selective Filters)** *(Milestone M3: pending Gate G3 sign-off)*
 - [ ] **Phase 6: Scalar (SQ8) or Product Quantization (PQ), Measure Recall Cost**
 - [ ] **Phase 7: Head-to-Head Benchmark vs. FAISS on Identical Hardware**
 
@@ -99,28 +100,62 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 
 ---
 
-## 6. Key Commands for Quick Verification
+## 6. Phase 3 & 3.5 (Milestone M1) Verified Results
+
+- [x] **Scale to 1M Vectors (`SIFT1M`)**: Built index on 1,000,000 128-d vectors in 450.3 s (2,220.7 vec/s).
+- [x] **Bit-Exact Ground Truth Alignment**: Official Texmex `sift_groundtruth.ivecs` verified with `999/1000` ID overlap (1 distance boundary tie) and 100% boundary distance compliance.
+- [x] **Adjacency Flattening & Memory Breakthrough (`T1.7`)**: Replaced pointer-heavy nested structures with flat contiguous `u32` slice storage (`layer0` stride `m_max0 + 1 = 33`, `upper_arena` stride `m_max + 1 = 17`).
+  - Graph-only memory dropped **56.0%** from `338.67 B/vec` to **`148.91 B/vec`** (`-180.97 MiB` at 1M).
+  - Isolated 1M peak RSS dropped from `845.75 MiB` to **`646.05 MiB`** (`-199.70 MiB`).
+  - 100k build time dropped **10.37%** (`30.3 s -> 27.2 s`).
+  - Preserved **100% bit-exact** graph fingerprints and query results.
+- [x] **Gate G0 and G1 Signed Off**: Zero-cost instrumentation (`--features instrument`), reproducible 64-bit graph fingerprinting, and strict provenance tracking merged.
+
+---
+
+## 7. Phase 4 (Milestone M2) Verified Results & Current Status
+
+- [x] **100k Wide Parameter Sweep (`T2.3`)**: Swept 23 configurations ($M \in \{8, 12, 16, 24, 32, 48\}$, $\text{efC} \in \{40, 100, 200, 400\}$ with $\text{efC} \ge M$) across a 12-point `efSearch` ladder $\{10..600\}$ on cached prefix ground truth.
+- [x] **Publication-Grade Pareto Visualization (`T2.4`)**: Implemented `scripts/plot_phase4.py` (`matplotlib` only, 100% typed, 0 lints) producing 4 clean charts in PNG and SVG under `results/phase4/`:
+  - `chart1_recall_vs_p99`: Recall@10 vs p99 query latency (log scale) with empirical Pareto frontier.
+  - `chart2_recall_vs_qps`: Recall@10 vs single-thread QPS.
+  - `chart3_build_time_vs_recall`: Construction throughput vs achievable recall at fixed latency.
+  - `chart4_memory_vs_m`: Graph memory bytes per vector vs $M$ demonstrating strict scale invariance.
+- [x] **1M Vector Confirmation (`T2.5`)**: Benchmarked 4 empirical Pareto points on full SIFT1M with 5 timed passes pinned to P-core `0x0004`:
+  - $M=8, \text{efC}=100$: 266.5 s build, 85.4 B/vec graph, 20,150.7 QPS at ef=10, 0.9947 Recall@10 at ef=600.
+  - $M=16, \text{efC}=100$ (Phase 3 baseline): 450.3 s build, 148.9 B/vec graph, 0.9806 Recall@10 at ef=100 (2,383.9 QPS, 0.55 ms p99). Bit-exact graph fingerprint `0x44044886c62bca5e`.
+  - $M=32, \text{efC}=200$: 1,288.9 s build, 272.3 B/vec graph, 0.9828 Recall@10 at ef=50 (2,579.7 QPS), 0.9988 at ef=200.
+  - $M=48, \text{efC}=400$: 2,828.0 s build, 402.4 B/vec graph, 0.9917 Recall@10 at ef=50 (1,918.8 QPS), 0.9992 at ef=200.
+- [x] **Documentation & Claims Ledger (`T2.6`)**: Authored comprehensive Phase 4 section in `README.md` and registered every number in `results/CLAIMS.md` Section 10.
+- [ ] **Current Gate Status**: Strictly paused at **Gate G3** awaiting Dev's sign-off before Milestone M3 (Phase 5).
+
+---
+
+## 8. Key Commands for Quick Verification
 
 ```powershell
-# Run all Rust unit & integration tests
-cargo test
+# Run all Rust unit & integration tests (84 tests)
+cargo test --release
 
 # Run Rust in release mode with clippy checks
 cargo clippy --all-targets -- -D warnings
 
-# Execute Phase 1 CLI benchmark (SIFT small)
-cargo run --release --bin phase1 -- --dataset siftsmall --k 10
+# Check code formatting
+cargo fmt --all -- --check
 
-# Execute Phase 1 CLI benchmark (offline synthetic seeded)
-cargo run --release --bin phase1 -- --dataset synthetic --num-base 10000 --num-query 100 --k 10 --seed 42
+# Run all Python reference & parity tests (27 tests, 0 skipped)
+python -m pytest tests -q -rs
 
-# Run all Python reference & parity tests
-pytest
+# Run Python lint & type checks
+ruff check . ; mypy src tests scripts
+
+# Execute Phase 4 parameter sweep runner
+cargo run --release --bin phase4 -- --scale 100000 --output-dir results/phase4
 ```
 
 ---
 
-## 7. Critical Design Rules & Gotchas
+## 9. Critical Design Rules & Gotchas
 
 1. **No Unsafe Code**: The Rust codebase enforces `#![forbid(unsafe_code)]`. Do not use `unsafe`.
 2. **Canonical Ordering**: Whenever sorting top-$k$ results, use `(ordered_float(distance), node_id)` to guarantee bit-exact determinism across platforms.
