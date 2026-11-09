@@ -186,8 +186,8 @@ Do not start until G1 is signed.
   3. Build time vs best achievable recall at a fixed latency budget, per config.
   4. Graph memory per vector vs M.
   Plain, readable styling: labeled axes with units, legend, no decoration. Each chart's caption states hardware, dataset, scale, repetitions.
-- [ ] **T2.5 Run the 1M finals** (Benchmarker) and add them to chart 1 as a separate marker style.
-- [ ] **T2.6 Write-up.** README section with the frontier, the recommended operating points, and what changed with scale. Every number goes in `CLAIMS.md`.
+- [x] **T2.5 Run the 1M finals** (Benchmarker) and add them to chart 1 as a separate marker style.
+- [x] **T2.6 Write-up.** README section with the frontier, the recommended operating points, and what changed with scale. Every number goes in `CLAIMS.md`.
 - [ ] **Gate G3 (Dev):** signs off Phase 4.
 
 ### M3. Phase 5: filtered search (design brief; expand after G3)

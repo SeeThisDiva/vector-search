@@ -114,7 +114,7 @@ Order matters. Do not skip ahead, and stop for Dev's review after each numbered 
    - Implemented and kept `T1.7` (`u32` ids and flat fixed-capacity adjacency in `layer0` + `upper_arena`), cutting graph-only memory by 56.0% (`338.67 -> 148.91 B/vector`), 1M Peak RSS by 199.7 MiB (`845.75 -> 646.05 MiB`), and 100k 3-run median build time by 10.37% (`30.299 s -> 27.157 s`);
    - Implemented and evaluated `T1.9` (`keep_pruned_shrink = Some(false)` behind config flag) at 100k (`21.351 s`, `-29.53%`) and 1M (`415.076 s`, `-18.81%`), recording the full `efSearch` sweep and matched-latency comparison in `results/phase3_5/LOG.md` for Dev's **Gate G1** decision.
 4. **Every optimization keeps `--repro-check` passing and all tests green.** *(Verified: 84 Rust tests + 27 Python tests pass; golden 10k/100k fixtures and 1M `--repro-check` match bit-for-bit.)*
-5. **Phase 4:** T2.1 (proposal & pilot), T2.2 (resumable sweep runner), T2.3 (23-config 100k sweep), and T2.4 (publication-grade Pareto plots) are complete and committed. Selected 4 Pareto points for 1M finals in `results/phase4/grid_1m.grid`. Proceeding to **T2.5** (1M finals) and **T2.6** (write-up & claims ledger).
+5. **Phase 4:** T2.1 (proposal & pilot), T2.2 (resumable sweep runner), T2.3 (23-config 100k sweep), T2.4 (publication-grade Pareto plots), T2.5 (1M finals on 4 Pareto points), and T2.6 (README write-up & CLAIMS.md Section 10) are 100% complete. Paused at **Gate G3** awaiting Dev's sign-off before Phase 5 (`results/phase5/DESIGN.md`).
 
 ## Commands
 ```bash

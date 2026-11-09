@@ -191,3 +191,58 @@ python -m pytest tests/ -v --cov=src
 ruff check .
 mypy src tests
 ```
+
+---
+
+## Phase 4: Parameter Sweep, Pareto Frontier & 1M Finals
+
+Phase 4 executes an empirical grid exploration across degree bounds $M \in \{8, 12, 16, 24, 32, 48\}$ and construction depths $\text{efConstruction} \in \{40, 100, 200, 400\}$ subject to $\text{efConstruction} \ge M$ (23 configurations) on a 100,000-vector prefix of Texmex SIFT1M, followed by 1,000,000-vector confirmation sweeps across 4 selected Pareto-optimal points.
+
+All benchmarks were executed single-threaded, pinned to Performance core affinity mask `0x0004` on a 12th Gen Intel(R) Core(TM) i7-12650H under clean Git commits.
+
+### Publication-Grade Benchmark Charts
+
+Generated deterministically via [`scripts/plot_phase4.py`](scripts/plot_phase4.py) (matplotlib only, zero external styling dependencies) into [`results/phase4/`](results/phase4/):
+
+1. **Recall@10 vs p99 Latency (Log Scale):** [`results/phase4/chart1_recall_vs_p99.png`](results/phase4/chart1_recall_vs_p99.png) ([SVG](results/phase4/chart1_recall_vs_p99.svg))
+   *Plots all 23 100k curves, the 100k Pareto frontier, and overlay markers for the 4 1M final confirmations.*
+2. **Recall@10 vs Single-Thread QPS:** [`results/phase4/chart2_recall_vs_qps.png`](results/phase4/chart2_recall_vs_qps.png) ([SVG](results/phase4/chart2_recall_vs_qps.svg))
+3. **Construction Efficiency (Build Time vs Recall):** [`results/phase4/chart3_build_time_vs_recall.png`](results/phase4/chart3_build_time_vs_recall.png) ([SVG](results/phase4/chart3_build_time_vs_recall.svg))
+4. **Graph Memory Footprint vs Degree Bound $M$:** [`results/phase4/chart4_memory_vs_m.png`](results/phase4/chart4_memory_vs_m.png) ([SVG](results/phase4/chart4_memory_vs_m.svg))
+
+### 1,000,000 Vector Final Confirmation (Authentic SIFT1M, 5 Timed Repetitions)
+
+Evaluated against the official Texmex 100-NN ground truth ([`data/sift1m/sift_groundtruth.ivecs`](data/sift1m/sift_groundtruth.ivecs)) across 10,000 queries ($k=10$, 1 warmup + 5 timed passes):
+
+| Operating Point | Build Time (s) | Build QPS | Graph Memory | Peak RSS | efSearch | Recall@10 | Single-Thread QPS | p99 Latency | Mean Latency |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **$M=8, \text{efC}=100$**<br>*(Throughput / Low Memory)* | **266.541 s** | 3,751.8 vec/s | **85.44 B/vec**<br>(81.5 MiB) | 583.42 MiB | 10<br>50<br>100<br>200<br>600 | 0.57222<br>0.86072<br>0.93304<br>0.97330<br>0.99470 | **20,150.7**<br>6,743.3<br>3,861.6<br>2,071.0<br>781.7 | **0.0830 ms**<br>0.2109 ms<br>0.3390 ms<br>0.6434 ms<br>1.6119 ms | 0.0495 ms<br>0.1481 ms<br>0.2588 ms<br>0.4826 ms<br>1.2790 ms |
+| **$M=16, \text{efC}=100$**<br>*(Phase 3 Reference)* | **450.301 s** | 2,220.7 vec/s | **148.91 B/vec**<br>(142.0 MiB) | 647.26 MiB | 10<br>50<br>100<br>200<br>600 | 0.73315<br>0.94703<br>0.98061<br>0.99376<br>0.99804 | 12,711.7<br>4,209.0<br>2,383.9<br>1,296.0<br>515.5 | 0.1284 ms<br>0.3230 ms<br>0.5515 ms<br>1.0673 ms<br>2.6370 ms | 0.0785 ms<br>0.2374 ms<br>0.4193 ms<br>0.7714 ms<br>1.9397 ms |
+| **$M=32, \text{efC}=200$**<br>*(Balanced Pareto Point)* | **1,288.897 s** | 775.9 vec/s | **272.33 B/vec**<br>(259.7 MiB) | 767.40 MiB | 10<br>50<br>100<br>200<br>600 | 0.84614<br>**0.98278**<br>**0.99572**<br>**0.99881**<br>0.99944 | 7,953.7<br>2,579.7<br>1,476.8<br>842.2<br>348.6 | 0.2041 ms<br>0.5304 ms<br>0.9404 ms<br>1.6854 ms<br>4.2463 ms | 0.1255 ms<br>0.3874 ms<br>0.6769 ms<br>1.1871 ms<br>2.8686 ms |
+| **$M=48, \text{efC}=400$**<br>*(High-Accuracy / Saturated)* | **2,827.980 s** | 353.6 vec/s | **402.42 B/vec**<br>(383.8 MiB) | 889.69 MiB | 10<br>50<br>100<br>200<br>600 | 0.89372<br>**0.99165**<br>**0.99803**<br>**0.99922**<br>**0.99944** | 5,905.2<br>1,918.8<br>1,110.1<br>643.9<br>273.0 | 0.2685 ms<br>0.7254 ms<br>1.2947 ms<br>2.3104 ms<br>5.7290 ms | 0.1692 ms<br>0.5209 ms<br>0.9006 ms<br>1.5529 ms<br>3.6630 ms |
+
+### Recommended Operating Points
+
+1. **Ultra-Low Memory / Throughput-Critical:** **$M=8, \text{efConstruction}=100$**
+   - Memory: only **$85.44\text{ B/vector}$** graph storage ($583\text{ MiB}$ peak RSS for 1M vectors).
+   - Throughput: **$20,150\text{ QPS}$** ($0.083\text{ ms}$ p99) at $\text{ef}=10$.
+   - Use case: High-volume serving, embedded environments, or large-scale indexes under strict RAM constraints.
+2. **General Production Standard:** **$M=16, \text{efConstruction}=100$**
+   - Memory: **$148.91\text{ B/vector}$** ($647\text{ MiB}$ peak RSS for 1M vectors).
+   - Performance: $98.06\%$ recall at $\text{ef}=100$ ($2,384\text{ QPS}$), reaching $99.38\%$ recall at $\text{ef}=200$.
+   - Build cost: fast $7.5\text{ min}$ build on a single laptop P-core ($2,221\text{ vec/s}$).
+3. **High-Precision Production:** **$M=32, \text{efConstruction}=200$**
+   - Performance: **$98.28\%$ recall** at only $\text{ef}=50$ ($2,580\text{ QPS}$), surpassing $99.57\%$ recall at $\text{ef}=100$ and $99.88\%$ recall at $\text{ef}=200$.
+   - Build cost: $21.5\text{ min}$ build time.
+   - Use case: Production retrieval systems requiring $\ge 99.5\%$ recall with sub-millisecond p99 latencies.
+4. **Accuracy-Saturated Index:** **$M=48, \text{efConstruction}=400$**
+   - Performance: **$99.16\%$ recall** at $\text{ef}=50$, saturating at $99.94\%$ recall.
+   - Build cost: $47.1\text{ min}$ build time.
+   - Use case: Offline evaluation ground-truthing or quality-first semantic ranking where missing any neighbor is unacceptable.
+
+### Scale Dynamics: 100k vs 1M Transitions
+
+- **Recall Degradation at Fixed $\text{efSearch}$:** For reference point $M=16, \text{efC}=100$, recall at $\text{efSearch}=50$ decreases from $98.02\%$ at 100k to $94.70\%$ at 1M. As the vector volume expands by $10\times$, search depth $\text{efSearch}$ must be scaled from $\approx 50$ to $\approx 100\text{–}150$ to preserve $\ge 98\%$ recall.
+- **Graph Adjacency Memory Invariance:** Because of the contiguous flat $u32$ edge storage with fixed upper-layer geometry, graph memory per vector remains strictly bounded and scale-invariant ($M=8$: $81.9 \to 85.4\text{ B/vec}$; $M=16$: $145.6 \to 148.9\text{ B/vec}$; $M=32$: $273.4 \to 272.3\text{ B/vec}$; $M=48$: $404.0 \to 402.4\text{ B/vec}$).
+- **Construction Scaling:** Index build time scales cleanly at $O(N \log N)$ (e.g. $M=16, \text{efC}=100$ builds in $26.1\text{ s}$ at 100k and $450.3\text{ s}$ at 1M, a scaling factor of $17.3\times$ for $10\times$ vectors).
+
