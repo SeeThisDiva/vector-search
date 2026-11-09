@@ -179,8 +179,8 @@ Do not start until G1 is signed.
   - The agent must run one pilot build (M=16, efC=100 at 100k) and one pilot sweep, then extrapolate time. Build time grows with both M and efC, so the biggest configs dominate; give a worst-case figure. My rough guess before measuring is a few hours for the 100k grid and under an hour per 1M build at the larger settings, which is exactly why this needs a budget before anything runs.
 - [x] **Gate G2 (Dev):** approves grid and budget (23 configurations, full 12-point ladder, ~95 min budget approved).
 - [x] **T2.2 Sweep runner.** Class: MEASUREMENT-ONLY. A `phase4` binary: reads a grid file, builds each index, runs the efSearch sweep, writes one JSON per index (same conventions as Phase 3: hardware, dataset source, config, fingerprint, provenance, `measured_this_run`). Must be resumable (skip configs whose JSON exists and matches the current commit) so a crash or a laptop sleep does not lose hours. Prefix ground truth cached per section 4. Tests on small synthetic data for grid parsing, resume logic, and JSON schema.
-- [ ] **T2.3 Run the 100k sweep** (Benchmarker, protocol in section 4, clean commit).
-- [ ] **T2.4 Plot script.** `scripts/plot_phase4.py`, matplotlib only, deterministic, writes PNG and SVG into `results/phase4/`. Charts:
+- [x] **T2.3 Run the 100k sweep** (Benchmarker, protocol in section 4, clean commit).
+- [x] **T2.4 Plot script.** `scripts/plot_phase4.py`, matplotlib only, deterministic, writes PNG and SVG into `results/phase4/`. Charts:
   1. Recall@10 (x) vs p99 latency in ms (y, log scale), one line per (M, efC), Pareto frontier drawn explicitly. Zoom x to the interesting recall range (for example 0.90 to 1.00).
   2. Same with QPS (single thread) instead of p99.
   3. Build time vs best achievable recall at a fixed latency budget, per config.

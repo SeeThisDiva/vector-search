@@ -1,0 +1,19 @@
+# Phase 4 Final Confirmation Grid (1M SIFT1M)
+# 4 Pareto-optimal configurations selected from the 100k sweep
+scale = 1000000
+k = 10
+sweep_runs = 5
+seed = 42
+ef_search = 10, 20, 30, 40, 50, 70, 100, 150, 200, 300, 400, 600
+
+# 1. Lightweight / Maximum Throughput
+config = m=8, ef_construction=100
+
+# 2. Reference Baseline (Phase 3 matched)
+config = m=16, ef_construction=100
+
+# 3. Balanced Pareto Frontier
+config = m=32, ef_construction=200
+
+# 4. Maximum Recall / Dense Graph
+config = m=48, ef_construction=400

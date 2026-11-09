@@ -115,6 +115,18 @@ seed = 99
     );
     assert_eq!(grid_100k.scale_vectors, Some(100_000));
     assert_eq!(grid_100k.ef_search_list.len(), 12);
+
+    // 11. Canonical 1M grid file from repository
+    let grid_1m_path = std::path::Path::new("results/phase4/grid_1m.grid");
+    let grid_1m = Phase4GridSpec::from_file(grid_1m_path).expect("grid_1m.grid must parse cleanly");
+    assert_eq!(
+        grid_1m.configs.len(),
+        4,
+        "1M grid must contain exactly 4 Pareto frontier configs"
+    );
+    assert_eq!(grid_1m.scale_vectors, Some(1_000_000));
+    assert_eq!(grid_1m.sweep_runs, 5);
+    assert_eq!(grid_1m.ef_search_list.len(), 12);
 }
 
 #[test]
