@@ -27,6 +27,10 @@ path = "src/bin/phase3.rs"
 name = "phase4"
 path = "src/bin/phase4.rs"
 
+[[bin]]
+name = "generate_metadata"
+path = "src/bin/generate_metadata.rs"
+
 [features]
 default = []
 instrument = []
