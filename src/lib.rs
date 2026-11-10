@@ -17,9 +17,15 @@ pub mod dataset;
 pub mod distance;
 pub mod error;
 pub mod exact_knn;
+pub mod filter;
 pub mod hardware;
 pub mod hnsw;
 pub mod matrix;
 pub mod phase4;
 pub mod recall;
 pub mod rng;
+
+pub use filter::{
+    BitsetOneIterator, DenseBitset, FilterPredicate, FilteredSearchFlags, FilteredSearchOutput,
+    FilteredSearchParams, LambdaPredicate,
+};
