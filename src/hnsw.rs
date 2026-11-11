@@ -9,6 +9,9 @@ use std::collections::{BinaryHeap, HashSet};
 use crate::distance::{inner_product, l2_squared, Metric};
 use crate::error::{Result, VectorSearchError};
 use crate::exact_knn::{KnnSearchResult, TimedKnnSearchResult};
+use crate::filter::{
+    FilterPredicate, FilteredSearchFlags, FilteredSearchOutput, FilteredSearchParams,
+};
 use crate::matrix::RowMatrix;
 use crate::recall::{compute_latency_stats, LatencyStats};
 use crate::rng::DeterministicRng;
@@ -279,6 +282,48 @@ impl HeuristicScratch {
             + self.e_cands.capacity() * std::mem::size_of::<Candidate>()
             + self.outer_neighbors.capacity() * std::mem::size_of::<usize>()
             + self.seen.capacity() * (std::mem::size_of::<usize>() + 1)
+    }
+}
+
+/// Execution strategy for filtered approximate nearest neighbor search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterStrategy {
+    /// Strategy 1: Post-filtering with iterative widening over-fetch candidate pool.
+    PostFilterOverfetch,
+    /// Strategy 2: In-traversal predicate filtering with bridge-node routing.
+    InTraversal,
+    /// Strategy 3: Pre-filter brute force flat scan over bitset-backed predicate.
+    PreFilterBruteForce,
+}
+
+/// Reusable per-thread scratch buffers for filtered HNSW queries.
+#[derive(Debug, Clone, Default)]
+pub struct FilteredSearchScratch {
+    /// Visited tracking tag array.
+    pub tracker: VisitedTracker,
+    /// Priority queue for candidate exploration (Min-Heap).
+    pub frontier: BinaryHeap<Reverse<Candidate>>,
+    /// Priority queue for matching results (Max-Heap).
+    pub matched_results: BinaryHeap<Candidate>,
+    /// Temporary candidate collection buffer.
+    pub raw_candidates: Vec<Candidate>,
+    /// Over-fetch staging buffer for Strategy 1.
+    pub overfetch_buffer: Vec<(f32, usize)>,
+}
+
+impl FilteredSearchScratch {
+    /// Preallocates every buffer for the largest query the caller will issue.
+    ///
+    /// Buffers are pre-sized to avoid dynamic heap reallocations during search traversals.
+    #[must_use]
+    pub fn new(num_nodes: usize, max_ef: usize, overfetch_cap: usize) -> Self {
+        Self {
+            tracker: VisitedTracker::new(num_nodes),
+            frontier: BinaryHeap::with_capacity(num_nodes),
+            matched_results: BinaryHeap::with_capacity(max_ef + 1),
+            raw_candidates: Vec::with_capacity(overfetch_cap),
+            overfetch_buffer: Vec::with_capacity(overfetch_cap),
+        }
     }
 }
 
@@ -1524,5 +1569,819 @@ impl<'a> HnswIndex<'a> {
             indices: RowMatrix::new(num_queries, effective_k, all_indices)?,
             distances: RowMatrix::new(num_queries, effective_k, all_distances)?,
         })
+    }
+
+    // =========================================================================
+    // Milestone M3 Task T3.4: Filtered Search (Strategy 1 Post-Filter Over-Fetch)
+    // =========================================================================
+
+    /// Executes Strategy 1 post-filter approximate nearest neighbor search with iterative widening over-fetch.
+    ///
+    /// # Sizing Formula & Widening Loop
+    /// - Initial candidate pool size:
+    ///   $$k'_0 = \min\left(K'_{\max}, \ \left\lceil \frac{k}{\sigma} \cdot \gamma \right\rceil\right)$$
+    ///   where $\gamma(\sigma, \delta) \approx 1 + z_{1-\delta} \sqrt{\frac{1 - \sigma}{k}}$ with $\delta = 0.001$ ($z_{1-\delta} \approx 3.0902323$).
+    ///   If `params.overfetch_factor` is explicitly set, it overrides $\gamma$.
+    /// - Widening step:
+    ///   $$k'_{i+1} = \min\left(K'_{\max}, \ \max(k'_i + 1, \lfloor 2.5 \cdot k'_i \rfloor)\right)$$
+    /// - Loop terminates when $m \ge k$ (with `post_filter_cap_reached = false`) or when $k'_i == K'_{\max}$ (with `post_filter_cap_reached = true`).
+    pub fn search_knn_filtered_post<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+    ) -> Result<FilteredSearchOutput> {
+        let mut tracker = VisitedTracker::new(self.node_meta.len());
+        self.search_knn_filtered_post_with_tracker(query, k, predicate, params, &mut tracker)
+    }
+
+    /// Read-only Strategy 1 post-filtering search reusing an externally provided [`VisitedTracker`].
+    pub fn search_knn_filtered_post_with_tracker<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+        tracker: &mut VisitedTracker,
+    ) -> Result<FilteredSearchOutput> {
+        if k == 0 {
+            return Err(VectorSearchError::InvalidArgument(
+                "k must be positive (> 0)".to_string(),
+            ));
+        }
+        if query.iter().any(|v| !v.is_finite()) {
+            return Err(VectorSearchError::InvalidArgument(
+                "query vector contains non-finite value (NaN/Inf)".to_string(),
+            ));
+        }
+
+        if self.matrix.cols() > 0 && query.len() != self.matrix.cols() {
+            return Err(VectorSearchError::DimensionMismatch {
+                expected: self.matrix.cols(),
+                actual: query.len(),
+            });
+        }
+
+        if self.node_meta.is_empty() || self.enter_point.is_none() {
+            return Ok(FilteredSearchOutput {
+                results: Vec::new(),
+                flags: FilteredSearchFlags::default(),
+            });
+        }
+
+        let k_max = params.overfetch_cap;
+        if k_max == 0 {
+            return Ok(FilteredSearchOutput {
+                results: Vec::new(),
+                flags: FilteredSearchFlags {
+                    post_filter_cap_reached: true,
+                    ..Default::default()
+                },
+            });
+        }
+
+        // Determine selectivity sigma
+        let total = self.node_meta.len();
+        let sigma = if let Some(count) = predicate.count_matching(total) {
+            if total == 0 {
+                1.0
+            } else {
+                (count as f64) / (total as f64)
+            }
+        } else {
+            1.0
+        };
+
+        // Determine over-fetch factor gamma
+        let gamma = if let Some(user_factor) = params.overfetch_factor {
+            user_factor
+        } else if sigma <= 0.0 {
+            1.0
+        } else {
+            const Z_DELTA: f64 = 3.090_232_306_143_706; // z_{1-delta} for delta = 0.001
+            let variance_term = ((1.0 - sigma).max(0.0) / (k as f64)).sqrt();
+            1.0 + Z_DELTA * variance_term
+        };
+
+        // Initial candidate pool size k'_0
+        let mut k_prime = if sigma <= 0.0 {
+            k_max
+        } else {
+            let raw = ((k as f64) / sigma) * gamma;
+            let raw_ceil = raw.ceil();
+            if raw_ceil.is_nan() || raw_ceil >= (k_max as f64) {
+                k_max
+            } else {
+                (raw_ceil as usize).max(1).min(k_max)
+            }
+        };
+
+        let mut best_matches: Vec<(f32, usize)> = Vec::new();
+        let mut eval_count = 0;
+
+        loop {
+            let current_ef = params.ef_search.max(k_prime);
+            let candidates = self.search_knn_with_tracker(query, k_prime, current_ef, tracker)?;
+
+            let mut eval_limit_reached = false;
+            for (d, id) in candidates {
+                if let Some(limit) = params.eval_limit {
+                    if predicate.bitset().is_none() && eval_count >= limit {
+                        eval_limit_reached = true;
+                        break;
+                    }
+                }
+                if predicate.bitset().is_none() {
+                    eval_count += 1;
+                }
+                if predicate.matches(id as u32) && !best_matches.iter().any(|m| m.1 == id) {
+                    best_matches.push((d, id));
+                }
+            }
+
+            best_matches.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+
+            if best_matches.len() >= k {
+                best_matches.truncate(k);
+                return Ok(FilteredSearchOutput {
+                    results: best_matches,
+                    flags: FilteredSearchFlags {
+                        post_filter_cap_reached: false,
+                        eval_limit_reached,
+                        ..Default::default()
+                    },
+                });
+            }
+
+            if eval_limit_reached {
+                return Ok(FilteredSearchOutput {
+                    results: best_matches,
+                    flags: FilteredSearchFlags {
+                        post_filter_cap_reached: false,
+                        eval_limit_reached: true,
+                        ..Default::default()
+                    },
+                });
+            }
+
+            if k_prime == k_max {
+                return Ok(FilteredSearchOutput {
+                    results: best_matches,
+                    flags: FilteredSearchFlags {
+                        post_filter_cap_reached: true,
+                        ..Default::default()
+                    },
+                });
+            }
+
+            // Widening step: k'_{i+1} = min(K'_max, max(k'_i + 1, floor(2.5 * k'_i)))
+            let next_k = (k_prime + 1).max((2.5 * k_prime as f64).floor() as usize);
+            k_prime = next_k.min(k_max);
+        }
+    }
+
+    /// Unified dispatch method executing filtered search under the selected strategy.
+    pub fn search_knn_filtered<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        strategy: FilterStrategy,
+        params: &FilteredSearchParams,
+    ) -> Result<FilteredSearchOutput> {
+        let mut tracker = VisitedTracker::new(self.node_meta.len());
+        self.search_knn_filtered_with_tracker(query, k, predicate, strategy, params, &mut tracker)
+    }
+
+    /// Read-only unified filtered search dispatch reusing an externally provided [`VisitedTracker`].
+    pub fn search_knn_filtered_with_tracker<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        strategy: FilterStrategy,
+        params: &FilteredSearchParams,
+        tracker: &mut VisitedTracker,
+    ) -> Result<FilteredSearchOutput> {
+        match strategy {
+            FilterStrategy::PostFilterOverfetch => {
+                self.search_knn_filtered_post_with_tracker(query, k, predicate, params, tracker)
+            }
+            FilterStrategy::InTraversal => self
+                .search_knn_filtered_traversal_with_tracker(query, k, predicate, params, tracker),
+            FilterStrategy::PreFilterBruteForce => Err(VectorSearchError::InvalidArgument(
+                "FilterStrategy::PreFilterBruteForce not implemented yet (Milestone M3 Task T3.6)"
+                    .to_string(),
+            )),
+        }
+    }
+
+    /// Read-only unified filtered search dispatch reusing preallocated [`FilteredSearchScratch`].
+    pub fn search_knn_filtered_with_scratch<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        strategy: FilterStrategy,
+        params: &FilteredSearchParams,
+        scratch: &mut FilteredSearchScratch,
+    ) -> Result<FilteredSearchOutput> {
+        match strategy {
+            FilterStrategy::PostFilterOverfetch => self.search_knn_filtered_post_with_tracker(
+                query,
+                k,
+                predicate,
+                params,
+                &mut scratch.tracker,
+            ),
+            FilterStrategy::InTraversal => self
+                .search_knn_filtered_traversal_with_scratch(query, k, predicate, params, scratch),
+            FilterStrategy::PreFilterBruteForce => Err(VectorSearchError::InvalidArgument(
+                "FilterStrategy::PreFilterBruteForce not implemented yet (Milestone M3 Task T3.6)"
+                    .to_string(),
+            )),
+        }
+    }
+
+    /// Batch sequential query execution for Strategy 1 post-filtering.
+    pub fn search_batch_filtered_post<P: FilterPredicate>(
+        &self,
+        queries: &RowMatrix<f32>,
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+    ) -> Result<Vec<FilteredSearchOutput>> {
+        let mut tracker = VisitedTracker::new(self.node_meta.len());
+        let mut outputs = Vec::with_capacity(queries.rows());
+        for q_row in queries.iter_rows() {
+            let out = self.search_knn_filtered_post_with_tracker(
+                q_row,
+                k,
+                predicate,
+                params,
+                &mut tracker,
+            )?;
+            outputs.push(out);
+        }
+        Ok(outputs)
+    }
+
+    /// Multi-threaded batch search for Strategy 1 post-filtering.
+    pub fn search_batch_filtered_post_parallel<P: FilterPredicate>(
+        &self,
+        queries: &RowMatrix<f32>,
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+        num_threads: usize,
+    ) -> Result<Vec<FilteredSearchOutput>> {
+        let num_queries = queries.rows();
+        if num_queries == 0 {
+            return Ok(Vec::new());
+        }
+
+        if k == 0 {
+            return Err(VectorSearchError::InvalidArgument(
+                "k must be positive (> 0)".to_string(),
+            ));
+        }
+
+        if queries.as_slice().iter().any(|v| !v.is_finite()) {
+            return Err(VectorSearchError::InvalidArgument(
+                "query vector contains non-finite value (NaN/Inf)".to_string(),
+            ));
+        }
+
+        if self.matrix.cols() > 0 && queries.cols() != self.matrix.cols() {
+            return Err(VectorSearchError::DimensionMismatch {
+                expected: self.matrix.cols(),
+                actual: queries.cols(),
+            });
+        }
+
+        if self.node_meta.is_empty() || self.enter_point.is_none() {
+            return Ok(vec![
+                FilteredSearchOutput {
+                    results: Vec::new(),
+                    flags: FilteredSearchFlags::default(),
+                };
+                num_queries
+            ]);
+        }
+
+        let workers = if num_threads == 0 {
+            std::thread::available_parallelism()
+                .map(usize::from)
+                .unwrap_or(1)
+        } else {
+            num_threads
+        }
+        .min(num_queries)
+        .max(1);
+
+        if workers == 1 {
+            return self.search_batch_filtered_post(queries, k, predicate, params);
+        }
+
+        let mut outputs: Vec<Option<FilteredSearchOutput>> =
+            (0..num_queries).map(|_| None).collect();
+        let chunk_size = num_queries.div_ceil(workers);
+
+        std::thread::scope(|s| {
+            let mut out_rest = outputs.as_mut_slice();
+            let mut q_offset = 0;
+
+            while q_offset < num_queries {
+                let take_q = chunk_size.min(num_queries - q_offset);
+                let (out_slice, next_out) = out_rest.split_at_mut(take_q);
+                out_rest = next_out;
+
+                let start_q = q_offset;
+                q_offset += take_q;
+
+                s.spawn(move || {
+                    let mut tracker = VisitedTracker::new(self.node_meta.len());
+                    for (local_i, out_slot) in out_slice.iter_mut().enumerate() {
+                        let q_row = queries.row(start_q + local_i);
+                        let res = self
+                            .search_knn_filtered_post_with_tracker(
+                                q_row,
+                                k,
+                                predicate,
+                                params,
+                                &mut tracker,
+                            )
+                            .expect("query valid");
+                        *out_slot = Some(res);
+                    }
+                });
+            }
+        });
+
+        Ok(outputs
+            .into_iter()
+            .map(|opt| opt.expect("all queries processed"))
+            .collect())
+    }
+
+    // =========================================================================
+    // Milestone M3 Task T3.5: Filtered Search (Strategy 2 In-Traversal Filtering)
+    // =========================================================================
+
+    /// Internal Layer 0 traversal with bridge nodes and hop budget (Algorithm 3).
+    #[allow(clippy::too_many_arguments)]
+    fn search_layer0_in_traversal<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        curr_ep: usize,
+        k: usize,
+        effective_ef: usize,
+        h_max: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+        tracker: &mut VisitedTracker,
+        c: &mut BinaryHeap<Reverse<Candidate>>,
+        w_match: &mut BinaryHeap<Candidate>,
+    ) -> (bool, bool) {
+        tracker.prepare(self.node_meta.len());
+        tracker.mark_visited(curr_ep);
+
+        let d_ep = self.compute_distance(query, curr_ep);
+        #[cfg(feature = "instrument")]
+        let mut dist_evals = 1_u64;
+
+        let cand_ep = Candidate {
+            distance: d_ep,
+            id: curr_ep,
+        };
+
+        c.clear();
+        w_match.clear();
+
+        let mut eval_count = 0;
+        let mut eval_limit_reached = false;
+
+        if let Some(limit) = params.eval_limit {
+            if predicate.bitset().is_none() && eval_count >= limit {
+                eval_limit_reached = true;
+            }
+        }
+
+        let ep_matches = if !eval_limit_reached {
+            if predicate.bitset().is_none() {
+                eval_count += 1;
+            }
+            predicate.matches(curr_ep as u32)
+        } else {
+            false
+        };
+
+        if ep_matches {
+            w_match.push(cand_ep);
+        }
+        c.push(Reverse(cand_ep));
+
+        let mut h = 0;
+        let mut hop_budget_exhausted = false;
+
+        while let Some(Reverse(curr)) = c.pop() {
+            h += 1;
+
+            if h > h_max && w_match.len() < k {
+                hop_budget_exhausted = true;
+                break;
+            }
+
+            // Pruning check against worst matching candidate
+            if w_match.len() >= effective_ef {
+                let furthest_match = *w_match.peek().expect("w_match not empty when len >= ef");
+                if curr.distance > furthest_match.distance {
+                    break;
+                }
+            }
+
+            if eval_limit_reached {
+                break;
+            }
+
+            for &neighbor_u32 in self.neighbors(0, curr.id) {
+                let neighbor_id = neighbor_u32 as usize;
+                if !tracker.is_visited(neighbor_id) {
+                    tracker.mark_visited(neighbor_id);
+
+                    let d_neighbor = self.compute_distance(query, neighbor_id);
+                    #[cfg(feature = "instrument")]
+                    {
+                        dist_evals += 1;
+                    }
+                    let cand_neighbor = Candidate {
+                        distance: d_neighbor,
+                        id: neighbor_id,
+                    };
+
+                    if let Some(limit) = params.eval_limit {
+                        if predicate.bitset().is_none() && eval_count >= limit {
+                            eval_limit_reached = true;
+                        }
+                    }
+
+                    let is_match = if !eval_limit_reached {
+                        if predicate.bitset().is_none() {
+                            eval_count += 1;
+                        }
+                        predicate.matches(neighbor_id as u32)
+                    } else {
+                        false
+                    };
+
+                    let mut admitted = false;
+                    if is_match
+                        && (w_match.len() < effective_ef
+                            || cand_neighbor < *w_match.peek().expect("w_match not empty"))
+                    {
+                        w_match.push(cand_neighbor);
+                        h = 0;
+                        if w_match.len() > effective_ef {
+                            w_match.pop();
+                        }
+                        admitted = true;
+                    }
+
+                    // Always allow promising nodes into exploration frontier C
+                    if admitted
+                        || w_match.len() < effective_ef
+                        || cand_neighbor < *w_match.peek().expect("w_match not empty")
+                    {
+                        c.push(Reverse(cand_neighbor));
+                    }
+                }
+            }
+        }
+
+        #[cfg(feature = "instrument")]
+        {
+            tracker.distance_evals += dist_evals;
+        }
+
+        (hop_budget_exhausted, eval_limit_reached)
+    }
+
+    /// Executes Strategy 2 in-traversal predicate filtered approximate nearest neighbor search
+    /// using bridge nodes and hop budget (Algorithm 3).
+    pub fn search_knn_filtered_traversal<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+    ) -> Result<FilteredSearchOutput> {
+        let mut tracker = VisitedTracker::new(self.node_meta.len());
+        self.search_knn_filtered_traversal_with_tracker(query, k, predicate, params, &mut tracker)
+    }
+
+    /// Read-only Strategy 2 in-traversal search reusing an externally provided [`VisitedTracker`].
+    pub fn search_knn_filtered_traversal_with_tracker<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+        tracker: &mut VisitedTracker,
+    ) -> Result<FilteredSearchOutput> {
+        if k == 0 {
+            return Err(VectorSearchError::InvalidArgument(
+                "k must be positive (> 0)".to_string(),
+            ));
+        }
+        if query.iter().any(|v| !v.is_finite()) {
+            return Err(VectorSearchError::InvalidArgument(
+                "query vector contains non-finite value (NaN/Inf)".to_string(),
+            ));
+        }
+
+        if self.matrix.cols() > 0 && query.len() != self.matrix.cols() {
+            return Err(VectorSearchError::DimensionMismatch {
+                expected: self.matrix.cols(),
+                actual: query.len(),
+            });
+        }
+
+        if self.node_meta.is_empty() || self.enter_point.is_none() {
+            return Ok(FilteredSearchOutput {
+                results: Vec::new(),
+                flags: FilteredSearchFlags::default(),
+            });
+        }
+
+        let mut curr_ep = self.enter_point.unwrap();
+
+        // Phase 1: Top-down greedy zoom-in (ef = 1) down to layer 1 (unfiltered)
+        if self.top_layer >= 1 {
+            for lc in (1..=self.top_layer).rev() {
+                let w = self.search_layer(query, curr_ep, 1, lc, tracker);
+                if let Some(best) = w.iter().min_by(|a, b| a.cmp(b)) {
+                    curr_ep = best.id;
+                }
+            }
+        }
+
+        // Phase 2: Base layer in-traversal search with bridge-nodes and hop budget
+        let effective_ef = params.ef_search.max(k);
+        let h_max = params.max_bridge_hops.unwrap_or(3 * effective_ef);
+
+        let cap = effective_ef + self.config.effective_m_max0();
+        let mut c = BinaryHeap::<Reverse<Candidate>>::with_capacity(cap);
+        let mut w_match = BinaryHeap::<Candidate>::with_capacity(cap);
+
+        let (hop_budget_exhausted, eval_limit_reached) = self.search_layer0_in_traversal(
+            query,
+            curr_ep,
+            k,
+            effective_ef,
+            h_max,
+            predicate,
+            params,
+            tracker,
+            &mut c,
+            &mut w_match,
+        );
+
+        let mut temp = Vec::with_capacity(w_match.len());
+        while let Some(cand) = w_match.pop() {
+            temp.push(cand);
+        }
+        temp.reverse();
+        let take_k = k.min(temp.len());
+        let mut results = Vec::with_capacity(take_k);
+        for cand in &temp[..take_k] {
+            results.push((self.format_output_distance(cand.distance), cand.id));
+        }
+
+        Ok(FilteredSearchOutput {
+            results,
+            flags: FilteredSearchFlags {
+                post_filter_cap_reached: false,
+                hop_budget_exhausted,
+                eval_limit_reached,
+                used_bruteforce_fallback: false,
+            },
+        })
+    }
+
+    /// Read-only Strategy 2 in-traversal search reusing preallocated [`FilteredSearchScratch`].
+    pub fn search_knn_filtered_traversal_with_scratch<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+        scratch: &mut FilteredSearchScratch,
+    ) -> Result<FilteredSearchOutput> {
+        if k == 0 {
+            return Err(VectorSearchError::InvalidArgument(
+                "k must be positive (> 0)".to_string(),
+            ));
+        }
+        if query.iter().any(|v| !v.is_finite()) {
+            return Err(VectorSearchError::InvalidArgument(
+                "query vector contains non-finite value (NaN/Inf)".to_string(),
+            ));
+        }
+
+        if self.matrix.cols() > 0 && query.len() != self.matrix.cols() {
+            return Err(VectorSearchError::DimensionMismatch {
+                expected: self.matrix.cols(),
+                actual: query.len(),
+            });
+        }
+
+        if self.node_meta.is_empty() || self.enter_point.is_none() {
+            return Ok(FilteredSearchOutput {
+                results: Vec::new(),
+                flags: FilteredSearchFlags::default(),
+            });
+        }
+
+        let mut curr_ep = self.enter_point.unwrap();
+
+        // Phase 1: Top-down greedy zoom-in (ef = 1) down to layer 1 (unfiltered)
+        if self.top_layer >= 1 {
+            for lc in (1..=self.top_layer).rev() {
+                let w = self.search_layer(query, curr_ep, 1, lc, &mut scratch.tracker);
+                if let Some(best) = w.iter().min_by(|a, b| a.cmp(b)) {
+                    curr_ep = best.id;
+                }
+            }
+        }
+
+        // Phase 2: Base layer in-traversal search with bridge-nodes and hop budget
+        let effective_ef = params.ef_search.max(k);
+        let h_max = params.max_bridge_hops.unwrap_or(3 * effective_ef);
+
+        let cap = effective_ef + self.config.effective_m_max0();
+        if scratch.frontier.capacity() < cap {
+            scratch.frontier.reserve(cap - scratch.frontier.capacity());
+        }
+        if scratch.matched_results.capacity() < effective_ef + 1 {
+            scratch
+                .matched_results
+                .reserve(effective_ef + 1 - scratch.matched_results.capacity());
+        }
+
+        let (hop_budget_exhausted, eval_limit_reached) = self.search_layer0_in_traversal(
+            query,
+            curr_ep,
+            k,
+            effective_ef,
+            h_max,
+            predicate,
+            params,
+            &mut scratch.tracker,
+            &mut scratch.frontier,
+            &mut scratch.matched_results,
+        );
+
+        scratch.raw_candidates.clear();
+        while let Some(cand) = scratch.matched_results.pop() {
+            scratch.raw_candidates.push(cand);
+        }
+        scratch.raw_candidates.reverse();
+        let take_k = k.min(scratch.raw_candidates.len());
+        let mut results = Vec::with_capacity(take_k);
+        for cand in &scratch.raw_candidates[..take_k] {
+            results.push((self.format_output_distance(cand.distance), cand.id));
+        }
+
+        Ok(FilteredSearchOutput {
+            results,
+            flags: FilteredSearchFlags {
+                post_filter_cap_reached: false,
+                hop_budget_exhausted,
+                eval_limit_reached,
+                used_bruteforce_fallback: false,
+            },
+        })
+    }
+
+    /// Batch sequential query execution for Strategy 2 in-traversal filtering.
+    pub fn search_batch_filtered_traversal<P: FilterPredicate>(
+        &self,
+        queries: &RowMatrix<f32>,
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+    ) -> Result<Vec<FilteredSearchOutput>> {
+        let mut tracker = VisitedTracker::new(self.node_meta.len());
+        let mut outputs = Vec::with_capacity(queries.rows());
+        for q_row in queries.iter_rows() {
+            let out = self.search_knn_filtered_traversal_with_tracker(
+                q_row,
+                k,
+                predicate,
+                params,
+                &mut tracker,
+            )?;
+            outputs.push(out);
+        }
+        Ok(outputs)
+    }
+
+    /// Multi-threaded batch search for Strategy 2 in-traversal filtering.
+    pub fn search_batch_filtered_traversal_parallel<P: FilterPredicate>(
+        &self,
+        queries: &RowMatrix<f32>,
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+        num_threads: usize,
+    ) -> Result<Vec<FilteredSearchOutput>> {
+        let num_queries = queries.rows();
+        if num_queries == 0 {
+            return Ok(Vec::new());
+        }
+
+        if k == 0 {
+            return Err(VectorSearchError::InvalidArgument(
+                "k must be positive (> 0)".to_string(),
+            ));
+        }
+
+        if queries.as_slice().iter().any(|v| !v.is_finite()) {
+            return Err(VectorSearchError::InvalidArgument(
+                "query vector contains non-finite value (NaN/Inf)".to_string(),
+            ));
+        }
+
+        if self.matrix.cols() > 0 && queries.cols() != self.matrix.cols() {
+            return Err(VectorSearchError::DimensionMismatch {
+                expected: self.matrix.cols(),
+                actual: queries.cols(),
+            });
+        }
+
+        if self.node_meta.is_empty() || self.enter_point.is_none() {
+            return Ok(vec![
+                FilteredSearchOutput {
+                    results: Vec::new(),
+                    flags: FilteredSearchFlags::default(),
+                };
+                num_queries
+            ]);
+        }
+
+        let workers = if num_threads == 0 {
+            std::thread::available_parallelism()
+                .map(usize::from)
+                .unwrap_or(1)
+        } else {
+            num_threads
+        }
+        .min(num_queries)
+        .max(1);
+
+        if workers == 1 {
+            return self.search_batch_filtered_traversal(queries, k, predicate, params);
+        }
+
+        let mut outputs: Vec<Option<FilteredSearchOutput>> =
+            (0..num_queries).map(|_| None).collect();
+        let chunk_size = num_queries.div_ceil(workers);
+
+        std::thread::scope(|s| {
+            let mut out_rest = outputs.as_mut_slice();
+            let mut q_offset = 0;
+
+            while q_offset < num_queries {
+                let take_q = chunk_size.min(num_queries - q_offset);
+                let (out_slice, next_out) = out_rest.split_at_mut(take_q);
+                out_rest = next_out;
+
+                let start_q = q_offset;
+                q_offset += take_q;
+
+                s.spawn(move || {
+                    let mut tracker = VisitedTracker::new(self.node_meta.len());
+                    for (local_i, out_slot) in out_slice.iter_mut().enumerate() {
+                        let q_row = queries.row(start_q + local_i);
+                        let res = self
+                            .search_knn_filtered_traversal_with_tracker(
+                                q_row,
+                                k,
+                                predicate,
+                                params,
+                                &mut tracker,
+                            )
+                            .expect("query valid");
+                        *out_slot = Some(res);
+                    }
+                });
+            }
+        });
+
+        Ok(outputs
+            .into_iter()
+            .map(|opt| opt.expect("all queries processed"))
+            .collect())
     }
 }
