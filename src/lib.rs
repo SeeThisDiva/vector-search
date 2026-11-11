@@ -25,6 +25,7 @@ pub mod phase4;
 pub mod recall;
 pub mod rng;
 
+pub use exact_knn::{ExactKnn, FilteredExactKnn, KnnSearchResult, TimedKnnSearchResult};
 pub use filter::{
     BitsetOneIterator, DenseBitset, FilterPredicate, FilteredSearchFlags, FilteredSearchOutput,
     FilteredSearchParams, LambdaPredicate,
