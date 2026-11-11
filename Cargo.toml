@@ -31,6 +31,10 @@ path = "src/bin/phase4.rs"
 name = "generate_metadata"
 path = "src/bin/generate_metadata.rs"
 
+[[bin]]
+name = "filtered_exact_knn"
+path = "src/bin/filtered_exact_knn.rs"
+
 [features]
 default = []
 instrument = []
