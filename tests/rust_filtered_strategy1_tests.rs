@@ -444,19 +444,20 @@ fn test_strategy1_unified_dispatch_and_scratch() {
         .unwrap();
     assert_eq!(direct, with_scratch);
 
-    // 4. InTraversal implemented in T3.5, PreFilterBruteForce returns informative error until T3.6
+    // 4. InTraversal implemented in T3.5, PreFilterBruteForce implemented in T3.6
     let in_trav_res =
         index.search_knn_filtered(&query, k, &bitset, FilterStrategy::InTraversal, &params);
     assert!(in_trav_res.is_ok());
 
-    let pre_filter_err = index.search_knn_filtered(
+    let pre_filter_res = index.search_knn_filtered(
         &query,
         k,
         &bitset,
         FilterStrategy::PreFilterBruteForce,
         &params,
     );
-    assert!(pre_filter_err.is_err());
+    assert!(pre_filter_res.is_ok());
+    assert_eq!(pre_filter_res.unwrap().results, direct.results);
 }
 
 #[test]
