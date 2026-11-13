@@ -2179,15 +2179,17 @@ impl<'a> HnswIndex<'a> {
             results.push((self.format_output_distance(cand.distance), cand.id));
         }
 
-        if (hop_budget_exhausted || eval_limit_reached) && results.len() < k {
-            if params.allow_bruteforce_fallback && predicate.bitset().is_some() {
-                let mut fallback_out = self
-                    .search_knn_filtered_pre_with_tracker(query, k, predicate, params, tracker)?;
-                fallback_out.flags.hop_budget_exhausted = hop_budget_exhausted;
-                fallback_out.flags.eval_limit_reached = eval_limit_reached;
-                fallback_out.flags.used_bruteforce_fallback = true;
-                return Ok(fallback_out);
-            }
+        if (hop_budget_exhausted || eval_limit_reached)
+            && results.len() < k
+            && params.allow_bruteforce_fallback
+            && predicate.bitset().is_some()
+        {
+            let mut fallback_out =
+                self.search_knn_filtered_pre_with_tracker(query, k, predicate, params, tracker)?;
+            fallback_out.flags.hop_budget_exhausted = hop_budget_exhausted;
+            fallback_out.flags.eval_limit_reached = eval_limit_reached;
+            fallback_out.flags.used_bruteforce_fallback = true;
+            return Ok(fallback_out);
         }
 
         Ok(FilteredSearchOutput {
@@ -2285,15 +2287,17 @@ impl<'a> HnswIndex<'a> {
             results.push((self.format_output_distance(cand.distance), cand.id));
         }
 
-        if (hop_budget_exhausted || eval_limit_reached) && results.len() < k {
-            if params.allow_bruteforce_fallback && predicate.bitset().is_some() {
-                let mut fallback_out = self
-                    .search_knn_filtered_pre_with_scratch(query, k, predicate, params, scratch)?;
-                fallback_out.flags.hop_budget_exhausted = hop_budget_exhausted;
-                fallback_out.flags.eval_limit_reached = eval_limit_reached;
-                fallback_out.flags.used_bruteforce_fallback = true;
-                return Ok(fallback_out);
-            }
+        if (hop_budget_exhausted || eval_limit_reached)
+            && results.len() < k
+            && params.allow_bruteforce_fallback
+            && predicate.bitset().is_some()
+        {
+            let mut fallback_out =
+                self.search_knn_filtered_pre_with_scratch(query, k, predicate, params, scratch)?;
+            fallback_out.flags.hop_budget_exhausted = hop_budget_exhausted;
+            fallback_out.flags.eval_limit_reached = eval_limit_reached;
+            fallback_out.flags.used_bruteforce_fallback = true;
+            return Ok(fallback_out);
         }
 
         Ok(FilteredSearchOutput {
