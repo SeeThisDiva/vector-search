@@ -17,6 +17,7 @@
 #![forbid(unsafe_code)]
 
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use vector_search::dataset::{generate_mode_a_bitset, read_fvecs};
 use vector_search::distance::Metric;
@@ -558,4 +559,104 @@ fn test_strategy1_sift10k_recall_against_ground_truth() {
             "Recall@10 too low for tier sigma={sigma}: recall={recall}"
         );
     }
+}
+
+#[test]
+fn test_strategy1_lambda_est_sel_and_eval_limit_no_double_eval() {
+    let matrix = make_synthetic_2d_matrix();
+    let index = make_synthetic_index(&matrix);
+    let query = [15.0_f32, 8.0_f32];
+
+    // Zero eval_limit stops cleanly before searching
+    let calls_zero = AtomicUsize::new(0);
+    let pred_zero = LambdaPredicate::new(
+        |id| {
+            calls_zero.fetch_add(1, Ordering::Relaxed);
+            id.is_multiple_of(2)
+        },
+        0.5,
+    );
+    let out_zero = index
+        .search_knn_filtered_post(
+            &query,
+            5,
+            &pred_zero,
+            &FilteredSearchParams {
+                ef_search: 20,
+                eval_limit: Some(0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(out_zero.results.is_empty());
+    assert!(out_zero.flags.eval_limit_reached);
+    assert_eq!(calls_zero.load(Ordering::Relaxed), 0);
+
+    // Widening with sparse match count respects eval_limit strictly without double-counting
+    let calls = AtomicUsize::new(0);
+    let sparse = LambdaPredicate::new(
+        |id| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            id >= 95
+        },
+        0.5, // intentionally optimistic est_sel to trigger widening
+    );
+    let out = index
+        .search_knn_filtered_post(
+            &query,
+            10,
+            &sparse,
+            &FilteredSearchParams {
+                ef_search: 20,
+                overfetch_cap: 100,
+                eval_limit: Some(45),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(out.flags.eval_limit_reached);
+    assert!(calls.load(Ordering::Relaxed) <= 45);
+}
+
+#[test]
+fn test_strategy1_scratch_zero_reallocation_invariance() {
+    let matrix = make_synthetic_2d_matrix();
+    let index = make_synthetic_index(&matrix);
+    let mut bitset = DenseBitset::zeros(100);
+    for i in (0..100).step_by(5) {
+        bitset.set_bit(i, true);
+    }
+    let mut scratch = FilteredSearchScratch::new(100, 100, 100);
+    let cap_frontier = scratch.frontier.capacity();
+    let cap_matched = scratch.matched_results.capacity();
+    let cap_raw = scratch.raw_candidates.capacity();
+    let cap_overfetch = scratch.overfetch_buffer.capacity();
+
+    let params = FilteredSearchParams {
+        ef_search: 20,
+        overfetch_cap: 100,
+        ..Default::default()
+    };
+    for step in 0..10 {
+        let q = [(step as f32) * 10.0, 5.0];
+        let direct = index
+            .search_knn_filtered_post(&q, 5, &bitset, &params)
+            .unwrap();
+        let with_scratch = index
+            .search_knn_filtered_with_scratch(
+                &q,
+                5,
+                &bitset,
+                FilterStrategy::PostFilterOverfetch,
+                &params,
+                &mut scratch,
+            )
+            .unwrap();
+        assert_eq!(direct, with_scratch);
+    }
+
+    assert_eq!(scratch.frontier.capacity(), cap_frontier);
+    assert_eq!(scratch.matched_results.capacity(), cap_matched);
+    assert_eq!(scratch.raw_candidates.capacity(), cap_raw);
+    assert_eq!(scratch.overfetch_buffer.capacity(), cap_overfetch);
 }

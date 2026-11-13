@@ -314,14 +314,14 @@ pub struct FilteredSearchScratch {
 impl FilteredSearchScratch {
     /// Preallocates every buffer for the largest query the caller will issue.
     ///
-    /// Buffers are pre-sized to avoid dynamic heap reallocations during search traversals.
+    /// Buffers are pre-sized so inner loops do not grow scratch allocations during queries.
     #[must_use]
     pub fn new(num_nodes: usize, max_ef: usize, overfetch_cap: usize) -> Self {
         Self {
             tracker: VisitedTracker::new(num_nodes),
             frontier: BinaryHeap::with_capacity(num_nodes),
             matched_results: BinaryHeap::with_capacity(max_ef + 1),
-            raw_candidates: Vec::with_capacity(overfetch_cap),
+            raw_candidates: Vec::with_capacity(overfetch_cap.max(max_ef + 1)),
             overfetch_buffer: Vec::with_capacity(overfetch_cap),
         }
     }
@@ -880,6 +880,25 @@ impl<'a> HnswIndex<'a> {
         lc: usize,
         tracker: &mut VisitedTracker,
     ) -> BinaryHeap<Candidate> {
+        let cap = ef + self.config.effective_m_max0();
+        let mut c = BinaryHeap::<Reverse<Candidate>>::with_capacity(cap);
+        let mut w = BinaryHeap::<Candidate>::with_capacity(cap);
+        self.search_layer_with_scratch(query, ep, ef, lc, tracker, &mut c, &mut w);
+        w
+    }
+
+    /// Executes Algorithm 2 (SEARCH-LAYER) reusing caller-supplied candidate and result heaps.
+    #[allow(clippy::too_many_arguments)]
+    fn search_layer_with_scratch(
+        &self,
+        query: &[f32],
+        ep: usize,
+        ef: usize,
+        lc: usize,
+        tracker: &mut VisitedTracker,
+        c: &mut BinaryHeap<Reverse<Candidate>>,
+        w: &mut BinaryHeap<Candidate>,
+    ) {
         tracker.prepare(self.node_meta.len());
         tracker.mark_visited(ep);
 
@@ -892,9 +911,8 @@ impl<'a> HnswIndex<'a> {
             id: ep,
         };
 
-        let cap = ef + self.config.effective_m_max0();
-        let mut c = BinaryHeap::<Reverse<Candidate>>::with_capacity(cap);
-        let mut w = BinaryHeap::<Candidate>::with_capacity(cap);
+        c.clear();
+        w.clear();
 
         c.push(Reverse(cand_ep));
         w.push(cand_ep);
@@ -938,8 +956,6 @@ impl<'a> HnswIndex<'a> {
         {
             tracker.distance_evals += dist_evals;
         }
-
-        w
     }
 
     /// Internal implementation of Algorithm 4 (SELECT-NEIGHBORS-HEURISTIC) reusing preallocated buffers in `scratch`.
@@ -1605,6 +1621,50 @@ impl<'a> HnswIndex<'a> {
         params: &FilteredSearchParams,
         tracker: &mut VisitedTracker,
     ) -> Result<FilteredSearchOutput> {
+        self.search_knn_filtered_post_core(query, k, predicate, params, tracker, None)
+    }
+
+    /// Read-only Strategy 1 post-filtering search reusing preallocated [`FilteredSearchScratch`].
+    pub fn search_knn_filtered_post_with_scratch<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+        scratch: &mut FilteredSearchScratch,
+    ) -> Result<FilteredSearchOutput> {
+        let FilteredSearchScratch {
+            tracker,
+            frontier,
+            matched_results,
+            raw_candidates,
+            overfetch_buffer,
+        } = scratch;
+        self.search_knn_filtered_post_core(
+            query,
+            k,
+            predicate,
+            params,
+            tracker,
+            Some((frontier, matched_results, raw_candidates, overfetch_buffer)),
+        )
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn search_knn_filtered_post_core<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+        tracker: &mut VisitedTracker,
+        mut scratch_bufs: Option<(
+            &mut BinaryHeap<Reverse<Candidate>>,
+            &mut BinaryHeap<Candidate>,
+            &mut Vec<Candidate>,
+            &mut Vec<(f32, usize)>,
+        )>,
+    ) -> Result<FilteredSearchOutput> {
         if k == 0 {
             return Err(VectorSearchError::InvalidArgument(
                 "k must be positive (> 0)".to_string(),
@@ -1630,11 +1690,30 @@ impl<'a> HnswIndex<'a> {
             });
         }
 
-        let k_max = params.overfetch_cap;
+        let is_bitset = predicate.bitset().is_some();
+        if !is_bitset && matches!(params.eval_limit, Some(0)) {
+            return Ok(FilteredSearchOutput {
+                results: Vec::new(),
+                flags: FilteredSearchFlags {
+                    eval_limit_reached: true,
+                    ..Default::default()
+                },
+            });
+        }
+
+        let total = self.node_meta.len();
+        let k_max = params.overfetch_cap.min(total);
         if k_max == 0 {
-            if params.allow_bruteforce_fallback && predicate.bitset().is_some() {
-                let mut fallback_out = self
-                    .search_knn_filtered_pre_with_tracker(query, k, predicate, params, tracker)?;
+            if params.allow_bruteforce_fallback && is_bitset {
+                let mut fallback_out = self.search_knn_filtered_pre_with_tracker_or_scratch(
+                    query,
+                    k,
+                    predicate,
+                    tracker,
+                    scratch_bufs
+                        .as_mut()
+                        .map(|(_, m, r, _)| (&mut **m, &mut **r)),
+                )?;
                 fallback_out.flags.post_filter_cap_reached = true;
                 fallback_out.flags.used_bruteforce_fallback = true;
                 return Ok(fallback_out);
@@ -1649,12 +1728,17 @@ impl<'a> HnswIndex<'a> {
         }
 
         // Determine selectivity sigma
-        let total = self.node_meta.len();
         let sigma = if let Some(count) = predicate.count_matching(total) {
             if total == 0 {
                 1.0
             } else {
                 (count as f64) / (total as f64)
+            }
+        } else if let Some(est) = predicate.estimated_selectivity() {
+            if est.is_finite() {
+                est.clamp(0.0, 1.0)
+            } else {
+                1.0
             }
         } else {
             1.0
@@ -1684,26 +1768,112 @@ impl<'a> HnswIndex<'a> {
             }
         };
 
-        let mut best_matches: Vec<(f32, usize)> = Vec::new();
+        let mut local_best: Vec<(f32, usize)> = Vec::new();
+        let mut seen_opaque: HashSet<usize> = HashSet::new();
         let mut eval_count = 0;
 
-        loop {
-            let current_ef = params.ef_search.max(k_prime);
-            let candidates = self.search_knn_with_tracker(query, k_prime, current_ef, tracker)?;
+        let (mut heap_bufs, best_matches) = match scratch_bufs {
+            Some((frontier, matched_res, raw_cands, overfetch_buf)) => {
+                overfetch_buf.clear();
+                (Some((frontier, matched_res, raw_cands)), overfetch_buf)
+            }
+            None => (None, &mut local_best),
+        };
 
+        loop {
+            let current_ef = params.ef_search.max(k_prime).min(total);
             let mut eval_limit_reached = false;
-            for (d, id) in candidates {
-                if let Some(limit) = params.eval_limit {
-                    if predicate.bitset().is_none() && eval_count >= limit {
-                        eval_limit_reached = true;
-                        break;
+
+            {
+                let mut try_push_candidate = |d: f32, id: usize, limit_hit: &mut bool| -> bool {
+                    if !is_bitset && !seen_opaque.insert(id) {
+                        return true;
                     }
-                }
-                if predicate.bitset().is_none() {
-                    eval_count += 1;
-                }
-                if predicate.matches(id as u32) && !best_matches.iter().any(|m| m.1 == id) {
-                    best_matches.push((d, id));
+                    if let Some(limit) = params.eval_limit {
+                        if !is_bitset && eval_count >= limit {
+                            *limit_hit = true;
+                            return false;
+                        }
+                    }
+                    if !is_bitset {
+                        eval_count += 1;
+                    }
+                    if predicate.matches(id as u32)
+                        && (!is_bitset || !best_matches.iter().any(|m| m.1 == id))
+                    {
+                        if best_matches.capacity() > k
+                            && best_matches.len() == best_matches.capacity()
+                        {
+                            best_matches
+                                .sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+                            best_matches.truncate(k);
+                        }
+                        best_matches.push((d, id));
+                    }
+                    true
+                };
+
+                let used_scratch_heaps = if let Some((frontier, matched_res, raw_cands)) =
+                    heap_bufs.as_mut()
+                {
+                    if frontier.capacity() >= total
+                        && matched_res.capacity() > current_ef
+                        && raw_cands.capacity() >= current_ef
+                    {
+                        let mut curr_ep = self.enter_point.expect("enter_point checked non-empty");
+                        if self.top_layer >= 1 {
+                            for lc in (1..=self.top_layer).rev() {
+                                self.search_layer_with_scratch(
+                                    query,
+                                    curr_ep,
+                                    1,
+                                    lc,
+                                    tracker,
+                                    frontier,
+                                    matched_res,
+                                );
+                                if let Some(best) = matched_res.iter().min_by(|a, b| a.cmp(b)) {
+                                    curr_ep = best.id;
+                                }
+                            }
+                        }
+                        self.search_layer_with_scratch(
+                            query,
+                            curr_ep,
+                            current_ef,
+                            0,
+                            tracker,
+                            frontier,
+                            matched_res,
+                        );
+                        raw_cands.clear();
+                        while let Some(cand) = matched_res.pop() {
+                            raw_cands.push(cand);
+                        }
+                        raw_cands.reverse();
+                        let take_k = k_prime.min(raw_cands.len());
+                        for cand in &raw_cands[..take_k] {
+                            let d = self.format_output_distance(cand.distance);
+                            if !try_push_candidate(d, cand.id, &mut eval_limit_reached) {
+                                break;
+                            }
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if !used_scratch_heaps {
+                    let candidates =
+                        self.search_knn_with_tracker(query, k_prime, current_ef, tracker)?;
+                    for (d, id) in candidates {
+                        if !try_push_candidate(d, id, &mut eval_limit_reached) {
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -1712,7 +1882,7 @@ impl<'a> HnswIndex<'a> {
             if best_matches.len() >= k {
                 best_matches.truncate(k);
                 return Ok(FilteredSearchOutput {
-                    results: best_matches,
+                    results: best_matches.clone(),
                     flags: FilteredSearchFlags {
                         post_filter_cap_reached: false,
                         eval_limit_reached,
@@ -1721,38 +1891,26 @@ impl<'a> HnswIndex<'a> {
                 });
             }
 
-            if eval_limit_reached {
-                if params.allow_bruteforce_fallback && predicate.bitset().is_some() {
-                    let mut fallback_out = self.search_knn_filtered_pre_with_tracker(
-                        query, k, predicate, params, tracker,
+            if eval_limit_reached || k_prime == k_max {
+                if params.allow_bruteforce_fallback && is_bitset {
+                    let mut fallback_out = self.search_knn_filtered_pre_with_tracker_or_scratch(
+                        query,
+                        k,
+                        predicate,
+                        tracker,
+                        heap_bufs.as_mut().map(|(_, m, r)| (&mut **m, &mut **r)),
                     )?;
-                    fallback_out.flags.eval_limit_reached = true;
+                    fallback_out.flags.eval_limit_reached = eval_limit_reached;
+                    fallback_out.flags.post_filter_cap_reached =
+                        !eval_limit_reached && k_prime == k_max;
                     fallback_out.flags.used_bruteforce_fallback = true;
                     return Ok(fallback_out);
                 }
                 return Ok(FilteredSearchOutput {
-                    results: best_matches,
+                    results: best_matches.clone(),
                     flags: FilteredSearchFlags {
-                        post_filter_cap_reached: false,
-                        eval_limit_reached: true,
-                        ..Default::default()
-                    },
-                });
-            }
-
-            if k_prime == k_max {
-                if params.allow_bruteforce_fallback && predicate.bitset().is_some() {
-                    let mut fallback_out = self.search_knn_filtered_pre_with_tracker(
-                        query, k, predicate, params, tracker,
-                    )?;
-                    fallback_out.flags.post_filter_cap_reached = true;
-                    fallback_out.flags.used_bruteforce_fallback = true;
-                    return Ok(fallback_out);
-                }
-                return Ok(FilteredSearchOutput {
-                    results: best_matches,
-                    flags: FilteredSearchFlags {
-                        post_filter_cap_reached: true,
+                        post_filter_cap_reached: !eval_limit_reached && k_prime == k_max,
+                        eval_limit_reached,
                         ..Default::default()
                     },
                 });
@@ -1810,13 +1968,9 @@ impl<'a> HnswIndex<'a> {
         scratch: &mut FilteredSearchScratch,
     ) -> Result<FilteredSearchOutput> {
         match strategy {
-            FilterStrategy::PostFilterOverfetch => self.search_knn_filtered_post_with_tracker(
-                query,
-                k,
-                predicate,
-                params,
-                &mut scratch.tracker,
-            ),
+            FilterStrategy::PostFilterOverfetch => {
+                self.search_knn_filtered_post_with_scratch(query, k, predicate, params, scratch)
+            }
             FilterStrategy::InTraversal => self
                 .search_knn_filtered_traversal_with_scratch(query, k, predicate, params, scratch),
             FilterStrategy::PreFilterBruteForce => {
@@ -2006,29 +2160,36 @@ impl<'a> HnswIndex<'a> {
         let mut h = 0;
         let mut hop_budget_exhausted = false;
 
-        while let Some(Reverse(curr)) = c.pop() {
+        'traversal: while let Some(Reverse(curr)) = c.pop() {
+            if eval_limit_reached {
+                break 'traversal;
+            }
+
             h += 1;
 
             if h > h_max && w_match.len() < k {
                 hop_budget_exhausted = true;
-                break;
+                break 'traversal;
             }
 
             // Pruning check against worst matching candidate
             if w_match.len() >= effective_ef {
                 let furthest_match = *w_match.peek().expect("w_match not empty when len >= ef");
                 if curr.distance > furthest_match.distance {
-                    break;
+                    break 'traversal;
                 }
-            }
-
-            if eval_limit_reached {
-                break;
             }
 
             for &neighbor_u32 in self.neighbors(0, curr.id) {
                 let neighbor_id = neighbor_u32 as usize;
                 if !tracker.is_visited(neighbor_id) {
+                    if let Some(limit) = params.eval_limit {
+                        if predicate.bitset().is_none() && eval_count >= limit {
+                            eval_limit_reached = true;
+                            break 'traversal;
+                        }
+                    }
+
                     tracker.mark_visited(neighbor_id);
 
                     let d_neighbor = self.compute_distance(query, neighbor_id);
@@ -2041,19 +2202,11 @@ impl<'a> HnswIndex<'a> {
                         id: neighbor_id,
                     };
 
-                    if let Some(limit) = params.eval_limit {
-                        if predicate.bitset().is_none() && eval_count >= limit {
-                            eval_limit_reached = true;
-                        }
-                    }
-
-                    let is_match = if !eval_limit_reached {
+                    let is_match = {
                         if predicate.bitset().is_none() {
                             eval_count += 1;
                         }
                         predicate.matches(neighbor_id as u32)
-                    } else {
-                        false
                     };
 
                     let mut admitted = false;
@@ -2237,31 +2390,40 @@ impl<'a> HnswIndex<'a> {
             });
         }
 
+        let effective_ef = params.ef_search.max(k);
+        let h_max = params.max_bridge_hops.unwrap_or(3 * effective_ef);
+
+        if scratch.frontier.capacity() < self.node_meta.len()
+            || scratch.matched_results.capacity() <= effective_ef
+            || scratch.raw_candidates.capacity() < effective_ef
+        {
+            return Err(VectorSearchError::InvalidArgument(
+                "FilteredSearchScratch capacity is insufficient for Strategy 2 query parameters"
+                    .to_string(),
+            ));
+        }
+
         let mut curr_ep = self.enter_point.unwrap();
 
         // Phase 1: Top-down greedy zoom-in (ef = 1) down to layer 1 (unfiltered)
         if self.top_layer >= 1 {
             for lc in (1..=self.top_layer).rev() {
-                let w = self.search_layer(query, curr_ep, 1, lc, &mut scratch.tracker);
-                if let Some(best) = w.iter().min_by(|a, b| a.cmp(b)) {
+                self.search_layer_with_scratch(
+                    query,
+                    curr_ep,
+                    1,
+                    lc,
+                    &mut scratch.tracker,
+                    &mut scratch.frontier,
+                    &mut scratch.matched_results,
+                );
+                if let Some(best) = scratch.matched_results.iter().min_by(|a, b| a.cmp(b)) {
                     curr_ep = best.id;
                 }
             }
         }
 
         // Phase 2: Base layer in-traversal search with bridge-nodes and hop budget
-        let effective_ef = params.ef_search.max(k);
-        let h_max = params.max_bridge_hops.unwrap_or(3 * effective_ef);
-
-        let cap = effective_ef + self.config.effective_m_max0();
-        if scratch.frontier.capacity() < cap {
-            scratch.frontier.reserve(cap - scratch.frontier.capacity());
-        }
-        if scratch.matched_results.capacity() < effective_ef + 1 {
-            scratch
-                .matched_results
-                .reserve(effective_ef + 1 - scratch.matched_results.capacity());
-        }
 
         let (hop_budget_exhausted, eval_limit_reached) = self.search_layer0_in_traversal(
             query,
@@ -2440,7 +2602,7 @@ impl<'a> HnswIndex<'a> {
     ///
     /// Requires a bitset-backed predicate (`predicate.bitset().is_some()`). Bypasses the HNSW
     /// graph traversal entirely, iterating over all active (1) bit IDs in the bitset and
-    /// computing exact vector distances using the SIMD-friendly kernel. Bounded by a max-heap of
+    /// computing exact vector distances using the compiler auto-vectorizable kernel. Bounded by a max-heap of
     /// size `k` with canonical `(distance, id)` tie-breaking.
     pub fn search_knn_filtered_pre<P: FilterPredicate>(
         &self,
@@ -2461,6 +2623,41 @@ impl<'a> HnswIndex<'a> {
         predicate: &P,
         _params: &FilteredSearchParams,
         #[allow(unused_variables)] tracker: &mut VisitedTracker,
+    ) -> Result<FilteredSearchOutput> {
+        self.search_knn_filtered_pre_with_tracker_or_scratch(query, k, predicate, tracker, None)
+    }
+
+    /// Read-only Strategy 3 pre-filter brute-force scan reusing preallocated [`FilteredSearchScratch`].
+    pub fn search_knn_filtered_pre_with_scratch<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        _params: &FilteredSearchParams,
+        scratch: &mut FilteredSearchScratch,
+    ) -> Result<FilteredSearchOutput> {
+        let FilteredSearchScratch {
+            tracker,
+            matched_results,
+            raw_candidates,
+            ..
+        } = scratch;
+        self.search_knn_filtered_pre_with_tracker_or_scratch(
+            query,
+            k,
+            predicate,
+            tracker,
+            Some((matched_results, raw_candidates)),
+        )
+    }
+
+    fn search_knn_filtered_pre_with_tracker_or_scratch<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        #[allow(unused_variables)] tracker: &mut VisitedTracker,
+        scratch_bufs: Option<(&mut BinaryHeap<Candidate>, &mut Vec<Candidate>)>,
     ) -> Result<FilteredSearchOutput> {
         let _ = tracker;
         if k == 0 {
@@ -2493,9 +2690,61 @@ impl<'a> HnswIndex<'a> {
             });
         }
 
-        let num_base = self.matrix.rows().min(self.node_meta.len());
-        let mut heap = BinaryHeap::<Candidate>::with_capacity(k);
+        if let Some((matched_results, raw_candidates)) = scratch_bufs.as_ref() {
+            if matched_results.capacity() < k || raw_candidates.capacity() < k {
+                return Err(VectorSearchError::InvalidArgument(
+                    "FilteredSearchScratch capacity is insufficient for Strategy 3 query k"
+                        .to_string(),
+                ));
+            }
+        }
 
+        let num_base = self.matrix.rows().min(self.node_meta.len());
+        let results = if let Some((matched_results, raw_candidates)) = scratch_bufs {
+            matched_results.clear();
+            self.fill_pre_filter_heap(query, k, num_base, bitset, tracker, matched_results);
+            raw_candidates.clear();
+            while let Some(cand) = matched_results.pop() {
+                raw_candidates.push(cand);
+            }
+            raw_candidates.reverse();
+            let mut results = Vec::with_capacity(raw_candidates.len());
+            for cand in raw_candidates.iter() {
+                results.push((self.format_output_distance(cand.distance), cand.id));
+            }
+            results
+        } else {
+            let mut heap = BinaryHeap::<Candidate>::with_capacity(k);
+            self.fill_pre_filter_heap(query, k, num_base, bitset, tracker, &mut heap);
+            let sorted = heap.into_sorted_vec();
+            let mut results = Vec::with_capacity(sorted.len());
+            for cand in sorted {
+                results.push((self.format_output_distance(cand.distance), cand.id));
+            }
+            results
+        };
+
+        Ok(FilteredSearchOutput {
+            results,
+            flags: FilteredSearchFlags {
+                post_filter_cap_reached: false,
+                hop_budget_exhausted: false,
+                eval_limit_reached: false,
+                used_bruteforce_fallback: false,
+            },
+        })
+    }
+
+    fn fill_pre_filter_heap(
+        &self,
+        query: &[f32],
+        k: usize,
+        num_base: usize,
+        bitset: &crate::filter::DenseBitset,
+        #[allow(unused_variables)] tracker: &mut VisitedTracker,
+        heap: &mut BinaryHeap<Candidate>,
+    ) {
+        let _ = tracker;
         for id in bitset.iter_ones() {
             if id >= num_base {
                 break;
@@ -2514,104 +2763,6 @@ impl<'a> HnswIndex<'a> {
                 }
             }
         }
-
-        let sorted = heap.into_sorted_vec();
-        let mut results = Vec::with_capacity(sorted.len());
-        for cand in sorted {
-            results.push((self.format_output_distance(cand.distance), cand.id));
-        }
-
-        Ok(FilteredSearchOutput {
-            results,
-            flags: FilteredSearchFlags {
-                post_filter_cap_reached: false,
-                hop_budget_exhausted: false,
-                eval_limit_reached: false,
-                used_bruteforce_fallback: false,
-            },
-        })
-    }
-
-    /// Read-only Strategy 3 pre-filter brute-force scan reusing preallocated [`FilteredSearchScratch`].
-    pub fn search_knn_filtered_pre_with_scratch<P: FilterPredicate>(
-        &self,
-        query: &[f32],
-        k: usize,
-        predicate: &P,
-        _params: &FilteredSearchParams,
-        scratch: &mut FilteredSearchScratch,
-    ) -> Result<FilteredSearchOutput> {
-        if k == 0 {
-            return Err(VectorSearchError::InvalidArgument(
-                "k must be positive (> 0)".to_string(),
-            ));
-        }
-        if query.iter().any(|v| !v.is_finite()) {
-            return Err(VectorSearchError::InvalidArgument(
-                "query vector contains non-finite value (NaN/Inf)".to_string(),
-            ));
-        }
-        if self.matrix.cols() > 0 && query.len() != self.matrix.cols() {
-            return Err(VectorSearchError::DimensionMismatch {
-                expected: self.matrix.cols(),
-                actual: query.len(),
-            });
-        }
-
-        let bitset = predicate.bitset().ok_or_else(|| {
-            VectorSearchError::InvalidArgument(
-                "Strategy 3 (PreFilterBruteForce) requires a bitset-backed predicate".to_string(),
-            )
-        })?;
-
-        if self.node_meta.is_empty() || self.matrix.rows() == 0 {
-            return Ok(FilteredSearchOutput {
-                results: Vec::new(),
-                flags: FilteredSearchFlags::default(),
-            });
-        }
-
-        let num_base = self.matrix.rows().min(self.node_meta.len());
-        scratch.matched_results.clear();
-
-        for id in bitset.iter_ones() {
-            if id >= num_base {
-                break;
-            }
-            #[cfg(feature = "instrument")]
-            {
-                scratch.tracker.distance_evals += 1;
-            }
-            let dist = self.compute_distance(query, id);
-            let cand = Candidate { distance: dist, id };
-            if scratch.matched_results.len() < k {
-                scratch.matched_results.push(cand);
-            } else if let Some(mut worst) = scratch.matched_results.peek_mut() {
-                if cand < *worst {
-                    *worst = cand;
-                }
-            }
-        }
-
-        scratch.raw_candidates.clear();
-        while let Some(cand) = scratch.matched_results.pop() {
-            scratch.raw_candidates.push(cand);
-        }
-        scratch.raw_candidates.reverse();
-        let mut results = Vec::with_capacity(scratch.raw_candidates.len());
-        for cand in &scratch.raw_candidates {
-            results.push((self.format_output_distance(cand.distance), cand.id));
-        }
-
-        Ok(FilteredSearchOutput {
-            results,
-            flags: FilteredSearchFlags {
-                post_filter_cap_reached: false,
-                hop_budget_exhausted: false,
-                eval_limit_reached: false,
-                used_bruteforce_fallback: false,
-            },
-        })
     }
 
     /// Batch sequential query execution for Strategy 3 pre-filter brute force.

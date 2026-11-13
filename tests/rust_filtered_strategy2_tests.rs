@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use vector_search::dataset::{generate_mode_a_bitset, read_fvecs};
 use vector_search::distance::Metric;
@@ -542,4 +543,112 @@ fn test_strategy2_unified_dispatch_and_scratch() {
         )
         .unwrap();
     assert_eq!(direct, with_scratch);
+}
+
+#[test]
+fn test_strategy2_eval_limit_strict_stop_and_zero_limit() {
+    let matrix = make_synthetic_2d_matrix();
+    let index = make_synthetic_index(&matrix);
+    let query = [10.0_f32, 5.0_f32];
+
+    // eval_limit = Some(0) with max_bridge_hops = Some(0) sets eval_limit_reached cleanly without hop_budget_exhausted
+    let zero_calls = AtomicUsize::new(0);
+    let zero_pred = LambdaPredicate::new(
+        |id| {
+            zero_calls.fetch_add(1, Ordering::Relaxed);
+            id.is_multiple_of(2)
+        },
+        0.5,
+    );
+    let zero_out = index
+        .search_knn_filtered_traversal(
+            &query,
+            5,
+            &zero_pred,
+            &FilteredSearchParams {
+                ef_search: 20,
+                max_bridge_hops: Some(0),
+                eval_limit: Some(0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(zero_out.flags.eval_limit_reached);
+    assert!(!zero_out.flags.hop_budget_exhausted);
+    assert_eq!(zero_calls.load(Ordering::Relaxed), 0);
+
+    // Non-zero strict eval_limit stops immediately without extra closure calls
+    let calls = AtomicUsize::new(0);
+    let count_pred = LambdaPredicate::new(
+        |id| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            id.is_multiple_of(2)
+        },
+        0.5,
+    );
+    let limit = 7;
+    let out = index
+        .search_knn_filtered_traversal(
+            &query,
+            5,
+            &count_pred,
+            &FilteredSearchParams {
+                ef_search: 50,
+                eval_limit: Some(limit),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(out.flags.eval_limit_reached);
+    assert!(calls.load(Ordering::Relaxed) <= limit);
+}
+
+#[test]
+fn test_strategy2_scratch_zero_reallocation_and_undersized_error() {
+    let matrix = make_synthetic_2d_matrix();
+    let index = make_synthetic_index(&matrix);
+    let bitset = DenseBitset::ones(100);
+
+    // effective_ef (100) + m_max0 (32) > num_nodes (100), yet frontier must not grow
+    let mut scratch = FilteredSearchScratch::new(100, 100, 0);
+    let cap_frontier = scratch.frontier.capacity();
+    let cap_matched = scratch.matched_results.capacity();
+    let cap_raw = scratch.raw_candidates.capacity();
+
+    let params = FilteredSearchParams {
+        ef_search: 100,
+        ..Default::default()
+    };
+    for step in 0..10 {
+        let q = [(step as f32) * 10.0, 5.0];
+        let direct = index
+            .search_knn_filtered_traversal(&q, 10, &bitset, &params)
+            .unwrap();
+        let with_scratch = index
+            .search_knn_filtered_with_scratch(
+                &q,
+                10,
+                &bitset,
+                FilterStrategy::InTraversal,
+                &params,
+                &mut scratch,
+            )
+            .unwrap();
+        assert_eq!(direct, with_scratch);
+    }
+    assert_eq!(scratch.frontier.capacity(), cap_frontier);
+    assert_eq!(scratch.matched_results.capacity(), cap_matched);
+    assert_eq!(scratch.raw_candidates.capacity(), cap_raw);
+
+    // Undersized scratch errors cleanly instead of reallocating in query path
+    let mut empty_scratch = FilteredSearchScratch::default();
+    let err = index.search_knn_filtered_with_scratch(
+        &[10.0, 5.0],
+        5,
+        &bitset,
+        FilterStrategy::InTraversal,
+        &params,
+        &mut empty_scratch,
+    );
+    assert!(matches!(err, Err(VectorSearchError::InvalidArgument(_))));
 }

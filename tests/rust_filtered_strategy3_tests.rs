@@ -581,3 +581,46 @@ fn test_strategy3_class_preserving_unfiltered_and_fingerprint() {
     // Unfiltered HNSW with ef=50 on 100 2D points achieves 100% recall
     assert_eq!(unfiltered_hits, filtered_hits.results);
 }
+
+#[test]
+fn test_strategy3_scratch_zero_reallocation_and_undersized_error() {
+    let matrix = make_synthetic_2d_matrix();
+    let index = make_synthetic_index(&matrix);
+    let bitset = DenseBitset::ones(100);
+    let params = FilteredSearchParams::default();
+
+    let mut scratch = FilteredSearchScratch::new(100, 50, 0);
+    let cap_matched = scratch.matched_results.capacity();
+    let cap_raw = scratch.raw_candidates.capacity();
+
+    for step in 0..10 {
+        let q = [(step as f32) * 10.0, 5.0];
+        let direct = index
+            .search_knn_filtered_pre(&q, 10, &bitset, &params)
+            .unwrap();
+        let with_scratch = index
+            .search_knn_filtered_with_scratch(
+                &q,
+                10,
+                &bitset,
+                FilterStrategy::PreFilterBruteForce,
+                &params,
+                &mut scratch,
+            )
+            .unwrap();
+        assert_eq!(direct, with_scratch);
+    }
+    assert_eq!(scratch.matched_results.capacity(), cap_matched);
+    assert_eq!(scratch.raw_candidates.capacity(), cap_raw);
+
+    let mut empty_scratch = FilteredSearchScratch::default();
+    let err = index.search_knn_filtered_with_scratch(
+        &[10.0, 5.0],
+        10,
+        &bitset,
+        FilterStrategy::PreFilterBruteForce,
+        &params,
+        &mut empty_scratch,
+    );
+    assert!(matches!(err, Err(VectorSearchError::InvalidArgument(_))));
+}

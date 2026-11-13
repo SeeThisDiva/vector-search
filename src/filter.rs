@@ -26,6 +26,13 @@ pub trait FilterPredicate: Send + Sync {
     fn count_matching(&self, _total: usize) -> Option<usize> {
         self.bitset().map(|b| b.count_ones())
     }
+
+    /// Optional caller-supplied selectivity estimate in `(0.0, 1.0]` when an exact
+    /// match count is unavailable (for example, [`LambdaPredicate`]).
+    #[inline]
+    fn estimated_selectivity(&self) -> Option<f64> {
+        None
+    }
 }
 
 impl<P: FilterPredicate + ?Sized> FilterPredicate for &P {
@@ -42,6 +49,11 @@ impl<P: FilterPredicate + ?Sized> FilterPredicate for &P {
     #[inline]
     fn count_matching(&self, total: usize) -> Option<usize> {
         (**self).count_matching(total)
+    }
+
+    #[inline]
+    fn estimated_selectivity(&self) -> Option<f64> {
+        (**self).estimated_selectivity()
     }
 }
 
@@ -60,6 +72,11 @@ impl<P: FilterPredicate + ?Sized> FilterPredicate for Box<P> {
     fn count_matching(&self, total: usize) -> Option<usize> {
         (**self).count_matching(total)
     }
+
+    #[inline]
+    fn estimated_selectivity(&self) -> Option<f64> {
+        (**self).estimated_selectivity()
+    }
 }
 
 impl<P: FilterPredicate + ?Sized> FilterPredicate for std::sync::Arc<P> {
@@ -76,6 +93,11 @@ impl<P: FilterPredicate + ?Sized> FilterPredicate for std::sync::Arc<P> {
     #[inline]
     fn count_matching(&self, total: usize) -> Option<usize> {
         (**self).count_matching(total)
+    }
+
+    #[inline]
+    fn estimated_selectivity(&self) -> Option<f64> {
+        (**self).estimated_selectivity()
     }
 }
 
@@ -416,6 +438,11 @@ where
     #[inline]
     fn bitset(&self) -> Option<&DenseBitset> {
         None
+    }
+
+    #[inline]
+    fn estimated_selectivity(&self) -> Option<f64> {
+        Some(self.est_sel)
     }
 }
 
@@ -767,6 +794,7 @@ mod tests {
         assert_eq!(pred.count_matching(len), Some(3));
         assert!(pred.bitset().is_some());
         assert_eq!(pred.bitset().unwrap().len(), len);
+        assert_eq!(pred.estimated_selectivity(), None);
 
         // LambdaPredicate evaluation
         let lambda = LambdaPredicate::new(|id| id % 10 == 0, 0.10);
@@ -778,17 +806,24 @@ mod tests {
         assert!(!lambda.matches(9));
         assert!(lambda.bitset().is_none());
         assert_eq!(lambda.count_matching(1000), None);
+        assert_eq!(lambda.estimated_selectivity(), Some(0.10));
 
         // Debug formatting does not panic
         let debug_str = format!("{:?}", lambda);
         assert!(debug_str.contains("LambdaPredicate"));
         assert!(debug_str.contains("0.1"));
 
-        // Boxed predicate dispatch
+        // Boxed and borrowed predicate dispatch
+        let borrowed = &lambda;
+        assert_eq!(borrowed.estimated_selectivity(), Some(0.10));
+        let arc_pred: std::sync::Arc<dyn FilterPredicate> =
+            std::sync::Arc::new(LambdaPredicate::new(|id| id % 5 == 0, 0.20));
+        assert_eq!(arc_pred.estimated_selectivity(), Some(0.20));
         let boxed: Box<dyn FilterPredicate> = Box::new(lambda);
         assert!(boxed.matches(20));
         assert!(!boxed.matches(21));
         assert!(boxed.bitset().is_none());
+        assert_eq!(boxed.estimated_selectivity(), Some(0.10));
     }
 
     #[test]
