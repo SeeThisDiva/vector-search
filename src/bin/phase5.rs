@@ -42,6 +42,7 @@ struct CliConfig {
     data_dir: PathBuf,
     scale: usize,
     queries: usize,
+    slow_probe_queries: usize,
     uncapped_probe_queries: usize,
     dim: usize,
     k: usize,
@@ -59,6 +60,7 @@ impl Default for CliConfig {
             data_dir: PathBuf::from("data"),
             scale: 100_000,
             queries: 10_000,
+            slow_probe_queries: 500,
             uncapped_probe_queries: 200,
             dim: 128,
             k: 10,
@@ -88,8 +90,10 @@ OPTIONS:
     --data-dir <PATH>   Dataset cache directory (default: data).
     --scale <USIZE>     Pilot base vector prefix scale N (default: 100000).
     --queries <USIZE>   Pilot query count Q (default: 10000).
+    --slow-probe-queries <USIZE>
+                        Query count for slow HNSW arms at sigma <= 0.01 (2x at 0.01 < sigma < 0.5; default: 500).
     --uncapped-probe-queries <USIZE>
-                        Query count for Strategy 1 uncapped probes at sigma < 0.01 (default: 200).
+                        Query count for Strategy 1 uncapped probes at sigma <= 0.01 (default: 200).
     --dim <USIZE>       Vector dimensionality for microbenchmark (default: 128).
     --k <USIZE>         Top-k neighbor count (default: 10).
     --reps <USIZE>      Timed repetitions after 1 warmup (default: 5).
@@ -148,6 +152,9 @@ fn parse_cli_args(args: &[String]) -> Result<CliConfig> {
             }
             "--scale" => config.scale = parse_next_usize(args, &mut i, "--scale")?,
             "--queries" => config.queries = parse_next_usize(args, &mut i, "--queries")?,
+            "--slow-probe-queries" => {
+                config.slow_probe_queries = parse_next_usize(args, &mut i, "--slow-probe-queries")?;
+            }
             "--uncapped-probe-queries" => {
                 config.uncapped_probe_queries =
                     parse_next_usize(args, &mut i, "--uncapped-probe-queries")?;
@@ -757,16 +764,25 @@ fn run_pilot(config: &CliConfig) -> Result<()> {
     let mut unfiltered_qps_ef100: Option<f64> = None;
     if unfiltered_gt_path.is_file() {
         let gt_mat = read_ivecs(&unfiltered_gt_path)?;
-        let mut t = VisitedTracker::new(num_base);
-        let _ = index.search_knn_with_tracker(loaded.query.row(0), config.k, 100, &mut t)?;
-        let timed = index.search_batch_timed_with_tracker(&loaded.query, config.k, 100, &mut t)?;
-        let rec = compute_recall_at_k(&timed.result.indices, &gt_mat, config.k)?;
-        unfiltered_recall_ef100 = Some(rec);
-        unfiltered_qps_ef100 = Some(timed.latency.qps);
-        eprintln!(
-            "[INFO] Unfiltered ef=100 check: Recall@{}={:.6}, QPS={:.2}",
-            config.k, rec, timed.latency.qps
-        );
+        if gt_mat.rows() == num_queries {
+            let mut t = VisitedTracker::new(num_base);
+            let _ = index.search_knn_with_tracker(loaded.query.row(0), config.k, 100, &mut t)?;
+            let timed =
+                index.search_batch_timed_with_tracker(&loaded.query, config.k, 100, &mut t)?;
+            let rec = compute_recall_at_k(&timed.result.indices, &gt_mat, config.k)?;
+            unfiltered_recall_ef100 = Some(rec);
+            unfiltered_qps_ef100 = Some(timed.latency.qps);
+            eprintln!(
+                "[INFO] Unfiltered ef=100 check: Recall@{}={:.6}, QPS={:.2}",
+                config.k, rec, timed.latency.qps
+            );
+        } else {
+            eprintln!(
+                "[WARN] Unfiltered GT rows ({}) != queries ({}); skipping unfiltered recall check",
+                gt_mat.rows(),
+                num_queries
+            );
+        }
     }
 
     // Prepare reusable scratches and exact filtered GT engine
@@ -854,6 +870,15 @@ fn run_pilot(config: &CliConfig) -> Result<()> {
             );
             arm_records.push(s3_rec);
 
+            let hnsw_q = if sigma <= 0.01 && config.slow_probe_queries > 0 {
+                config.slow_probe_queries.min(num_queries)
+            } else if sigma < 0.5 && config.slow_probe_queries > 0 {
+                (config.slow_probe_queries * 2).min(num_queries)
+            } else {
+                num_queries
+            };
+            let hnsw_is_probe = hnsw_q < num_queries;
+
             // 4. Strategy 2 (InTraversal, all 6 efSearch points)
             for &ef in &ef_s2_ladder {
                 let s2_params = FilteredSearchParams {
@@ -864,7 +889,7 @@ fn run_pilot(config: &CliConfig) -> Result<()> {
                 let s2_rec = measure_filtered_arm(
                     &index,
                     &loaded.query,
-                    num_queries,
+                    hnsw_q,
                     config.k,
                     &bitset,
                     &gt_batch.indices,
@@ -875,10 +900,10 @@ fn run_pilot(config: &CliConfig) -> Result<()> {
                     &s2_params,
                     config.reps,
                     &mut scratch_s2_s3,
-                    false,
+                    hnsw_is_probe,
                 )?;
                 eprintln!(
-                    "[INFO] S2 ef={ef:3}: mean={:.4} ms, QPS={:.1}, Recall@10={:.4}, fewer={:.3}%, hop_exh={:.3}%",
+                    "[INFO] S2 ef={ef:3} (q={hnsw_q}, probe={hnsw_is_probe}): mean={:.4} ms, QPS={:.1}, Recall@10={:.4}, fewer={:.3}%, hop_exh={:.3}%",
                     s2_rec.median_mean_ms,
                     s2_rec.median_qps,
                     s2_rec.recall_at_k,
@@ -903,7 +928,7 @@ fn run_pilot(config: &CliConfig) -> Result<()> {
                 let rec = measure_filtered_arm(
                     &index,
                     &loaded.query,
-                    num_queries,
+                    hnsw_q,
                     config.k,
                     &bitset,
                     &gt_batch.indices,
@@ -914,10 +939,10 @@ fn run_pilot(config: &CliConfig) -> Result<()> {
                     &s1_cap_params,
                     config.reps,
                     &mut scratch_s1_cap,
-                    false,
+                    hnsw_is_probe,
                 )?;
                 eprintln!(
-                    "[INFO] S1_cap ef={ef:3}: mean={:.4} ms, QPS={:.1}, Recall@10={:.4}, fewer={:.3}%, cap={:.3}%",
+                    "[INFO] S1_cap ef={ef:3} (q={hnsw_q}, probe={hnsw_is_probe}): mean={:.4} ms, QPS={:.1}, Recall@10={:.4}, fewer={:.3}%, cap={:.3}%",
                     rec.median_mean_ms,
                     rec.median_qps,
                     rec.recall_at_k,
@@ -928,11 +953,12 @@ fn run_pilot(config: &CliConfig) -> Result<()> {
             }
 
             // 6. Strategy 1 Uncapped (overfetch_cap = N)
-            let (uncap_q, is_probe) = if sigma < 0.01 {
-                (config.uncapped_probe_queries.min(num_queries), true)
+            let uncap_q = if sigma <= 0.01 && config.uncapped_probe_queries > 0 {
+                config.uncapped_probe_queries.min(num_queries)
             } else {
-                (num_queries, false)
+                hnsw_q
             };
+            let is_probe = uncap_q < num_queries;
             let s1_uncap_params = FilteredSearchParams {
                 ef_search: 100,
                 overfetch_cap: num_base,
