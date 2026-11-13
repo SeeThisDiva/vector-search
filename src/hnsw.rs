@@ -1632,6 +1632,13 @@ impl<'a> HnswIndex<'a> {
 
         let k_max = params.overfetch_cap;
         if k_max == 0 {
+            if params.allow_bruteforce_fallback && predicate.bitset().is_some() {
+                let mut fallback_out = self
+                    .search_knn_filtered_pre_with_tracker(query, k, predicate, params, tracker)?;
+                fallback_out.flags.post_filter_cap_reached = true;
+                fallback_out.flags.used_bruteforce_fallback = true;
+                return Ok(fallback_out);
+            }
             return Ok(FilteredSearchOutput {
                 results: Vec::new(),
                 flags: FilteredSearchFlags {
@@ -1715,6 +1722,14 @@ impl<'a> HnswIndex<'a> {
             }
 
             if eval_limit_reached {
+                if params.allow_bruteforce_fallback && predicate.bitset().is_some() {
+                    let mut fallback_out = self.search_knn_filtered_pre_with_tracker(
+                        query, k, predicate, params, tracker,
+                    )?;
+                    fallback_out.flags.eval_limit_reached = true;
+                    fallback_out.flags.used_bruteforce_fallback = true;
+                    return Ok(fallback_out);
+                }
                 return Ok(FilteredSearchOutput {
                     results: best_matches,
                     flags: FilteredSearchFlags {
@@ -1726,6 +1741,14 @@ impl<'a> HnswIndex<'a> {
             }
 
             if k_prime == k_max {
+                if params.allow_bruteforce_fallback && predicate.bitset().is_some() {
+                    let mut fallback_out = self.search_knn_filtered_pre_with_tracker(
+                        query, k, predicate, params, tracker,
+                    )?;
+                    fallback_out.flags.post_filter_cap_reached = true;
+                    fallback_out.flags.used_bruteforce_fallback = true;
+                    return Ok(fallback_out);
+                }
                 return Ok(FilteredSearchOutput {
                     results: best_matches,
                     flags: FilteredSearchFlags {
@@ -1770,10 +1793,9 @@ impl<'a> HnswIndex<'a> {
             }
             FilterStrategy::InTraversal => self
                 .search_knn_filtered_traversal_with_tracker(query, k, predicate, params, tracker),
-            FilterStrategy::PreFilterBruteForce => Err(VectorSearchError::InvalidArgument(
-                "FilterStrategy::PreFilterBruteForce not implemented yet (Milestone M3 Task T3.6)"
-                    .to_string(),
-            )),
+            FilterStrategy::PreFilterBruteForce => {
+                self.search_knn_filtered_pre_with_tracker(query, k, predicate, params, tracker)
+            }
         }
     }
 
@@ -1797,10 +1819,9 @@ impl<'a> HnswIndex<'a> {
             ),
             FilterStrategy::InTraversal => self
                 .search_knn_filtered_traversal_with_scratch(query, k, predicate, params, scratch),
-            FilterStrategy::PreFilterBruteForce => Err(VectorSearchError::InvalidArgument(
-                "FilterStrategy::PreFilterBruteForce not implemented yet (Milestone M3 Task T3.6)"
-                    .to_string(),
-            )),
+            FilterStrategy::PreFilterBruteForce => {
+                self.search_knn_filtered_pre_with_scratch(query, k, predicate, params, scratch)
+            }
         }
     }
 
@@ -2158,6 +2179,17 @@ impl<'a> HnswIndex<'a> {
             results.push((self.format_output_distance(cand.distance), cand.id));
         }
 
+        if (hop_budget_exhausted || eval_limit_reached) && results.len() < k {
+            if params.allow_bruteforce_fallback && predicate.bitset().is_some() {
+                let mut fallback_out = self
+                    .search_knn_filtered_pre_with_tracker(query, k, predicate, params, tracker)?;
+                fallback_out.flags.hop_budget_exhausted = hop_budget_exhausted;
+                fallback_out.flags.eval_limit_reached = eval_limit_reached;
+                fallback_out.flags.used_bruteforce_fallback = true;
+                return Ok(fallback_out);
+            }
+        }
+
         Ok(FilteredSearchOutput {
             results,
             flags: FilteredSearchFlags {
@@ -2251,6 +2283,17 @@ impl<'a> HnswIndex<'a> {
         let mut results = Vec::with_capacity(take_k);
         for cand in &scratch.raw_candidates[..take_k] {
             results.push((self.format_output_distance(cand.distance), cand.id));
+        }
+
+        if (hop_budget_exhausted || eval_limit_reached) && results.len() < k {
+            if params.allow_bruteforce_fallback && predicate.bitset().is_some() {
+                let mut fallback_out = self
+                    .search_knn_filtered_pre_with_scratch(query, k, predicate, params, scratch)?;
+                fallback_out.flags.hop_budget_exhausted = hop_budget_exhausted;
+                fallback_out.flags.eval_limit_reached = eval_limit_reached;
+                fallback_out.flags.used_bruteforce_fallback = true;
+                return Ok(fallback_out);
+            }
         }
 
         Ok(FilteredSearchOutput {
@@ -2366,6 +2409,315 @@ impl<'a> HnswIndex<'a> {
                         let q_row = queries.row(start_q + local_i);
                         let res = self
                             .search_knn_filtered_traversal_with_tracker(
+                                q_row,
+                                k,
+                                predicate,
+                                params,
+                                &mut tracker,
+                            )
+                            .expect("query valid");
+                        *out_slot = Some(res);
+                    }
+                });
+            }
+        });
+
+        Ok(outputs
+            .into_iter()
+            .map(|opt| opt.expect("all queries processed"))
+            .collect())
+    }
+
+    // =========================================================================
+    // Milestone M3 Task T3.6: Filtered Search (Strategy 3 Pre-Filter Brute-Force Scan)
+    // =========================================================================
+
+    /// Single-query execution for Strategy 3: Pre-filter brute-force flat scan (Algorithm 4).
+    ///
+    /// Requires a bitset-backed predicate (`predicate.bitset().is_some()`). Bypasses the HNSW
+    /// graph traversal entirely, iterating over all active (1) bit IDs in the bitset and
+    /// computing exact vector distances using the SIMD-friendly kernel. Bounded by a max-heap of
+    /// size `k` with canonical `(distance, id)` tie-breaking.
+    pub fn search_knn_filtered_pre<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+    ) -> Result<FilteredSearchOutput> {
+        let mut tracker = VisitedTracker::new(self.node_meta.len());
+        self.search_knn_filtered_pre_with_tracker(query, k, predicate, params, &mut tracker)
+    }
+
+    /// Read-only Strategy 3 pre-filter brute-force scan reusing an externally provided [`VisitedTracker`].
+    pub fn search_knn_filtered_pre_with_tracker<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        _params: &FilteredSearchParams,
+        #[allow(unused_variables)] tracker: &mut VisitedTracker,
+    ) -> Result<FilteredSearchOutput> {
+        let _ = tracker;
+        if k == 0 {
+            return Err(VectorSearchError::InvalidArgument(
+                "k must be positive (> 0)".to_string(),
+            ));
+        }
+        if query.iter().any(|v| !v.is_finite()) {
+            return Err(VectorSearchError::InvalidArgument(
+                "query vector contains non-finite value (NaN/Inf)".to_string(),
+            ));
+        }
+        if self.matrix.cols() > 0 && query.len() != self.matrix.cols() {
+            return Err(VectorSearchError::DimensionMismatch {
+                expected: self.matrix.cols(),
+                actual: query.len(),
+            });
+        }
+
+        let bitset = predicate.bitset().ok_or_else(|| {
+            VectorSearchError::InvalidArgument(
+                "Strategy 3 (PreFilterBruteForce) requires a bitset-backed predicate".to_string(),
+            )
+        })?;
+
+        if self.node_meta.is_empty() || self.matrix.rows() == 0 {
+            return Ok(FilteredSearchOutput {
+                results: Vec::new(),
+                flags: FilteredSearchFlags::default(),
+            });
+        }
+
+        let num_base = self.matrix.rows().min(self.node_meta.len());
+        let mut heap = BinaryHeap::<Candidate>::with_capacity(k);
+
+        for id in bitset.iter_ones() {
+            if id >= num_base {
+                break;
+            }
+            #[cfg(feature = "instrument")]
+            {
+                tracker.distance_evals += 1;
+            }
+            let dist = self.compute_distance(query, id);
+            let cand = Candidate { distance: dist, id };
+            if heap.len() < k {
+                heap.push(cand);
+            } else if let Some(mut worst) = heap.peek_mut() {
+                if cand < *worst {
+                    *worst = cand;
+                }
+            }
+        }
+
+        let sorted = heap.into_sorted_vec();
+        let mut results = Vec::with_capacity(sorted.len());
+        for cand in sorted {
+            results.push((self.format_output_distance(cand.distance), cand.id));
+        }
+
+        Ok(FilteredSearchOutput {
+            results,
+            flags: FilteredSearchFlags {
+                post_filter_cap_reached: false,
+                hop_budget_exhausted: false,
+                eval_limit_reached: false,
+                used_bruteforce_fallback: false,
+            },
+        })
+    }
+
+    /// Read-only Strategy 3 pre-filter brute-force scan reusing preallocated [`FilteredSearchScratch`].
+    pub fn search_knn_filtered_pre_with_scratch<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        _params: &FilteredSearchParams,
+        scratch: &mut FilteredSearchScratch,
+    ) -> Result<FilteredSearchOutput> {
+        if k == 0 {
+            return Err(VectorSearchError::InvalidArgument(
+                "k must be positive (> 0)".to_string(),
+            ));
+        }
+        if query.iter().any(|v| !v.is_finite()) {
+            return Err(VectorSearchError::InvalidArgument(
+                "query vector contains non-finite value (NaN/Inf)".to_string(),
+            ));
+        }
+        if self.matrix.cols() > 0 && query.len() != self.matrix.cols() {
+            return Err(VectorSearchError::DimensionMismatch {
+                expected: self.matrix.cols(),
+                actual: query.len(),
+            });
+        }
+
+        let bitset = predicate.bitset().ok_or_else(|| {
+            VectorSearchError::InvalidArgument(
+                "Strategy 3 (PreFilterBruteForce) requires a bitset-backed predicate".to_string(),
+            )
+        })?;
+
+        if self.node_meta.is_empty() || self.matrix.rows() == 0 {
+            return Ok(FilteredSearchOutput {
+                results: Vec::new(),
+                flags: FilteredSearchFlags::default(),
+            });
+        }
+
+        let num_base = self.matrix.rows().min(self.node_meta.len());
+        scratch.matched_results.clear();
+
+        for id in bitset.iter_ones() {
+            if id >= num_base {
+                break;
+            }
+            #[cfg(feature = "instrument")]
+            {
+                scratch.tracker.distance_evals += 1;
+            }
+            let dist = self.compute_distance(query, id);
+            let cand = Candidate { distance: dist, id };
+            if scratch.matched_results.len() < k {
+                scratch.matched_results.push(cand);
+            } else if let Some(mut worst) = scratch.matched_results.peek_mut() {
+                if cand < *worst {
+                    *worst = cand;
+                }
+            }
+        }
+
+        scratch.raw_candidates.clear();
+        while let Some(cand) = scratch.matched_results.pop() {
+            scratch.raw_candidates.push(cand);
+        }
+        scratch.raw_candidates.reverse();
+        let mut results = Vec::with_capacity(scratch.raw_candidates.len());
+        for cand in &scratch.raw_candidates {
+            results.push((self.format_output_distance(cand.distance), cand.id));
+        }
+
+        Ok(FilteredSearchOutput {
+            results,
+            flags: FilteredSearchFlags {
+                post_filter_cap_reached: false,
+                hop_budget_exhausted: false,
+                eval_limit_reached: false,
+                used_bruteforce_fallback: false,
+            },
+        })
+    }
+
+    /// Batch sequential query execution for Strategy 3 pre-filter brute force.
+    pub fn search_batch_filtered_pre<P: FilterPredicate>(
+        &self,
+        queries: &RowMatrix<f32>,
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+    ) -> Result<Vec<FilteredSearchOutput>> {
+        let mut tracker = VisitedTracker::new(self.node_meta.len());
+        let mut outputs = Vec::with_capacity(queries.rows());
+        for q_row in queries.iter_rows() {
+            let out = self.search_knn_filtered_pre_with_tracker(
+                q_row,
+                k,
+                predicate,
+                params,
+                &mut tracker,
+            )?;
+            outputs.push(out);
+        }
+        Ok(outputs)
+    }
+
+    /// Multi-threaded batch search for Strategy 3 pre-filter brute force.
+    pub fn search_batch_filtered_pre_parallel<P: FilterPredicate>(
+        &self,
+        queries: &RowMatrix<f32>,
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+        num_threads: usize,
+    ) -> Result<Vec<FilteredSearchOutput>> {
+        let num_queries = queries.rows();
+        if num_queries == 0 {
+            return Ok(Vec::new());
+        }
+
+        if k == 0 {
+            return Err(VectorSearchError::InvalidArgument(
+                "k must be positive (> 0)".to_string(),
+            ));
+        }
+
+        if queries.as_slice().iter().any(|v| !v.is_finite()) {
+            return Err(VectorSearchError::InvalidArgument(
+                "query vector contains non-finite value (NaN/Inf)".to_string(),
+            ));
+        }
+
+        if self.matrix.cols() > 0 && queries.cols() != self.matrix.cols() {
+            return Err(VectorSearchError::DimensionMismatch {
+                expected: self.matrix.cols(),
+                actual: queries.cols(),
+            });
+        }
+
+        let _ = predicate.bitset().ok_or_else(|| {
+            VectorSearchError::InvalidArgument(
+                "Strategy 3 (PreFilterBruteForce) requires a bitset-backed predicate".to_string(),
+            )
+        })?;
+
+        if self.node_meta.is_empty() || self.matrix.rows() == 0 {
+            return Ok(vec![
+                FilteredSearchOutput {
+                    results: Vec::new(),
+                    flags: FilteredSearchFlags::default(),
+                };
+                num_queries
+            ]);
+        }
+
+        let workers = if num_threads == 0 {
+            std::thread::available_parallelism()
+                .map(usize::from)
+                .unwrap_or(1)
+        } else {
+            num_threads
+        }
+        .min(num_queries)
+        .max(1);
+
+        if workers == 1 {
+            return self.search_batch_filtered_pre(queries, k, predicate, params);
+        }
+
+        let mut outputs: Vec<Option<FilteredSearchOutput>> =
+            (0..num_queries).map(|_| None).collect();
+        let chunk_size = num_queries.div_ceil(workers);
+
+        std::thread::scope(|s| {
+            let mut out_rest = outputs.as_mut_slice();
+            let mut q_offset = 0;
+
+            while q_offset < num_queries {
+                let take_q = chunk_size.min(num_queries - q_offset);
+                let (out_slice, next_out) = out_rest.split_at_mut(take_q);
+                out_rest = next_out;
+
+                let start_q = q_offset;
+                q_offset += take_q;
+
+                s.spawn(move || {
+                    let mut tracker = VisitedTracker::new(self.node_meta.len());
+                    for (local_i, out_slot) in out_slice.iter_mut().enumerate() {
+                        let q_row = queries.row(start_q + local_i);
+                        let res = self
+                            .search_knn_filtered_pre_with_tracker(
                                 q_row,
                                 k,
                                 predicate,
