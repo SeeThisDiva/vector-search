@@ -186,7 +186,7 @@ pub fn measure_t_word(num_words: usize, reps: usize) -> f64 {
     let mut words = vec![0_u64; num_words];
     let mut rng = DeterministicRng::new(0x1234_5678);
     for w in words.iter_mut() {
-        if rng.next_u64() % 100 == 0 {
+        if rng.next_u64().is_multiple_of(100) {
             *w = rng.next_u64();
         }
     }
