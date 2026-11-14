@@ -1,0 +1,61 @@
+{
+  "benchmark": "cost_microbenchmark",
+  "task": "Milestone M3 Task T3.6",
+  "git_commit": "84e3c81",
+  "git_dirty": false,
+  "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "measured_this_run": true,
+  "environment": {
+    "os": "windows",
+    "arch": "x86_64",
+    "cpu_model": "12th Gen Intel(R) Core(TM) i7-12650H",
+    "logical_cores": 16,
+    "total_ram_gb": 15.78,
+    "power_mode": "balanced",
+    "processor_affinity_mask": "0x0004"
+  },
+  "hardware": {
+    "cpu_model": "12th Gen Intel(R) Core(TM) i7-12650H",
+    "logical_cores": 16,
+    "total_ram_gb": 15.8,
+    "os": "windows",
+    "arch": "x86_64",
+    "processor_affinity_mask": "0x0004"
+  },
+  "parameters": {
+    "dim": 128,
+    "k": 10,
+    "reps": 5,
+    "num_words": 500000,
+    "num_dists": 50000,
+    "num_heap_ops": 50000
+  },
+  "measurements": {
+    "t_word_ns": 0.304200,
+    "t_dist_ns": 21.042000,
+    "t_heap_ns": 2.836000,
+    "t_cand_ns": 23.878000
+  },
+  "theoretical_model": {
+    "formula": "C_brute(sigma, N, d) = (N / 64) * t_word + sigma * N * (t_dist(d) + t_heap(k))",
+    "t_scan_formula": "(N / 64) * t_word",
+    "t_cand_formula": "t_dist(d) + t_heap(k)",
+    "predicted_c_brute_ns": {
+      "n10000_sigma0.0005": 166.9213,
+      "n10000_sigma0.0010": 286.3113,
+      "n10000_sigma0.0100": 2435.3313,
+      "n10000_sigma0.1000": 23925.5312,
+      "n10000_sigma0.5000": 119437.5312,
+      "n100000_sigma0.0005": 1669.2125,
+      "n100000_sigma0.0010": 2863.1125,
+      "n100000_sigma0.0100": 24353.3125,
+      "n100000_sigma0.1000": 239255.3125,
+      "n100000_sigma0.5000": 1194375.3125,
+      "n1000000_sigma0.0005": 16692.1250,
+      "n1000000_sigma0.0010": 28631.1250,
+      "n1000000_sigma0.0100": 243533.1250,
+      "n1000000_sigma0.1000": 2392553.1250,
+      "n1000000_sigma0.5000": 11943753.1250
+    }
+  }
+}
