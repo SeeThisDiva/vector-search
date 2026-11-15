@@ -446,6 +446,20 @@ where
     }
 }
 
+/// Default per-query predicate evaluation limit for opaque closures (`predicate.bitset().is_none()`).
+///
+/// Set to `4 * 4,096 = 16,384` based on the 100k SIFT1M pilot empirical tail distribution
+/// (`results/phase5/pilot/pilot_100k.json`, `results/phase5/PROPOSAL.md` §6):
+/// - `0.0%` truncation on `S1_post_capped` (`overfetch_cap = 4096`, `max = 4,096`),
+/// - `0.0%` truncation across active 100k Strategy 2 winning points (Mode A `50%` `ef <= 600`
+///   `max = 13,302`; Mode A `10%` `ef <= 100` `max = 12,565`; Mode B `50%` `ef <= 100` `max = 7,983`),
+/// - `>99%` pass rate on Mode B `50%` `ef = 600` (`p99 = 15,726`), while cutting off `54k+`
+///   runaway traversals at low selectivity or disconnected correlated clusters.
+///
+/// Origin: derived on `N = 100,000` (`M=16, efConstruction=100`); 1M tail behavior is spot-checked
+/// in the Phase 5 opaque-closure sensitivity step (`phase5` sensitivity suite).
+pub const DEFAULT_OPAQUE_EVAL_LIMIT: usize = 16_384;
+
 /// Query-time parameter settings for filtered approximate nearest neighbor search.
 #[derive(Debug, Clone)]
 pub struct FilteredSearchParams {
@@ -460,10 +474,23 @@ pub struct FilteredSearchParams {
     /// `None` defaults to $3 \cdot efSearch$.
     pub max_bridge_hops: Option<usize>,
     /// Maximum allowed predicate evaluations per query for opaque predicates without bitset.
-    /// `None` means unconstrained evaluation.
+    /// `None` means unconstrained evaluation (`Default` keeps `None`; see
+    /// [`FilteredSearchParams::with_opaque_eval_limit`] for [`DEFAULT_OPAQUE_EVAL_LIMIT`]).
     pub eval_limit: Option<usize>,
     /// Whether bitset-backed predicates may fallback to Strategy 3 upon truncation/budget exhaustion.
     pub allow_bruteforce_fallback: bool,
+}
+
+impl FilteredSearchParams {
+    /// Returns default `FilteredSearchParams` with [`DEFAULT_OPAQUE_EVAL_LIMIT`] enabled
+    /// for opaque closure predicates (`predicate.bitset().is_none()`).
+    #[must_use]
+    pub fn with_opaque_eval_limit() -> Self {
+        Self {
+            eval_limit: Some(DEFAULT_OPAQUE_EVAL_LIMIT),
+            ..Self::default()
+        }
+    }
 }
 
 impl Default for FilteredSearchParams {
@@ -828,6 +855,8 @@ mod tests {
 
     #[test]
     fn test_filtered_search_params_and_flags_defaults() {
+        assert_eq!(DEFAULT_OPAQUE_EVAL_LIMIT, 16_384);
+
         let params = FilteredSearchParams::default();
         assert_eq!(params.ef_search, 50);
         assert_eq!(params.overfetch_cap, 4096);
@@ -835,6 +864,17 @@ mod tests {
         assert_eq!(params.max_bridge_hops, None);
         assert_eq!(params.eval_limit, None);
         assert!(!params.allow_bruteforce_fallback);
+
+        let guarded = FilteredSearchParams::with_opaque_eval_limit();
+        assert_eq!(guarded.ef_search, params.ef_search);
+        assert_eq!(guarded.overfetch_cap, params.overfetch_cap);
+        assert_eq!(guarded.overfetch_factor, params.overfetch_factor);
+        assert_eq!(guarded.max_bridge_hops, params.max_bridge_hops);
+        assert_eq!(guarded.eval_limit, Some(16_384));
+        assert_eq!(
+            guarded.allow_bruteforce_fallback,
+            params.allow_bruteforce_fallback
+        );
 
         let flags = FilteredSearchFlags::default();
         assert!(!flags.post_filter_cap_reached);
