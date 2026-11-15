@@ -327,6 +327,77 @@ impl FilteredSearchScratch {
     }
 }
 
+/// Per-query execution counters collected outside timed hot paths via
+/// [`HnswIndex::search_knn_filtered_with_counters`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FilteredSearchCounters {
+    /// Total vector distance computations performed (`valid_distance_evals + bridge_distance_evals`).
+    pub total_distance_evals: u64,
+    /// Distance computations evaluated on base vectors matching the filter predicate.
+    pub valid_distance_evals: u64,
+    /// Distance computations evaluated on non-matching routing / bridge vectors.
+    pub bridge_distance_evals: u64,
+    /// Subset of total distance computations executed during upper-layer (`l >= 1`) zoom-in.
+    pub upper_layer_distance_evals: u64,
+    /// Layer 0 vertices visited (distance-evaluated) during filtered search.
+    pub visited_nodes: u64,
+    /// Subset of `visited_nodes` satisfying the filter predicate (`|V_visited intersect S_match|`).
+    pub visited_matching_nodes: u64,
+}
+
+impl FilteredSearchCounters {
+    /// Graph traversal efficiency ratio `eta_graph = |V_visited intersect S_match| / |V_visited|`.
+    #[inline]
+    #[must_use]
+    pub fn eta_graph(&self) -> f64 {
+        if self.visited_nodes == 0 {
+            0.0
+        } else {
+            (self.visited_matching_nodes as f64) / (self.visited_nodes as f64)
+        }
+    }
+}
+
+#[inline]
+fn record_layer_distance_counter(
+    counters: &mut Option<&mut FilteredSearchCounters>,
+    nid: usize,
+    layer: usize,
+    predicate_bitset: Option<&crate::filter::DenseBitset>,
+) {
+    if let Some(c_out) = counters.as_deref_mut() {
+        let is_match = predicate_bitset.is_some_and(|bs| bs.get_bit(nid));
+        c_out.total_distance_evals += 1;
+        if is_match {
+            c_out.valid_distance_evals += 1;
+        } else {
+            c_out.bridge_distance_evals += 1;
+        }
+        if layer >= 1 {
+            c_out.upper_layer_distance_evals += 1;
+        } else {
+            c_out.visited_nodes += 1;
+            if is_match {
+                c_out.visited_matching_nodes += 1;
+            }
+        }
+    }
+}
+
+#[inline]
+fn record_layer0_match_counter(counters: &mut Option<&mut FilteredSearchCounters>, is_match: bool) {
+    if let Some(c_out) = counters.as_deref_mut() {
+        c_out.total_distance_evals += 1;
+        c_out.visited_nodes += 1;
+        if is_match {
+            c_out.valid_distance_evals += 1;
+            c_out.visited_matching_nodes += 1;
+        } else {
+            c_out.bridge_distance_evals += 1;
+        }
+    }
+}
+
 /// Detailed memory footprint breakdown for HNSW graph components.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct HnswGraphComponents {
@@ -899,10 +970,29 @@ impl<'a> HnswIndex<'a> {
         c: &mut BinaryHeap<Reverse<Candidate>>,
         w: &mut BinaryHeap<Candidate>,
     ) {
+        self.search_layer_with_scratch_inner::<false>(query, ep, ef, lc, tracker, c, w, None, None);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn search_layer_with_scratch_inner<const COLLECT_COUNTERS: bool>(
+        &self,
+        query: &[f32],
+        ep: usize,
+        ef: usize,
+        lc: usize,
+        tracker: &mut VisitedTracker,
+        c: &mut BinaryHeap<Reverse<Candidate>>,
+        w: &mut BinaryHeap<Candidate>,
+        predicate_bitset: Option<&crate::filter::DenseBitset>,
+        mut counters: Option<&mut FilteredSearchCounters>,
+    ) {
         tracker.prepare(self.node_meta.len());
         tracker.mark_visited(ep);
 
         let d_ep = self.compute_distance(query, ep);
+        if COLLECT_COUNTERS {
+            record_layer_distance_counter(&mut counters, ep, lc, predicate_bitset);
+        }
         #[cfg(feature = "instrument")]
         let mut dist_evals = 1_u64;
 
@@ -931,6 +1021,14 @@ impl<'a> HnswIndex<'a> {
 
                     let furthest_now = *w.peek().expect("W never empty");
                     let d_neighbor = self.compute_distance(query, neighbor_id);
+                    if COLLECT_COUNTERS {
+                        record_layer_distance_counter(
+                            &mut counters,
+                            neighbor_id,
+                            lc,
+                            predicate_bitset,
+                        );
+                    }
                     #[cfg(feature = "instrument")]
                     {
                         dist_evals += 1;
@@ -1343,6 +1441,18 @@ impl<'a> HnswIndex<'a> {
         ef_search: usize,
         tracker: &mut VisitedTracker,
     ) -> Result<Vec<(f32, usize)>> {
+        self.search_knn_with_tracker_inner::<false>(query, k, ef_search, tracker, None, None)
+    }
+
+    fn search_knn_with_tracker_inner<const COLLECT_COUNTERS: bool>(
+        &self,
+        query: &[f32],
+        k: usize,
+        ef_search: usize,
+        tracker: &mut VisitedTracker,
+        predicate_bitset: Option<&crate::filter::DenseBitset>,
+        mut counters: Option<&mut FilteredSearchCounters>,
+    ) -> Result<Vec<(f32, usize)>> {
         if k == 0 {
             return Err(VectorSearchError::InvalidArgument(
                 "k must be positive (> 0)".to_string(),
@@ -1368,7 +1478,20 @@ impl<'a> HnswIndex<'a> {
         // Phase 1: Top-down greedy zoom-in (ef = 1) down to layer 1
         if self.top_layer >= 1 {
             for lc in (1..=self.top_layer).rev() {
-                let w = self.search_layer(query, curr_ep, 1, lc, tracker);
+                let cap = 1 + self.config.effective_m_max0();
+                let mut c = BinaryHeap::<Reverse<Candidate>>::with_capacity(cap);
+                let mut w = BinaryHeap::<Candidate>::with_capacity(cap);
+                self.search_layer_with_scratch_inner::<COLLECT_COUNTERS>(
+                    query,
+                    curr_ep,
+                    1,
+                    lc,
+                    tracker,
+                    &mut c,
+                    &mut w,
+                    predicate_bitset,
+                    counters.as_deref_mut(),
+                );
                 if let Some(best) = w.iter().min_by(|a, b| a.cmp(b)) {
                     curr_ep = best.id;
                 }
@@ -1377,7 +1500,20 @@ impl<'a> HnswIndex<'a> {
 
         // Phase 2: Base layer beam search at layer 0
         let effective_ef = ef_search.max(k);
-        let w = self.search_layer(query, curr_ep, effective_ef, 0, tracker);
+        let cap0 = effective_ef + self.config.effective_m_max0();
+        let mut c0 = BinaryHeap::<Reverse<Candidate>>::with_capacity(cap0);
+        let mut w = BinaryHeap::<Candidate>::with_capacity(cap0);
+        self.search_layer_with_scratch_inner::<COLLECT_COUNTERS>(
+            query,
+            curr_ep,
+            effective_ef,
+            0,
+            tracker,
+            &mut c0,
+            &mut w,
+            predicate_bitset,
+            counters,
+        );
 
         // Phase 3: Extract top-K elements ordered ascending by (distance, id)
         let sorted = w.into_sorted_vec();
@@ -1621,7 +1757,9 @@ impl<'a> HnswIndex<'a> {
         params: &FilteredSearchParams,
         tracker: &mut VisitedTracker,
     ) -> Result<FilteredSearchOutput> {
-        self.search_knn_filtered_post_core(query, k, predicate, params, tracker, None)
+        self.search_knn_filtered_post_core::<P, false>(
+            query, k, predicate, params, tracker, None, None,
+        )
     }
 
     /// Read-only Strategy 1 post-filtering search reusing preallocated [`FilteredSearchScratch`].
@@ -1640,18 +1778,19 @@ impl<'a> HnswIndex<'a> {
             raw_candidates,
             overfetch_buffer,
         } = scratch;
-        self.search_knn_filtered_post_core(
+        self.search_knn_filtered_post_core::<P, false>(
             query,
             k,
             predicate,
             params,
             tracker,
             Some((frontier, matched_results, raw_candidates, overfetch_buffer)),
+            None,
         )
     }
 
-    #[allow(clippy::type_complexity)]
-    fn search_knn_filtered_post_core<P: FilterPredicate>(
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+    fn search_knn_filtered_post_core<P: FilterPredicate, const COLLECT_COUNTERS: bool>(
         &self,
         query: &[f32],
         k: usize,
@@ -1664,6 +1803,7 @@ impl<'a> HnswIndex<'a> {
             &mut Vec<Candidate>,
             &mut Vec<(f32, usize)>,
         )>,
+        mut counters: Option<&mut FilteredSearchCounters>,
     ) -> Result<FilteredSearchOutput> {
         if k == 0 {
             return Err(VectorSearchError::InvalidArgument(
@@ -1705,7 +1845,7 @@ impl<'a> HnswIndex<'a> {
         let k_max = params.overfetch_cap.min(total);
         if k_max == 0 {
             if params.allow_bruteforce_fallback && is_bitset {
-                let mut fallback_out = self.search_knn_filtered_pre_with_tracker_or_scratch(
+                let mut fallback_out = self.search_knn_filtered_pre_inner::<P, COLLECT_COUNTERS>(
                     query,
                     k,
                     predicate,
@@ -1713,6 +1853,7 @@ impl<'a> HnswIndex<'a> {
                     scratch_bufs
                         .as_mut()
                         .map(|(_, m, r, _)| (&mut **m, &mut **r)),
+                    counters,
                 )?;
                 fallback_out.flags.post_filter_cap_reached = true;
                 fallback_out.flags.used_bruteforce_fallback = true;
@@ -1821,9 +1962,10 @@ impl<'a> HnswIndex<'a> {
                         && raw_cands.capacity() >= current_ef
                     {
                         let mut curr_ep = self.enter_point.expect("enter_point checked non-empty");
+                        let pred_bitset = predicate.bitset();
                         if self.top_layer >= 1 {
                             for lc in (1..=self.top_layer).rev() {
-                                self.search_layer_with_scratch(
+                                self.search_layer_with_scratch_inner::<COLLECT_COUNTERS>(
                                     query,
                                     curr_ep,
                                     1,
@@ -1831,13 +1973,15 @@ impl<'a> HnswIndex<'a> {
                                     tracker,
                                     frontier,
                                     matched_res,
+                                    pred_bitset,
+                                    counters.as_deref_mut(),
                                 );
                                 if let Some(best) = matched_res.iter().min_by(|a, b| a.cmp(b)) {
                                     curr_ep = best.id;
                                 }
                             }
                         }
-                        self.search_layer_with_scratch(
+                        self.search_layer_with_scratch_inner::<COLLECT_COUNTERS>(
                             query,
                             curr_ep,
                             current_ef,
@@ -1845,6 +1989,8 @@ impl<'a> HnswIndex<'a> {
                             tracker,
                             frontier,
                             matched_res,
+                            pred_bitset,
+                            counters.as_deref_mut(),
                         );
                         raw_cands.clear();
                         while let Some(cand) = matched_res.pop() {
@@ -1867,8 +2013,14 @@ impl<'a> HnswIndex<'a> {
                 };
 
                 if !used_scratch_heaps {
-                    let candidates =
-                        self.search_knn_with_tracker(query, k_prime, current_ef, tracker)?;
+                    let candidates = self.search_knn_with_tracker_inner::<COLLECT_COUNTERS>(
+                        query,
+                        k_prime,
+                        current_ef,
+                        tracker,
+                        predicate.bitset(),
+                        counters.as_deref_mut(),
+                    )?;
                     for (d, id) in candidates {
                         if !try_push_candidate(d, id, &mut eval_limit_reached) {
                             break;
@@ -1893,13 +2045,15 @@ impl<'a> HnswIndex<'a> {
 
             if eval_limit_reached || k_prime == k_max {
                 if params.allow_bruteforce_fallback && is_bitset {
-                    let mut fallback_out = self.search_knn_filtered_pre_with_tracker_or_scratch(
-                        query,
-                        k,
-                        predicate,
-                        tracker,
-                        heap_bufs.as_mut().map(|(_, m, r)| (&mut **m, &mut **r)),
-                    )?;
+                    let mut fallback_out = self
+                        .search_knn_filtered_pre_inner::<P, COLLECT_COUNTERS>(
+                            query,
+                            k,
+                            predicate,
+                            tracker,
+                            heap_bufs.as_mut().map(|(_, m, r)| (&mut **m, &mut **r)),
+                            counters.as_deref_mut(),
+                        )?;
                     fallback_out.flags.eval_limit_reached = eval_limit_reached;
                     fallback_out.flags.post_filter_cap_reached =
                         !eval_limit_reached && k_prime == k_max;
@@ -1977,6 +2131,59 @@ impl<'a> HnswIndex<'a> {
                 self.search_knn_filtered_pre_with_scratch(query, k, predicate, params, scratch)
             }
         }
+    }
+
+    /// Read-only unified filtered search dispatch collecting per-query execution counters.
+    ///
+    /// Intended for untimed measurement passes outside the timed loop so timed calls
+    /// to [`Self::search_knn_filtered_with_scratch`] pay zero counter overhead via
+    /// compile-time monomorphization.
+    pub fn search_knn_filtered_with_counters<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        strategy: FilterStrategy,
+        params: &FilteredSearchParams,
+        scratch: &mut FilteredSearchScratch,
+    ) -> Result<(FilteredSearchOutput, FilteredSearchCounters)> {
+        let mut counters = FilteredSearchCounters::default();
+        let FilteredSearchScratch {
+            tracker,
+            frontier,
+            matched_results,
+            raw_candidates,
+            overfetch_buffer,
+        } = scratch;
+        let output = match strategy {
+            FilterStrategy::PostFilterOverfetch => self.search_knn_filtered_post_core::<P, true>(
+                query,
+                k,
+                predicate,
+                params,
+                tracker,
+                Some((frontier, matched_results, raw_candidates, overfetch_buffer)),
+                Some(&mut counters),
+            )?,
+            FilterStrategy::InTraversal => self.search_knn_filtered_traversal_core::<P, true>(
+                query,
+                k,
+                predicate,
+                params,
+                tracker,
+                Some((frontier, matched_results, raw_candidates)),
+                Some(&mut counters),
+            )?,
+            FilterStrategy::PreFilterBruteForce => self.search_knn_filtered_pre_inner::<P, true>(
+                query,
+                k,
+                predicate,
+                tracker,
+                Some((matched_results, raw_candidates)),
+                Some(&mut counters),
+            )?,
+        };
+        Ok((output, counters))
     }
 
     /// Batch sequential query execution for Strategy 1 post-filtering.
@@ -2106,7 +2313,7 @@ impl<'a> HnswIndex<'a> {
 
     /// Internal Layer 0 traversal with bridge nodes and hop budget (Algorithm 3).
     #[allow(clippy::too_many_arguments)]
-    fn search_layer0_in_traversal<P: FilterPredicate>(
+    fn search_layer0_in_traversal_inner<P: FilterPredicate, const COLLECT_COUNTERS: bool>(
         &self,
         query: &[f32],
         curr_ep: usize,
@@ -2118,6 +2325,7 @@ impl<'a> HnswIndex<'a> {
         tracker: &mut VisitedTracker,
         c: &mut BinaryHeap<Reverse<Candidate>>,
         w_match: &mut BinaryHeap<Candidate>,
+        mut counters: Option<&mut FilteredSearchCounters>,
     ) -> (bool, bool) {
         tracker.prepare(self.node_meta.len());
         tracker.mark_visited(curr_ep);
@@ -2151,6 +2359,9 @@ impl<'a> HnswIndex<'a> {
         } else {
             false
         };
+        if COLLECT_COUNTERS {
+            record_layer0_match_counter(&mut counters, ep_matches);
+        }
 
         if ep_matches {
             w_match.push(cand_ep);
@@ -2208,6 +2419,9 @@ impl<'a> HnswIndex<'a> {
                         }
                         predicate.matches(neighbor_id as u32)
                     };
+                    if COLLECT_COUNTERS {
+                        record_layer0_match_counter(&mut counters, is_match);
+                    }
 
                     let mut admitted = false;
                     if is_match
@@ -2263,97 +2477,9 @@ impl<'a> HnswIndex<'a> {
         params: &FilteredSearchParams,
         tracker: &mut VisitedTracker,
     ) -> Result<FilteredSearchOutput> {
-        if k == 0 {
-            return Err(VectorSearchError::InvalidArgument(
-                "k must be positive (> 0)".to_string(),
-            ));
-        }
-        if query.iter().any(|v| !v.is_finite()) {
-            return Err(VectorSearchError::InvalidArgument(
-                "query vector contains non-finite value (NaN/Inf)".to_string(),
-            ));
-        }
-
-        if self.matrix.cols() > 0 && query.len() != self.matrix.cols() {
-            return Err(VectorSearchError::DimensionMismatch {
-                expected: self.matrix.cols(),
-                actual: query.len(),
-            });
-        }
-
-        if self.node_meta.is_empty() || self.enter_point.is_none() {
-            return Ok(FilteredSearchOutput {
-                results: Vec::new(),
-                flags: FilteredSearchFlags::default(),
-            });
-        }
-
-        let mut curr_ep = self.enter_point.unwrap();
-
-        // Phase 1: Top-down greedy zoom-in (ef = 1) down to layer 1 (unfiltered)
-        if self.top_layer >= 1 {
-            for lc in (1..=self.top_layer).rev() {
-                let w = self.search_layer(query, curr_ep, 1, lc, tracker);
-                if let Some(best) = w.iter().min_by(|a, b| a.cmp(b)) {
-                    curr_ep = best.id;
-                }
-            }
-        }
-
-        // Phase 2: Base layer in-traversal search with bridge-nodes and hop budget
-        let effective_ef = params.ef_search.max(k);
-        let h_max = params.max_bridge_hops.unwrap_or(3 * effective_ef);
-
-        let cap = effective_ef + self.config.effective_m_max0();
-        let mut c = BinaryHeap::<Reverse<Candidate>>::with_capacity(cap);
-        let mut w_match = BinaryHeap::<Candidate>::with_capacity(cap);
-
-        let (hop_budget_exhausted, eval_limit_reached) = self.search_layer0_in_traversal(
-            query,
-            curr_ep,
-            k,
-            effective_ef,
-            h_max,
-            predicate,
-            params,
-            tracker,
-            &mut c,
-            &mut w_match,
-        );
-
-        let mut temp = Vec::with_capacity(w_match.len());
-        while let Some(cand) = w_match.pop() {
-            temp.push(cand);
-        }
-        temp.reverse();
-        let take_k = k.min(temp.len());
-        let mut results = Vec::with_capacity(take_k);
-        for cand in &temp[..take_k] {
-            results.push((self.format_output_distance(cand.distance), cand.id));
-        }
-
-        if (hop_budget_exhausted || eval_limit_reached)
-            && results.len() < k
-            && params.allow_bruteforce_fallback
-            && predicate.bitset().is_some()
-        {
-            let mut fallback_out =
-                self.search_knn_filtered_pre_with_tracker(query, k, predicate, params, tracker)?;
-            fallback_out.flags.hop_budget_exhausted = hop_budget_exhausted;
-            fallback_out.flags.eval_limit_reached = eval_limit_reached;
-            fallback_out.flags.used_bruteforce_fallback = true;
-            return Ok(fallback_out);
-        }
-
-        Ok(FilteredSearchOutput {
-            results,
-            flags: FilteredSearchFlags {
-                post_filter_cap_reached: false,
-                hop_budget_exhausted,
-                eval_limit_reached,
-                used_bruteforce_fallback: false,
-            },
-        })
+        self.search_knn_filtered_traversal_core::<P, false>(
+            query, k, predicate, params, tracker, None, None,
+        )
     }
 
     /// Read-only Strategy 2 in-traversal search reusing preallocated [`FilteredSearchScratch`].
@@ -2364,6 +2490,39 @@ impl<'a> HnswIndex<'a> {
         predicate: &P,
         params: &FilteredSearchParams,
         scratch: &mut FilteredSearchScratch,
+    ) -> Result<FilteredSearchOutput> {
+        let FilteredSearchScratch {
+            tracker,
+            frontier,
+            matched_results,
+            raw_candidates,
+            ..
+        } = scratch;
+        self.search_knn_filtered_traversal_core::<P, false>(
+            query,
+            k,
+            predicate,
+            params,
+            tracker,
+            Some((frontier, matched_results, raw_candidates)),
+            None,
+        )
+    }
+
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+    fn search_knn_filtered_traversal_core<P: FilterPredicate, const COLLECT_COUNTERS: bool>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+        params: &FilteredSearchParams,
+        tracker: &mut VisitedTracker,
+        scratch_bufs: Option<(
+            &mut BinaryHeap<Reverse<Candidate>>,
+            &mut BinaryHeap<Candidate>,
+            &mut Vec<Candidate>,
+        )>,
+        mut counters: Option<&mut FilteredSearchCounters>,
     ) -> Result<FilteredSearchOutput> {
         if k == 0 {
             return Err(VectorSearchError::InvalidArgument(
@@ -2393,69 +2552,101 @@ impl<'a> HnswIndex<'a> {
         let effective_ef = params.ef_search.max(k);
         let h_max = params.max_bridge_hops.unwrap_or(3 * effective_ef);
 
-        if scratch.frontier.capacity() < self.node_meta.len()
-            || scratch.matched_results.capacity() <= effective_ef
-            || scratch.raw_candidates.capacity() < effective_ef
-        {
-            return Err(VectorSearchError::InvalidArgument(
-                "FilteredSearchScratch capacity is insufficient for Strategy 2 query parameters"
-                    .to_string(),
-            ));
+        if let Some((frontier, matched_results, raw_candidates)) = scratch_bufs.as_ref() {
+            if frontier.capacity() < self.node_meta.len()
+                || matched_results.capacity() <= effective_ef
+                || raw_candidates.capacity() < effective_ef
+            {
+                return Err(VectorSearchError::InvalidArgument(
+                    "FilteredSearchScratch capacity is insufficient for Strategy 2 query parameters"
+                        .to_string(),
+                ));
+            }
         }
 
+        let cap = effective_ef + self.config.effective_m_max0();
+        let mut local_c = BinaryHeap::<Reverse<Candidate>>::new();
+        let mut local_w = BinaryHeap::<Candidate>::new();
+        let mut local_raw = Vec::<Candidate>::new();
+        let using_scratch = scratch_bufs.is_some();
+        let (frontier, matched_results, raw_candidates) = match scratch_bufs {
+            Some((frontier, matched_results, raw_candidates)) => {
+                (frontier, matched_results, raw_candidates)
+            }
+            None => {
+                local_c.reserve(cap);
+                local_w.reserve(cap);
+                (&mut local_c, &mut local_w, &mut local_raw)
+            }
+        };
+
         let mut curr_ep = self.enter_point.unwrap();
+        let pred_bitset = predicate.bitset();
 
         // Phase 1: Top-down greedy zoom-in (ef = 1) down to layer 1 (unfiltered)
         if self.top_layer >= 1 {
             for lc in (1..=self.top_layer).rev() {
-                self.search_layer_with_scratch(
+                self.search_layer_with_scratch_inner::<COLLECT_COUNTERS>(
                     query,
                     curr_ep,
                     1,
                     lc,
-                    &mut scratch.tracker,
-                    &mut scratch.frontier,
-                    &mut scratch.matched_results,
+                    tracker,
+                    frontier,
+                    matched_results,
+                    pred_bitset,
+                    counters.as_deref_mut(),
                 );
-                if let Some(best) = scratch.matched_results.iter().min_by(|a, b| a.cmp(b)) {
+                if let Some(best) = matched_results.iter().min_by(|a, b| a.cmp(b)) {
                     curr_ep = best.id;
                 }
             }
         }
 
         // Phase 2: Base layer in-traversal search with bridge-nodes and hop budget
+        let (hop_budget_exhausted, eval_limit_reached) = self
+            .search_layer0_in_traversal_inner::<P, COLLECT_COUNTERS>(
+                query,
+                curr_ep,
+                k,
+                effective_ef,
+                h_max,
+                predicate,
+                params,
+                tracker,
+                frontier,
+                matched_results,
+                counters.as_deref_mut(),
+            );
 
-        let (hop_budget_exhausted, eval_limit_reached) = self.search_layer0_in_traversal(
-            query,
-            curr_ep,
-            k,
-            effective_ef,
-            h_max,
-            predicate,
-            params,
-            &mut scratch.tracker,
-            &mut scratch.frontier,
-            &mut scratch.matched_results,
-        );
-
-        scratch.raw_candidates.clear();
-        while let Some(cand) = scratch.matched_results.pop() {
-            scratch.raw_candidates.push(cand);
+        raw_candidates.clear();
+        while let Some(cand) = matched_results.pop() {
+            raw_candidates.push(cand);
         }
-        scratch.raw_candidates.reverse();
-        let take_k = k.min(scratch.raw_candidates.len());
+        raw_candidates.reverse();
+        let take_k = k.min(raw_candidates.len());
         let mut results = Vec::with_capacity(take_k);
-        for cand in &scratch.raw_candidates[..take_k] {
+        for cand in &raw_candidates[..take_k] {
             results.push((self.format_output_distance(cand.distance), cand.id));
         }
 
         if (hop_budget_exhausted || eval_limit_reached)
             && results.len() < k
             && params.allow_bruteforce_fallback
-            && predicate.bitset().is_some()
+            && pred_bitset.is_some()
         {
-            let mut fallback_out =
-                self.search_knn_filtered_pre_with_scratch(query, k, predicate, params, scratch)?;
+            let mut fallback_out = self.search_knn_filtered_pre_inner::<P, COLLECT_COUNTERS>(
+                query,
+                k,
+                predicate,
+                tracker,
+                if using_scratch {
+                    Some((matched_results, raw_candidates))
+                } else {
+                    None
+                },
+                counters,
+            )?;
             fallback_out.flags.hop_budget_exhausted = hop_budget_exhausted;
             fallback_out.flags.eval_limit_reached = eval_limit_reached;
             fallback_out.flags.used_bruteforce_fallback = true;
@@ -2624,7 +2815,7 @@ impl<'a> HnswIndex<'a> {
         _params: &FilteredSearchParams,
         #[allow(unused_variables)] tracker: &mut VisitedTracker,
     ) -> Result<FilteredSearchOutput> {
-        self.search_knn_filtered_pre_with_tracker_or_scratch(query, k, predicate, tracker, None)
+        self.search_knn_filtered_pre_inner::<P, false>(query, k, predicate, tracker, None, None)
     }
 
     /// Read-only Strategy 3 pre-filter brute-force scan reusing preallocated [`FilteredSearchScratch`].
@@ -2642,22 +2833,24 @@ impl<'a> HnswIndex<'a> {
             raw_candidates,
             ..
         } = scratch;
-        self.search_knn_filtered_pre_with_tracker_or_scratch(
+        self.search_knn_filtered_pre_inner::<P, false>(
             query,
             k,
             predicate,
             tracker,
             Some((matched_results, raw_candidates)),
+            None,
         )
     }
 
-    fn search_knn_filtered_pre_with_tracker_or_scratch<P: FilterPredicate>(
+    fn search_knn_filtered_pre_inner<P: FilterPredicate, const COLLECT_COUNTERS: bool>(
         &self,
         query: &[f32],
         k: usize,
         predicate: &P,
         #[allow(unused_variables)] tracker: &mut VisitedTracker,
         scratch_bufs: Option<(&mut BinaryHeap<Candidate>, &mut Vec<Candidate>)>,
+        counters: Option<&mut FilteredSearchCounters>,
     ) -> Result<FilteredSearchOutput> {
         let _ = tracker;
         if k == 0 {
@@ -2702,7 +2895,15 @@ impl<'a> HnswIndex<'a> {
         let num_base = self.matrix.rows().min(self.node_meta.len());
         let results = if let Some((matched_results, raw_candidates)) = scratch_bufs {
             matched_results.clear();
-            self.fill_pre_filter_heap(query, k, num_base, bitset, tracker, matched_results);
+            self.fill_pre_filter_heap_inner::<COLLECT_COUNTERS>(
+                query,
+                k,
+                num_base,
+                bitset,
+                tracker,
+                matched_results,
+                counters,
+            );
             raw_candidates.clear();
             while let Some(cand) = matched_results.pop() {
                 raw_candidates.push(cand);
@@ -2715,7 +2916,9 @@ impl<'a> HnswIndex<'a> {
             results
         } else {
             let mut heap = BinaryHeap::<Candidate>::with_capacity(k);
-            self.fill_pre_filter_heap(query, k, num_base, bitset, tracker, &mut heap);
+            self.fill_pre_filter_heap_inner::<COLLECT_COUNTERS>(
+                query, k, num_base, bitset, tracker, &mut heap, counters,
+            );
             let sorted = heap.into_sorted_vec();
             let mut results = Vec::with_capacity(sorted.len());
             for cand in sorted {
@@ -2735,7 +2938,8 @@ impl<'a> HnswIndex<'a> {
         })
     }
 
-    fn fill_pre_filter_heap(
+    #[allow(clippy::too_many_arguments)]
+    fn fill_pre_filter_heap_inner<const COLLECT_COUNTERS: bool>(
         &self,
         query: &[f32],
         k: usize,
@@ -2743,6 +2947,7 @@ impl<'a> HnswIndex<'a> {
         bitset: &crate::filter::DenseBitset,
         #[allow(unused_variables)] tracker: &mut VisitedTracker,
         heap: &mut BinaryHeap<Candidate>,
+        mut counters: Option<&mut FilteredSearchCounters>,
     ) {
         let _ = tracker;
         for id in bitset.iter_ones() {
@@ -2754,6 +2959,9 @@ impl<'a> HnswIndex<'a> {
                 tracker.distance_evals += 1;
             }
             let dist = self.compute_distance(query, id);
+            if COLLECT_COUNTERS {
+                record_layer0_match_counter(&mut counters, true);
+            }
             let cand = Candidate { distance: dist, id };
             if heap.len() < k {
                 heap.push(cand);

@@ -30,3 +30,4 @@ pub use filter::{
     BitsetOneIterator, DenseBitset, FilterPredicate, FilteredSearchFlags, FilteredSearchOutput,
     FilteredSearchParams, LambdaPredicate, DEFAULT_OPAQUE_EVAL_LIMIT,
 };
+pub use hnsw::FilteredSearchCounters;
