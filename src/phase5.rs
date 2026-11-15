@@ -158,6 +158,7 @@ pub struct Phase5MatrixConfig {
     pub synthetic: bool,
     pub synthetic_dim: usize,
     pub synthetic_queries: Option<usize>,
+    pub allow_download: bool,
     pub smoke: bool,
     pub resume: bool,
     pub include_sensitivity: bool,
@@ -182,6 +183,7 @@ impl Default for Phase5MatrixConfig {
             synthetic: false,
             synthetic_dim: 128,
             synthetic_queries: None,
+            allow_download: true,
             smoke: false,
             resume: true,
             include_sensitivity: false,
@@ -1689,27 +1691,36 @@ fn load_dataset_for_config(config: &Phase5MatrixConfig) -> Result<LoadedDataset>
         });
     }
 
-    if config.scale <= 10_000 {
+    let loaded = if config.scale <= 10_000 {
         load_or_download_sift_with_options(
             SiftPreset::SiftSmall,
             &config.data_dir,
-            false,
+            config.allow_download,
             config.attr_seed,
             Some(config.scale),
             config.synthetic_queries,
             false,
-        )
+        )?
     } else {
         load_or_download_sift_with_options(
             SiftPreset::Sift1M,
             &config.data_dir,
-            false,
+            config.allow_download,
             config.attr_seed,
             Some(config.scale),
             config.synthetic_queries,
             false,
-        )
+        )?
+    };
+    if !loaded.source.is_authentic_sift() {
+        return Err(VectorSearchError::InvalidArgument(format!(
+            "Authentic Texmex SIFT corpus is required for scale {} unless --synthetic is passed (loaded '{}'). Ensure SIFT files exist under '{}' or omit --offline.",
+            config.scale,
+            loaded.source,
+            config.data_dir.display()
+        )));
     }
+    Ok(loaded)
 }
 
 struct PreparedCellData {

@@ -73,6 +73,7 @@ struct CliConfig {
     sigmas_explicit: bool,
     smoke: bool,
     synthetic: bool,
+    offline: bool,
     resume: bool,
     include_sensitivity: bool,
     sensitivity_only: bool,
@@ -107,6 +108,7 @@ impl Default for CliConfig {
             sigmas_explicit: false,
             smoke: false,
             synthetic: false,
+            offline: false,
             resume: true,
             include_sensitivity: false,
             sensitivity_only: false,
@@ -138,6 +140,7 @@ OPTIONS:
     --sigmas <CSV>      Comma-separated selectivity values (e.g. 0.5,0.1,0.01).
     --queries <USIZE>   Query count override Q (default: full dataset query count / Option C).
     --synthetic         Use offline deterministic synthetic vectors instead of SIFT files.
+    --offline           Disallow automatic SIFT dataset download if missing locally.
     --resume            Skip cells whose clean-commit JSON matches current config (default).
     --no-resume         Force re-execution of all requested cells.
     --include-sensitivity
@@ -272,6 +275,10 @@ fn parse_cli_args(args: &[String]) -> Result<CliConfig> {
             }
             "--synthetic" => {
                 config.synthetic = true;
+                i += 1;
+            }
+            "--offline" => {
+                config.offline = true;
                 i += 1;
             }
             "--resume" => {
@@ -1377,6 +1384,7 @@ fn run_matrix_cli(config: &CliConfig) -> Result<()> {
         } else {
             None
         },
+        allow_download: !config.offline,
         smoke: config.smoke,
         resume: config.resume,
         include_sensitivity: config.include_sensitivity,

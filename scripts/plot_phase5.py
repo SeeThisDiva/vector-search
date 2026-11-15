@@ -46,11 +46,20 @@ STRATEGY_STYLES: dict[str, dict[str, Any]] = {
     },
     "S2_in_traversal_ef20": {
         "label": "S2 In-traversal (ef=20)",
-        "color": "#56B4E9",
+        "color": "#A6CEE3",
         "linestyle": "-",
         "marker": "o",
+        "linewidth": 1.4,
+        "markersize": 4.4,
+        "zorder": 4,
+    },
+    "S2_in_traversal_ef50": {
+        "label": "S2 In-traversal (ef=50)",
+        "color": "#56B4E9",
+        "linestyle": "-",
+        "marker": "<",
         "linewidth": 1.6,
-        "markersize": 4.8,
+        "markersize": 4.6,
         "zorder": 4,
     },
     "S2_in_traversal_ef100": {
@@ -59,29 +68,65 @@ STRATEGY_STYLES: dict[str, dict[str, Any]] = {
         "linestyle": "-",
         "marker": "^",
         "linewidth": 2.1,
-        "markersize": 5.6,
+        "markersize": 5.5,
+        "zorder": 5,
+    },
+    "S2_in_traversal_ef200": {
+        "label": "S2 In-traversal (ef=200)",
+        "color": "#1B9E77",
+        "linestyle": "-",
+        "marker": ">",
+        "linewidth": 1.8,
+        "markersize": 4.8,
+        "zorder": 5,
+    },
+    "S2_in_traversal_ef400": {
+        "label": "S2 In-traversal (ef=400)",
+        "color": "#009E73",
+        "linestyle": "-",
+        "marker": "d",
+        "linewidth": 1.8,
+        "markersize": 4.8,
         "zorder": 5,
     },
     "S2_in_traversal_ef600": {
         "label": "S2 In-traversal (ef=600)",
-        "color": "#009E73",
+        "color": "#005A43",
         "linestyle": "-",
         "marker": "D",
-        "linewidth": 2.0,
+        "linewidth": 2.1,
         "markersize": 5.0,
         "zorder": 5,
     },
+    "S1_post_capped_ef20": {
+        "label": "S1 Capped (cap=4096, ef=20)",
+        "color": "#FDB462",
+        "linestyle": ":",
+        "marker": "v",
+        "linewidth": 1.6,
+        "markersize": 4.8,
+        "zorder": 4,
+    },
     "S1_post_capped_ef100": {
-        "label": "S1 Post-filter capped (cap=4096, ef=100)",
+        "label": "S1 Capped (cap=4096, ef=100)",
         "color": "#D55E00",
         "linestyle": ":",
         "marker": "v",
         "linewidth": 2.0,
-        "markersize": 5.6,
+        "markersize": 5.5,
+        "zorder": 4,
+    },
+    "S1_post_capped_ef600": {
+        "label": "S1 Capped (cap=4096, ef=600)",
+        "color": "#B2182B",
+        "linestyle": ":",
+        "marker": "v",
+        "linewidth": 1.8,
+        "markersize": 5.0,
         "zorder": 4,
     },
     "S1_post_uncapped_ef100": {
-        "label": "S1 Post-filter uncapped (ef=100, sigma >= 0.05)",
+        "label": "S1 Uncapped (ef=100, sigma >= 0.05)",
         "color": "#CC79A7",
         "linestyle": "-.",
         "marker": "P",
@@ -103,9 +148,14 @@ DEFAULT_STRATEGY_STYLE: dict[str, Any] = {
 PREFERRED_ARM_KEYS: tuple[str, ...] = (
     "S3_pre_filter",
     "S2_in_traversal_ef20",
+    "S2_in_traversal_ef50",
     "S2_in_traversal_ef100",
+    "S2_in_traversal_ef200",
+    "S2_in_traversal_ef400",
     "S2_in_traversal_ef600",
+    "S1_post_capped_ef20",
     "S1_post_capped_ef100",
+    "S1_post_capped_ef600",
     "S1_post_uncapped_ef100",
 )
 
@@ -718,23 +768,39 @@ def _plot_evals_and_eta_row(data: LoadedPhase5Data, ax_left: Axes, ax_right: Axe
     single_sigma = len(all_sigmas) == 1
 
     if single_sigma:
-        # Grouped valid vs bridge stacked horizontal/vertical bars for each arm when only 1 cell sigma exists
+        # Grouped valid vs bridge side-by-side bars on log-y for exact comparison when 1 sigma is measured
         _configure_ax_style(ax_left, log_x=False, log_y=True)
         labels: list[str] = []
         valid_vals: list[float] = []
         bridge_vals: list[float] = []
+        eta_vals: list[float] = []
+        bar_colors: list[str] = []
         for cell in data.cells:
             mode_tag = "A" if str(cell.get("mode", "")) == "independent" else "B"
             for arm in cell.get("arms", []):
                 key = _canonical_arm_key(arm)
-                if key == "S2_in_traversal_ef20":
-                    continue
                 labels.append(f"{mode_tag}:{arm.get('strategy_label', key)}")
-                valid_vals.append(max(float(arm.get("valid_dist_evals_mean", 0.0)), 0.0))
-                bridge_vals.append(max(float(arm.get("bridge_dist_evals_mean", 0.0)), 0.0))
+                valid_vals.append(float(arm.get("valid_dist_evals_mean", 0.0)))
+                bridge_vals.append(float(arm.get("bridge_dist_evals_mean", 0.0)))
+                eta_vals.append(float(arm.get("eta_graph_mean", 0.0)))
+                bar_colors.append(str(_style_for_arm_key(key)["color"]))
         x_idx = list(range(len(labels)))
-        ax_left.bar(x_idx, valid_vals, color="#0072B2", label="Valid dist evals")
-        ax_left.bar(x_idx, bridge_vals, bottom=valid_vals, color="#D55E00", alpha=0.85, label="Bridge dist evals")
+        width = 0.38
+        ax_left.bar(
+            [x - width / 2 for x in x_idx],
+            [v if v > 0.0 else float("nan") for v in valid_vals],
+            width=width,
+            color="#0072B2",
+            label="Valid dist evals",
+        )
+        ax_left.bar(
+            [x + width / 2 for x in x_idx],
+            [b if b > 0.0 else float("nan") for b in bridge_vals],
+            width=width,
+            color="#D55E00",
+            alpha=0.88,
+            label="Bridge dist evals",
+        )
         ax_left.set_xticks(x_idx)
         ax_left.set_xticklabels(labels, rotation=28, ha="right", fontsize=7.8)
         ax_left.set_ylabel("Mean Distance Evals / Query (log)", fontsize=9.5)
@@ -742,15 +808,6 @@ def _plot_evals_and_eta_row(data: LoadedPhase5Data, ax_left: Axes, ax_right: Axe
         ax_left.legend(frameon=False, fontsize=8.0)
 
         _configure_ax_style(ax_right, log_x=False, log_y=False)
-        eta_vals = []
-        bar_colors = []
-        for cell in data.cells:
-            for arm in cell.get("arms", []):
-                key = _canonical_arm_key(arm)
-                if key == "S2_in_traversal_ef20":
-                    continue
-                eta_vals.append(float(arm.get("eta_graph_mean", 0.0)))
-                bar_colors.append(_style_for_arm_key(key)["color"])
         ax_right.bar(x_idx, eta_vals, color=bar_colors, alpha=0.88)
         ax_right.set_xticks(x_idx)
         ax_right.set_xticklabels(labels, rotation=28, ha="right", fontsize=7.8)
