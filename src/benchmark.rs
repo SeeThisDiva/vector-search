@@ -142,6 +142,34 @@ impl ReportProvenance {
     }
 }
 
+/// Appends the standard `"hardware": { ... },` JSON object (2-space indented, 2-decimal RAM)
+/// to an in-progress top-level JSON report.
+pub fn append_hardware_json(out: &mut String, hardware: &HardwareInfo) {
+    out.push_str("  \"hardware\": {\n");
+    out.push_str(&format!(
+        "    \"summary\": \"{}\",\n",
+        escape_json(&hardware.summary_line())
+    ));
+    out.push_str(&format!(
+        "    \"cpu_model\": \"{}\",\n",
+        escape_json(&hardware.cpu_model)
+    ));
+    out.push_str(&format!(
+        "    \"logical_cores\": {},\n",
+        hardware.logical_cores
+    ));
+    out.push_str(&format!(
+        "    \"total_ram_gb\": {:.2},\n",
+        hardware.total_ram_gb.unwrap_or(0.0)
+    ));
+    out.push_str(&format!("    \"os\": \"{}\",\n", escape_json(&hardware.os)));
+    out.push_str(&format!(
+        "    \"arch\": \"{}\"\n",
+        escape_json(&hardware.arch)
+    ));
+    out.push_str("  },\n");
+}
+
 /// Detects provenance (`git_commit`, `git_dirty`, `rustc_version`) and environment settings
 /// using the specified command binaries, falling back to `"unknown"` when a binary is unavailable
 /// or exits non-zero.
@@ -584,7 +612,9 @@ pub fn run_phase1_benchmark(config: &Phase1Config) -> Result<Phase1Report> {
     })
 }
 
-fn escape_json(s: &str) -> String {
+/// Escapes a string for JSON emission.
+#[must_use]
+pub fn escape_json(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for ch in s.chars() {
         match ch {
@@ -600,7 +630,9 @@ fn escape_json(s: &str) -> String {
     out
 }
 
-fn opt_path_json(p: Option<&Path>) -> String {
+/// Formats an optional file path as a JSON string literal or `null`.
+#[must_use]
+pub fn opt_path_json(p: Option<&Path>) -> String {
     match p {
         Some(path) => format!("\"{}\"", escape_json(&path.display().to_string())),
         None => "null".to_string(),
@@ -707,32 +739,7 @@ impl Phase2Report {
         out.push_str("{\n");
         out.push_str("  \"phase\": 2,\n");
         detect_provenance().append_json_fields(&mut out, &self.hardware);
-        out.push_str("  \"hardware\": {\n");
-        out.push_str(&format!(
-            "    \"summary\": \"{}\",\n",
-            escape_json(&self.hardware.summary_line())
-        ));
-        out.push_str(&format!(
-            "    \"cpu_model\": \"{}\",\n",
-            escape_json(&self.hardware.cpu_model)
-        ));
-        out.push_str(&format!(
-            "    \"logical_cores\": {},\n",
-            self.hardware.logical_cores
-        ));
-        out.push_str(&format!(
-            "    \"total_ram_gb\": {:.2},\n",
-            self.hardware.total_ram_gb.unwrap_or(0.0)
-        ));
-        out.push_str(&format!(
-            "    \"os\": \"{}\",\n",
-            escape_json(&self.hardware.os)
-        ));
-        out.push_str(&format!(
-            "    \"arch\": \"{}\"\n",
-            escape_json(&self.hardware.arch)
-        ));
-        out.push_str("  },\n");
+        append_hardware_json(&mut out, &self.hardware);
 
         out.push_str("  \"dataset\": {\n");
         out.push_str(&format!(
@@ -1041,32 +1048,7 @@ impl BaselineMultiScaleReport {
         out.push_str("{\n");
         out.push_str("  \"phase\": \"2_baseline_profile\",\n");
         detect_provenance().append_json_fields(&mut out, &self.hardware);
-        out.push_str("  \"hardware\": {\n");
-        out.push_str(&format!(
-            "    \"summary\": \"{}\",\n",
-            escape_json(&self.hardware.summary_line())
-        ));
-        out.push_str(&format!(
-            "    \"cpu_model\": \"{}\",\n",
-            escape_json(&self.hardware.cpu_model)
-        ));
-        out.push_str(&format!(
-            "    \"logical_cores\": {},\n",
-            self.hardware.logical_cores
-        ));
-        out.push_str(&format!(
-            "    \"total_ram_gb\": {:.2},\n",
-            self.hardware.total_ram_gb.unwrap_or(0.0)
-        ));
-        out.push_str(&format!(
-            "    \"os\": \"{}\",\n",
-            escape_json(&self.hardware.os)
-        ));
-        out.push_str(&format!(
-            "    \"arch\": \"{}\"\n",
-            escape_json(&self.hardware.arch)
-        ));
-        out.push_str("  },\n");
+        append_hardware_json(&mut out, &self.hardware);
 
         out.push_str("  \"dataset\": {\n");
         out.push_str(&format!(
@@ -2804,32 +2786,7 @@ impl Phase3Report {
         detect_provenance().append_json_fields(&mut out, &self.hardware);
 
         // Hardware
-        out.push_str("  \"hardware\": {\n");
-        out.push_str(&format!(
-            "    \"summary\": \"{}\",\n",
-            escape_json(&self.hardware.summary_line())
-        ));
-        out.push_str(&format!(
-            "    \"cpu_model\": \"{}\",\n",
-            escape_json(&self.hardware.cpu_model)
-        ));
-        out.push_str(&format!(
-            "    \"logical_cores\": {},\n",
-            self.hardware.logical_cores
-        ));
-        out.push_str(&format!(
-            "    \"total_ram_gb\": {:.2},\n",
-            self.hardware.total_ram_gb.unwrap_or(0.0)
-        ));
-        out.push_str(&format!(
-            "    \"os\": \"{}\",\n",
-            escape_json(&self.hardware.os)
-        ));
-        out.push_str(&format!(
-            "    \"arch\": \"{}\"\n",
-            escape_json(&self.hardware.arch)
-        ));
-        out.push_str("  },\n");
+        append_hardware_json(&mut out, &self.hardware);
 
         // Dataset
         out.push_str("  \"dataset\": {\n");
@@ -3331,7 +3288,9 @@ fn load_or_default_baseline_profiles(_data_dir: &Path) -> Vec<BaselineScaleProfi
     ]
 }
 
-fn current_utc_rfc3339() -> String {
+/// Generates a current UTC RFC3339 timestamp using std only.
+#[must_use]
+pub fn current_utc_rfc3339() -> String {
     let now = std::time::SystemTime::now();
     let secs = now
         .duration_since(std::time::UNIX_EPOCH)

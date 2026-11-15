@@ -13,9 +13,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+pub use crate::benchmark::current_utc_rfc3339;
 use crate::benchmark::{
-    detect_provenance, summarize_repeated_latencies, Phase1DatasetMode, RepeatedSweepSummary,
-    ReportProvenance,
+    append_hardware_json, detect_provenance, escape_json, opt_path_json,
+    summarize_repeated_latencies, Phase1DatasetMode, RepeatedSweepSummary, ReportProvenance,
 };
 use crate::dataset::{
     generate_synthetic_sift, load_custom_dataset_with_options, load_or_download_sift_with_options,
@@ -770,32 +771,7 @@ impl Phase4IndexReport {
         out.push_str(&format!("  \"sweep_runs\": {},\n", self.sweep_runs));
 
         // Hardware block
-        out.push_str("  \"hardware\": {\n");
-        out.push_str(&format!(
-            "    \"summary\": \"{}\",\n",
-            escape_json(&self.hardware.summary_line())
-        ));
-        out.push_str(&format!(
-            "    \"cpu_model\": \"{}\",\n",
-            escape_json(&self.hardware.cpu_model)
-        ));
-        out.push_str(&format!(
-            "    \"logical_cores\": {},\n",
-            self.hardware.logical_cores
-        ));
-        out.push_str(&format!(
-            "    \"total_ram_gb\": {:.2},\n",
-            self.hardware.total_ram_gb.unwrap_or(0.0)
-        ));
-        out.push_str(&format!(
-            "    \"os\": \"{}\",\n",
-            escape_json(&self.hardware.os)
-        ));
-        out.push_str(&format!(
-            "    \"arch\": \"{}\"\n",
-            escape_json(&self.hardware.arch)
-        ));
-        out.push_str("  },\n");
+        append_hardware_json(&mut out, &self.hardware);
 
         // Dataset block
         out.push_str("  \"dataset\": {\n");
@@ -1102,32 +1078,7 @@ impl Phase4SweepSummary {
         // Provenance & Environment
         self.provenance.append_json_fields(&mut out, &self.hardware);
 
-        out.push_str("  \"hardware\": {\n");
-        out.push_str(&format!(
-            "    \"summary\": \"{}\",\n",
-            escape_json(&self.hardware.summary_line())
-        ));
-        out.push_str(&format!(
-            "    \"cpu_model\": \"{}\",\n",
-            escape_json(&self.hardware.cpu_model)
-        ));
-        out.push_str(&format!(
-            "    \"logical_cores\": {},\n",
-            self.hardware.logical_cores
-        ));
-        out.push_str(&format!(
-            "    \"total_ram_gb\": {:.2},\n",
-            self.hardware.total_ram_gb.unwrap_or(0.0)
-        ));
-        out.push_str(&format!(
-            "    \"os\": \"{}\",\n",
-            escape_json(&self.hardware.os)
-        ));
-        out.push_str(&format!(
-            "    \"arch\": \"{}\"\n",
-            escape_json(&self.hardware.arch)
-        ));
-        out.push_str("  },\n");
+        append_hardware_json(&mut out, &self.hardware);
 
         out.push_str("  \"dataset\": {\n");
         out.push_str(&format!("    \"scale_vectors\": {},\n", self.scale_vectors));
@@ -1595,57 +1546,6 @@ fn extract_json_u64_field(content: &str, key: &str) -> Option<u64> {
     let rem = &content[start..];
     let val_str: String = rem.chars().take_while(|c| c.is_ascii_digit()).collect();
     val_str.parse().ok()
-}
-
-/// Generates a current UTC RFC3339 timestamp with std only.
-#[must_use]
-pub fn current_utc_rfc3339() -> String {
-    let now = std::time::SystemTime::now();
-    let secs = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let days = secs / 86400;
-    let rem_secs = secs % 86400;
-    let hours = rem_secs / 3600;
-    let mins = (rem_secs % 3600) / 60;
-    let s = rem_secs % 60;
-
-    let z = days as i64 + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = (z - era * 146097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-
-    format!("{y:04}-{m:02}-{d:02}T{hours:02}:{mins:02}:{s:02}Z")
-}
-
-fn escape_json(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 8);
-    for ch in s.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-fn opt_path_json(p: Option<&Path>) -> String {
-    match p {
-        Some(path) => format!("\"{}\"", escape_json(&path.display().to_string())),
-        None => "null".to_string(),
-    }
 }
 
 /// Executes Phase 4 CLI with given arguments.
