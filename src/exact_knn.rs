@@ -63,6 +63,95 @@ impl Ord for HeapCandidate {
     }
 }
 
+fn validate_base_matrix(base_vectors: &RowMatrix<f32>) -> Result<()> {
+    if base_vectors.rows() == 0 || base_vectors.cols() == 0 {
+        return Err(VectorSearchError::InvalidArgument(
+            "base_vectors cannot be empty (rows and cols must be > 0)".to_string(),
+        ));
+    }
+    if i32::try_from(base_vectors.rows()).is_err() {
+        return Err(VectorSearchError::InvalidArgument(format!(
+            "base_vectors row count {} exceeds i32::MAX",
+            base_vectors.rows()
+        )));
+    }
+    if let Some(pos) = base_vectors.as_slice().iter().position(|v| !v.is_finite()) {
+        let row = pos / base_vectors.cols();
+        let col = pos % base_vectors.cols();
+        return Err(VectorSearchError::InvalidArgument(format!(
+            "base_vectors contains non-finite value (NaN/Inf) at ({row}, {col})"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_query_batch(base: &RowMatrix<f32>, queries: &RowMatrix<f32>, k: usize) -> Result<()> {
+    if k == 0 {
+        return Err(VectorSearchError::InvalidArgument(
+            "k must be positive (> 0)".to_string(),
+        ));
+    }
+    if queries.rows() > 0 && queries.cols() != base.cols() {
+        return Err(VectorSearchError::DimensionMismatch {
+            expected: base.cols(),
+            actual: queries.cols(),
+        });
+    }
+    if let Some(pos) = queries.as_slice().iter().position(|v| !v.is_finite()) {
+        let cols = queries.cols().max(1);
+        let row = pos / cols;
+        let col = pos % cols;
+        return Err(VectorSearchError::InvalidArgument(format!(
+            "queries contains non-finite value (NaN/Inf) at ({row}, {col})"
+        )));
+    }
+    Ok(())
+}
+
+#[inline]
+fn compute_metric_sort_key(metric: Metric, query: &[f32], base_row: &[f32]) -> f32 {
+    match metric {
+        Metric::L2Squared | Metric::Euclidean => l2_squared(query, base_row),
+        Metric::InnerProduct => {
+            let neg_dot = -inner_product(query, base_row);
+            if neg_dot == 0.0 {
+                0.0
+            } else {
+                neg_dot
+            }
+        }
+    }
+}
+
+#[inline]
+fn format_metric_output_distance(metric: Metric, sort_key: f32) -> f32 {
+    match metric {
+        Metric::L2Squared => {
+            if sort_key <= 0.0 {
+                0.0
+            } else {
+                sort_key
+            }
+        }
+        Metric::Euclidean => {
+            let d = sort_key.max(0.0).sqrt();
+            if d <= 0.0 {
+                0.0
+            } else {
+                d
+            }
+        }
+        Metric::InnerProduct => {
+            let score = -sort_key;
+            if score == 0.0 {
+                0.0
+            } else {
+                score
+            }
+        }
+    }
+}
+
 /// Brute-force exact K-Nearest Neighbor search engine.
 #[derive(Debug, Clone)]
 pub struct ExactKnn {
@@ -117,24 +206,7 @@ impl ExactKnn {
 
     /// Indexes `base_vectors` after validating non-empty dimensions, `i32` ID bounds, and finiteness.
     pub fn fit(&mut self, base_vectors: RowMatrix<f32>) -> Result<&mut Self> {
-        if base_vectors.rows() == 0 || base_vectors.cols() == 0 {
-            return Err(VectorSearchError::InvalidArgument(
-                "base_vectors cannot be empty (rows and cols must be > 0)".to_string(),
-            ));
-        }
-        if i32::try_from(base_vectors.rows()).is_err() {
-            return Err(VectorSearchError::InvalidArgument(format!(
-                "base_vectors row count {} exceeds i32::MAX",
-                base_vectors.rows()
-            )));
-        }
-        if let Some(pos) = base_vectors.as_slice().iter().position(|v| !v.is_finite()) {
-            let row = pos / base_vectors.cols();
-            let col = pos % base_vectors.cols();
-            return Err(VectorSearchError::InvalidArgument(format!(
-                "base_vectors contains non-finite value (NaN/Inf) at ({row}, {col})"
-            )));
-        }
+        validate_base_matrix(&base_vectors)?;
 
         self.base_vectors = Some(base_vectors);
         Ok(self)
@@ -294,43 +366,8 @@ impl ExactKnn {
         k: usize,
         num_threads: usize,
     ) -> Result<KnnSearchResult> {
-        if base.rows() == 0 || base.cols() == 0 {
-            return Err(VectorSearchError::InvalidArgument(
-                "base_vectors cannot be empty (rows and cols must be > 0)".to_string(),
-            ));
-        }
-        if i32::try_from(base.rows()).is_err() {
-            return Err(VectorSearchError::InvalidArgument(format!(
-                "base_vectors row count {} exceeds i32::MAX",
-                base.rows()
-            )));
-        }
-        if let Some(pos) = base.as_slice().iter().position(|v| !v.is_finite()) {
-            let row = pos / base.cols();
-            let col = pos % base.cols();
-            return Err(VectorSearchError::InvalidArgument(format!(
-                "base_vectors contains non-finite value (NaN/Inf) at ({row}, {col})"
-            )));
-        }
-        if k == 0 {
-            return Err(VectorSearchError::InvalidArgument(
-                "k must be positive (> 0)".to_string(),
-            ));
-        }
-        if queries.rows() > 0 && queries.cols() != base.cols() {
-            return Err(VectorSearchError::DimensionMismatch {
-                expected: base.cols(),
-                actual: queries.cols(),
-            });
-        }
-        if let Some(pos) = queries.as_slice().iter().position(|v| !v.is_finite()) {
-            let cols = queries.cols().max(1);
-            let row = pos / cols;
-            let col = pos % cols;
-            return Err(VectorSearchError::InvalidArgument(format!(
-                "queries contains non-finite value (NaN/Inf) at ({row}, {col})"
-            )));
-        }
+        validate_base_matrix(base)?;
+        validate_query_batch(base, queries, k)?;
 
         Self::search_parallel_validated(metric, base, queries, k, num_threads)
     }
@@ -446,73 +483,19 @@ impl ExactKnn {
                 "ExactKnn::fit() must be called with base_vectors before search",
             ))?;
 
-        if k == 0 {
-            return Err(VectorSearchError::InvalidArgument(
-                "k must be positive (> 0)".to_string(),
-            ));
-        }
-
-        if queries.rows() > 0 && queries.cols() != base.cols() {
-            return Err(VectorSearchError::DimensionMismatch {
-                expected: base.cols(),
-                actual: queries.cols(),
-            });
-        }
-
-        if let Some(pos) = queries.as_slice().iter().position(|v| !v.is_finite()) {
-            let cols = queries.cols().max(1);
-            let row = pos / cols;
-            let col = pos % cols;
-            return Err(VectorSearchError::InvalidArgument(format!(
-                "queries contains non-finite value (NaN/Inf) at ({row}, {col})"
-            )));
-        }
+        validate_query_batch(base, queries, k)?;
 
         Ok(base)
     }
 
     #[inline]
     fn compute_sort_key(&self, query: &[f32], base_row: &[f32]) -> f32 {
-        match self.metric {
-            Metric::L2Squared | Metric::Euclidean => l2_squared(query, base_row),
-            Metric::InnerProduct => {
-                let neg_dot = -inner_product(query, base_row);
-                if neg_dot == 0.0 {
-                    0.0
-                } else {
-                    neg_dot
-                }
-            }
-        }
+        compute_metric_sort_key(self.metric, query, base_row)
     }
 
     #[inline]
     fn format_output_distance(&self, sort_key: f32) -> f32 {
-        match self.metric {
-            Metric::L2Squared => {
-                if sort_key <= 0.0 {
-                    0.0
-                } else {
-                    sort_key
-                }
-            }
-            Metric::Euclidean => {
-                let d = sort_key.max(0.0).sqrt();
-                if d <= 0.0 {
-                    0.0
-                } else {
-                    d
-                }
-            }
-            Metric::InnerProduct => {
-                let score = -sort_key;
-                if score == 0.0 {
-                    0.0
-                } else {
-                    score
-                }
-            }
-        }
+        format_metric_output_distance(self.metric, sort_key)
     }
 
     #[inline]
@@ -579,24 +562,7 @@ impl FilteredExactKnn {
     ///
     /// Validates non-empty matrix dimensions, `i32::MAX` row bound, and vector finiteness.
     pub fn new(metric: Metric, base_vectors: RowMatrix<f32>) -> Result<Self> {
-        if base_vectors.rows() == 0 || base_vectors.cols() == 0 {
-            return Err(VectorSearchError::InvalidArgument(
-                "base_vectors cannot be empty (rows and cols must be > 0)".to_string(),
-            ));
-        }
-        if i32::try_from(base_vectors.rows()).is_err() {
-            return Err(VectorSearchError::InvalidArgument(format!(
-                "base_vectors row count {} exceeds i32::MAX",
-                base_vectors.rows()
-            )));
-        }
-        if let Some(pos) = base_vectors.as_slice().iter().position(|v| !v.is_finite()) {
-            let row = pos / base_vectors.cols();
-            let col = pos % base_vectors.cols();
-            return Err(VectorSearchError::InvalidArgument(format!(
-                "base_vectors contains non-finite value (NaN/Inf) at ({row}, {col})"
-            )));
-        }
+        validate_base_matrix(&base_vectors)?;
         Ok(Self {
             metric,
             base_vectors,
@@ -671,43 +637,33 @@ impl FilteredExactKnn {
         let num_base = self.base_vectors.rows();
         let mut heap = BinaryHeap::<HeapCandidate>::with_capacity(k);
 
+        let push_id = |id: usize, heap: &mut BinaryHeap<HeapCandidate>| {
+            let row = self.base_vectors.row(id);
+            let cand = HeapCandidate {
+                sort_key: self.compute_sort_key(query, row),
+                id: id as i32,
+            };
+            if heap.len() < k {
+                heap.push(cand);
+            } else if let Some(&worst) = heap.peek() {
+                if cand < worst {
+                    heap.pop();
+                    heap.push(cand);
+                }
+            }
+        };
+
         if let Some(b) = predicate.bitset() {
             for id in b.iter_ones() {
                 if id >= num_base {
                     break;
                 }
-                let row = self.base_vectors.row(id);
-                let dist = self.compute_sort_key(query, row);
-                let cand = HeapCandidate {
-                    sort_key: dist,
-                    id: id as i32,
-                };
-                if heap.len() < k {
-                    heap.push(cand);
-                } else if let Some(&worst) = heap.peek() {
-                    if cand < worst {
-                        heap.pop();
-                        heap.push(cand);
-                    }
-                }
+                push_id(id, &mut heap);
             }
         } else {
             for id in 0..num_base {
                 if predicate.matches(id as u32) {
-                    let row = self.base_vectors.row(id);
-                    let dist = self.compute_sort_key(query, row);
-                    let cand = HeapCandidate {
-                        sort_key: dist,
-                        id: id as i32,
-                    };
-                    if heap.len() < k {
-                        heap.push(cand);
-                    } else if let Some(&worst) = heap.peek() {
-                        if cand < worst {
-                            heap.pop();
-                            heap.push(cand);
-                        }
-                    }
+                    push_id(id, &mut heap);
                 }
             }
         }
@@ -865,70 +821,17 @@ impl FilteredExactKnn {
     }
 
     fn validate_batch_inputs(&self, queries: &RowMatrix<f32>, k: usize) -> Result<()> {
-        if k == 0 {
-            return Err(VectorSearchError::InvalidArgument(
-                "k must be positive (> 0)".to_string(),
-            ));
-        }
-        if queries.rows() > 0 && queries.cols() != self.base_vectors.cols() {
-            return Err(VectorSearchError::DimensionMismatch {
-                expected: self.base_vectors.cols(),
-                actual: queries.cols(),
-            });
-        }
-        if let Some(pos) = queries.as_slice().iter().position(|v| !v.is_finite()) {
-            let cols = queries.cols().max(1);
-            let row = pos / cols;
-            let col = pos % cols;
-            return Err(VectorSearchError::InvalidArgument(format!(
-                "queries contains non-finite value (NaN/Inf) at ({row}, {col})"
-            )));
-        }
-        Ok(())
+        validate_query_batch(&self.base_vectors, queries, k)
     }
 
     #[inline]
     fn compute_sort_key(&self, query: &[f32], base_row: &[f32]) -> f32 {
-        match self.metric {
-            Metric::L2Squared | Metric::Euclidean => l2_squared(query, base_row),
-            Metric::InnerProduct => {
-                let neg_dot = -inner_product(query, base_row);
-                if neg_dot == 0.0 {
-                    0.0
-                } else {
-                    neg_dot
-                }
-            }
-        }
+        compute_metric_sort_key(self.metric, query, base_row)
     }
 
     #[inline]
     fn format_output_distance(&self, sort_key: f32) -> f32 {
-        match self.metric {
-            Metric::L2Squared => {
-                if sort_key <= 0.0 {
-                    0.0
-                } else {
-                    sort_key
-                }
-            }
-            Metric::Euclidean => {
-                let d = sort_key.max(0.0).sqrt();
-                if d <= 0.0 {
-                    0.0
-                } else {
-                    d
-                }
-            }
-            Metric::InnerProduct => {
-                let score = -sort_key;
-                if score == 0.0 {
-                    0.0
-                } else {
-                    score
-                }
-            }
-        }
+        format_metric_output_distance(self.metric, sort_key)
     }
 }
 
