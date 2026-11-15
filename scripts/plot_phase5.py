@@ -878,8 +878,24 @@ def _plot_sensitivity_row(data: LoadedPhase5Data, ax_left: Axes, ax_right: Axes)
     gamma_items = [it for it in items if str(it.get("sweep_group", "")) == "overfetch_factor_sweep"]
 
     if hmax_items:
-        # Plot Recall@10 grouped by (mode, sigma) over multiplier = H_max / ef_search
-        groups: dict[str, list[tuple[float, float]]] = {}
+        # Group by (mode, sigma, ef) using 6 mode/sigma colors and ef-coded linestyles so legends stay concise
+        mode_sigma_colors = [
+            "#0072B2",
+            "#56B4E9",
+            "#009E73",
+            "#D55E00",
+            "#E69F00",
+            "#CC79A7",
+        ]
+        ms_pairs = sorted(
+            {(str(it.get("mode", "")), float(it.get("sigma", 0.0))) for it in hmax_items},
+            key=lambda pair: (pair[0], pair[1]),
+        )
+        color_map = {
+            pair: mode_sigma_colors[idx % len(mode_sigma_colors)]
+            for idx, pair in enumerate(ms_pairs)
+        }
+        grouped: dict[tuple[str, float, int], list[tuple[float, float]]] = {}
         for it in hmax_items:
             arm = it.get("arm", {})
             ef = max(int(arm.get("ef_search", 100)), 1)
@@ -887,24 +903,39 @@ def _plot_sensitivity_row(data: LoadedPhase5Data, ax_left: Axes, ax_right: Axes)
             if hmax is None:
                 continue
             mult = float(hmax) / float(ef)
-            g_label = f"{str(it.get('mode', ''))[:4]} s={float(it.get('sigma', 0.0)):.3g} ef={ef}"
-            groups.setdefault(g_label, []).append((mult, float(arm.get("recall_at_k", 0.0))))
-        for g_label, pts in sorted(groups.items()):
+            key_t = (str(it.get("mode", "")), float(it.get("sigma", 0.0)), ef)
+            grouped.setdefault(key_t, []).append((mult, float(arm.get("recall_at_k", 0.0))))
+
+        ef_styles: dict[int, tuple[str, float, float, str]] = {
+            50: (":", 1.1, 0.50, "."),
+            100: ("-", 1.9, 0.95, "o"),
+            400: ("--", 1.3, 0.65, "^"),
+        }
+        for (m_name, sig, ef), pts in sorted(grouped.items()):
             pts_sorted = sorted(pts, key=lambda x: x[0])
+            color = color_map.get((m_name, sig), "#444444")
+            ls, lw, alpha, marker = ef_styles.get(ef, ("-", 1.5, 0.8, "o"))
+            lbl = (
+                f"{'A' if m_name == 'independent' else 'B'} s={sig:g} (ef={ef})"
+                if ef == 100 or len(grouped) <= 8
+                else None
+            )
             ax_left.plot(
                 [p[0] for p in pts_sorted],
                 [p[1] for p in pts_sorted],
-                marker="o",
-                linewidth=1.5,
-                markersize=4.2,
-                label=g_label,
+                color=color,
+                linestyle=ls,
+                linewidth=lw,
+                alpha=alpha,
+                marker=marker,
+                markersize=4.0,
+                label=lbl,
             )
         ax_left.set_xlabel(r"Bridge-Hop Budget Multiplier ($H_{\max} / ef$)", fontsize=9.5)
         ax_left.set_ylabel("Filtered Recall@10", fontsize=9.5)
         ax_left.set_ylim(-0.02, 1.05)
-        ax_left.set_title(r"$H_{\max}$ Bridge-Hop Sensitivity", fontsize=10.5, fontweight="bold")
-        if len(groups) <= 8:
-            ax_left.legend(frameon=False, fontsize=7.0, ncol=2)
+        ax_left.set_title(r"$H_{\max}$ Bridge-Hop Sensitivity (solid=ef100, dashed=ef400)", fontsize=10.2, fontweight="bold")
+        ax_left.legend(frameon=False, fontsize=6.8, ncol=2, loc="best")
     elif gamma_items:
         xs = [str(it.get("arm", {}).get("strategy_label", "")) for it in gamma_items]
         ys = [float(it.get("arm", {}).get("recall_at_k", 0.0)) for it in gamma_items]
@@ -926,11 +957,12 @@ def _plot_sensitivity_row(data: LoadedPhase5Data, ax_left: Axes, ax_right: Axes)
         limit_rates = []
         for p in probes:
             lim = p.get("eval_limit")
-            lim_str = "None" if lim is None else str(int(lim))
+            lim_str = "None" if lim is None else (f"{int(lim) // 1000}k" if int(lim) >= 1000 else str(int(lim)))
             sc = int(p.get("scale", data.scale))
             sc_tag = f"{sc // 1000}k" if sc < 1_000_000 else "1M"
+            mode_ch = "A" if str(p.get("mode", "")) == "independent" else "B"
             strat = "S2" if "S2" in str(p.get("strategy_label", "")) else "S1"
-            probe_labels.append(f"{sc_tag} {strat}\nlim={lim_str}\ns={float(p.get('sigma', 0.0)):.2g}")
+            probe_labels.append(f"{sc_tag} {mode_ch}:{strat} s={float(p.get('sigma', 0.0)):g} [{lim_str}]")
             mean_evals.append(float(p.get("eval_count_mean", 0.0)))
             max_evals.append(float(p.get("eval_count_max", 0.0)))
             limit_rates.append(float(p.get("eval_limit_reached_rate", 0.0)))
@@ -940,7 +972,7 @@ def _plot_sensitivity_row(data: LoadedPhase5Data, ax_left: Axes, ax_right: Axes)
         ax_right.bar([x + width / 2 for x in x_p], max_evals, width=width, color="#E69F00", label="Max predicate calls")
         ax_right.axhline(16_384, color="#CC79A7", linestyle="--", linewidth=1.2, label="DEFAULT_OPAQUE_EVAL_LIMIT=16,384")
         ax_right.set_xticks(x_p)
-        ax_right.set_xticklabels(probe_labels, fontsize=6.8, rotation=22, ha="right")
+        ax_right.set_xticklabels(probe_labels, fontsize=6.4, rotation=42, ha="right")
         ax_right.set_ylabel("Predicate Closure Invocations", fontsize=9.5)
         ax_right.set_title(
             f"Opaque Closure eval_limit Probe (max hit rate={max(limit_rates) * 100:.1f}%)",
