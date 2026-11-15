@@ -1,0 +1,69 @@
+{
+  "phase": 5,
+  "phase_name": "Phase 5 Filtered Search Summary",
+  "task": "Milestone M3 Task T3.8 / T3.9",
+  "generated_at": "2026-11-15T11:47:46Z",
+  "git_commit": "b2d0f52",
+  "git_dirty": false,
+  "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "dataset_source": "Authentic Texmex SIFT1M (data\\sift1m)",
+  "is_authentic_sift": true,
+  "scale": 100000,
+  "total_cells": 1,
+  "newly_measured_count": 1,
+  "resumed_skipped_count": 0,
+  "sensitivity_executed": false,
+  "opaque_1m_spotcheck_executed": false,
+  "option_c_schedule": {
+    "tier": "Option C",
+    "default_opaque_eval_limit": 16384,
+    "s1_uncapped_evaluated_sigma_min": 0.050000
+  },
+  "hardware": {
+    "summary": "12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)",
+    "cpu_model": "12th Gen Intel(R) Core(TM) i7-12650H",
+    "logical_cores": 16,
+    "total_ram_gb": 15.78,
+    "os": "windows",
+    "arch": "x86_64"
+  },
+
+  "cells": [
+    {
+      "report_filename": "cell_n100000_correlated_s0.100000.json",
+      "status": "measured",
+      "mode": "correlated",
+      "sigma": 0.100000,
+      "s1_uncapped_evaluated": true,
+      "predicate_cache_hit": false,
+      "gt_cache_hit": false,
+      "num_arms": 11
+    }
+  ],
+  "crossovers_primary_0_95": [
+    {
+      "mode": "correlated",
+      "target_recall": 0.95,
+      "outcome": "no_crossover_in_range",
+      "bracket_lo_sigma": null,
+      "bracket_hi_sigma": null,
+      "crossover_sigma_loglog": null,
+      "bracket_lo_s2_ef": null,
+      "bracket_hi_s2_ef": null,
+      "note": "s3_wins_across_all_measured_selectivities"
+    }
+  ],
+  "crossovers_secondary_0_99": [
+    {
+      "mode": "correlated",
+      "target_recall": 0.99,
+      "outcome": "no_crossover_in_range",
+      "bracket_lo_sigma": null,
+      "bracket_hi_sigma": null,
+      "crossover_sigma_loglog": null,
+      "bracket_lo_s2_ef": null,
+      "bracket_hi_s2_ef": null,
+      "note": "s3_wins_across_all_measured_selectivities"
+    }
+  ]
+}
