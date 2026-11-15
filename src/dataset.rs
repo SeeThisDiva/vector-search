@@ -869,7 +869,12 @@ fn download_sift_preset(preset: SiftPreset, cache_dir: &Path) -> Result<()> {
                         let extract_res = run_tar_extract(&archive_path, cache_dir);
                         let _ = fs::remove_file(&archive_path);
                         match extract_res {
-                            Ok(()) => return Ok(()),
+                            Ok(()) => {
+                                let _ = fs::remove_file(
+                                    cache_dir.join("siftsmall").join("siftsmall_learn.fvecs"),
+                                );
+                                return Ok(());
+                            }
                             Err(e) => errors.push(format!("{url} (extract): {e}")),
                         }
                     }
@@ -928,6 +933,9 @@ fn download_sift_preset(preset: SiftPreset, cache_dir: &Path) -> Result<()> {
                     fs::rename(&archive_part, &archive_path)?;
                     let extract_res = run_tar_extract(&archive_path, cache_dir);
                     let _ = fs::remove_file(&archive_path);
+                    if extract_res.is_ok() {
+                        let _ = fs::remove_file(cache_dir.join("sift").join("sift_learn.fvecs"));
+                    }
                     extract_res
                 }
                 Err(e) => {
