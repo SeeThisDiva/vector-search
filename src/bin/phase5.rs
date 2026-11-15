@@ -16,7 +16,9 @@ use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-use vector_search::benchmark::{detect_provenance, summarize_repeated_latencies, ReportProvenance};
+use vector_search::benchmark::{
+    detect_provenance, escape_json, summarize_repeated_latencies, ReportProvenance,
+};
 use vector_search::dataset::{
     generate_mode_a_bitset, generate_mode_b_bitset_detailed, load_or_download_sift_with_options,
     read_ivecs, SiftPreset, S_CLUST_DEFAULT,
@@ -182,21 +184,6 @@ fn parse_cli_args(args: &[String]) -> Result<CliConfig> {
     Ok(config)
 }
 
-fn escape_json_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
 /// Measures the average nanoseconds required to scan one 64-bit bitset word ($t_{\text{word}}$).
 pub fn measure_t_word(num_words: usize, reps: usize) -> f64 {
     let mut words = vec![0_u64; num_words];
@@ -351,14 +338,14 @@ fn format_environment_json(
     "power_mode": "{}",
     "processor_affinity_mask": "{}"
   }}"#,
-        escape_json_str(&hw.os),
-        escape_json_str(&hw.arch),
-        escape_json_str(&hw.cpu_model),
+        escape_json(&hw.os),
+        escape_json(&hw.arch),
+        escape_json(&hw.cpu_model),
         hw.logical_cores,
         hw.total_ram_gb
             .map_or("null".to_string(), |r| format!("{r:.2}")),
-        escape_json_str(&prov.power_mode),
-        escape_json_str(&prov.processor_affinity_mask)
+        escape_json(&prov.power_mode),
+        escape_json(&prov.processor_affinity_mask)
     )
 }
 
@@ -427,17 +414,17 @@ fn build_json_report(config: &CliConfig, t_word_ns: f64, t_dist_ns: f64, t_heap_
   }}
 }}
 "#,
-        escape_json_str(&prov.git_commit),
+        escape_json(&prov.git_commit),
         prov.git_dirty,
-        escape_json_str(&prov.rustc_version),
+        escape_json(&prov.rustc_version),
         env_block,
-        escape_json_str(&hw.cpu_model),
+        escape_json(&hw.cpu_model),
         hw.logical_cores,
         hw.total_ram_gb
             .map_or("null".to_string(), |r| format!("{r:.1}")),
-        escape_json_str(&hw.os),
-        escape_json_str(&hw.arch),
-        escape_json_str(&prov.processor_affinity_mask),
+        escape_json(&hw.os),
+        escape_json(&hw.arch),
+        escape_json(&prov.processor_affinity_mask),
         config.dim,
         config.k,
         config.reps,
@@ -1119,9 +1106,9 @@ fn run_pilot(config: &CliConfig) -> Result<()> {
 {}  ]
 }}
 "#,
-        escape_json_str(&prov.git_commit),
+        escape_json(&prov.git_commit),
         prov.git_dirty,
-        escape_json_str(&prov.rustc_version),
+        escape_json(&prov.rustc_version),
         config.reps,
         env_block,
         num_base,

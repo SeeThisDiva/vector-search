@@ -9,9 +9,11 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 use std::str::FromStr;
 use std::time::Instant;
+
+use vector_search::benchmark::detect_provenance;
 
 use vector_search::dataset::{
     generate_mode_a_bitset, generate_mode_b_bitset_detailed, generate_synthetic_sift, read_bitset,
@@ -365,29 +367,12 @@ fn parse_cli_args() -> Result<Option<CliConfig>> {
     }))
 }
 
-fn get_git_commit() -> String {
-    Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .ok()
-        .and_then(|output| {
-            if output.status.success() {
-                String::from_utf8(output.stdout)
-                    .ok()
-                    .map(|s| s.trim().to_string())
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| "unknown".to_string())
-}
-
 fn run() -> Result<()> {
     let Some(config) = parse_cli_args()? else {
         return Ok(());
     };
 
-    let git_commit = get_git_commit();
+    let git_commit = detect_provenance().git_commit;
     let hw = detect_hardware();
 
     println!("============================================================");
