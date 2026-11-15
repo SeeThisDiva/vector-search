@@ -43,8 +43,15 @@ path = "src/bin/phase5.rs"
 default = []
 instrument = []
 
+[profile.dev]
+debug = false
+
+[profile.test]
+debug = false
+
 [profile.release]
 opt-level = 3
 lto = "thin"
 codegen-units = 1
+strip = "debuginfo"
 
