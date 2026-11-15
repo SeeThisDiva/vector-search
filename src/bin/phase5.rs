@@ -1,10 +1,10 @@
-//! Phase 5 Filtered Search CLI & Cost Microbenchmark / T3.7 Pilot Runner.
+//! Phase 5 Filtered Search CLI & Cost Microbenchmark / T3.7 Pilot / T3.8 Matrix Runner.
 //!
 //! Supports:
 //! - `--microbench` (T3.6): Emits structured JSON reporting `t_word`, `t_dist(d)`, `t_heap(k)`.
-//! - `--pilot` (T3.7): Runs a 100k authentic SIFT1M prefix pilot across Mode A/B metadata,
-//!   filtered ground truth generation, Strategies 1 (capped/uncapped), 2, and 3, and
-//!   opaque `LambdaPredicate` evaluation-count profiling for the Gate G4.5 budget proposal.
+//! - `--pilot` (T3.7): Runs the 100k pilot benchmark suite across Strategies 1-3.
+//! - `--matrix` / `--smoke` (T3.8 / T3.9): Runs the resumable Phase 5 Option C matrix,
+//!   versioned bitset + GT cache, sensitivity suites, and matched-recall crossover analysis.
 
 #![forbid(unsafe_code)]
 
@@ -32,18 +32,34 @@ use vector_search::hnsw::{
     Candidate, FilterStrategy, FilteredSearchScratch, HnswConfig, HnswIndex, VisitedTracker,
 };
 use vector_search::matrix::RowMatrix;
+use vector_search::phase5::{
+    run_phase5_matrix, MetadataMode, Phase5MatrixConfig, SELECTIVITY_LADDER_12,
+    SMOKE_SELECTIVITY_LADDER,
+};
 use vector_search::recall::{
     compute_latency_stats, compute_recall_at_k, percentile_sorted, LatencyStats,
 };
 use vector_search::rng::DeterministicRng;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Phase5RunMode {
+    Microbench,
+    Pilot,
+    Matrix,
+}
+
 #[derive(Debug, Clone)]
 struct CliConfig {
+    mode: Phase5RunMode,
     run_pilot: bool,
     output_path: Option<PathBuf>,
+    output_dir: PathBuf,
+    output_dir_explicit: bool,
     data_dir: PathBuf,
     scale: usize,
+    scale_explicit: bool,
     queries: usize,
+    queries_explicit: bool,
     slow_probe_queries: usize,
     uncapped_probe_queries: usize,
     dim: usize,
@@ -52,16 +68,32 @@ struct CliConfig {
     num_words: usize,
     num_dists: usize,
     num_heap_ops: usize,
+    modes: Vec<MetadataMode>,
+    sigmas: Vec<f64>,
+    sigmas_explicit: bool,
+    smoke: bool,
+    synthetic: bool,
+    resume: bool,
+    include_sensitivity: bool,
+    sensitivity_only: bool,
+    include_1m_opaque_spotcheck: bool,
+    opaque_1m_spotcheck_only: bool,
+    gt_threads: usize,
 }
 
 impl Default for CliConfig {
     fn default() -> Self {
         Self {
+            mode: Phase5RunMode::Microbench,
             run_pilot: false,
             output_path: None,
+            output_dir: PathBuf::from("results/phase5"),
+            output_dir_explicit: false,
             data_dir: PathBuf::from("data"),
             scale: 100_000,
+            scale_explicit: false,
             queries: 10_000,
+            queries_explicit: false,
             slow_probe_queries: 500,
             uncapped_probe_queries: 200,
             dim: 128,
@@ -70,33 +102,57 @@ impl Default for CliConfig {
             num_words: 500_000,
             num_dists: 50_000,
             num_heap_ops: 50_000,
+            modes: vec![MetadataMode::Independent, MetadataMode::Correlated],
+            sigmas: SELECTIVITY_LADDER_12.to_vec(),
+            sigmas_explicit: false,
+            smoke: false,
+            synthetic: false,
+            resume: true,
+            include_sensitivity: false,
+            sensitivity_only: false,
+            include_1m_opaque_spotcheck: false,
+            opaque_1m_spotcheck_only: false,
+            gt_threads: 0,
         }
     }
 }
 
 fn print_usage() {
     eprintln!(
-        r#"Phase 5 Filtered Vector Search CLI (Milestone M3 Tasks T3.6 / T3.7)
+        r#"Phase 5 Filtered Vector Search CLI (Milestone M3 Tasks T3.6 / T3.7 / T3.8 / T3.9)
 
 USAGE:
     phase5 [OPTIONS]
 
 OPTIONS:
-    --microbench, -m
-                        Run the Strategy 3 cost model microbenchmark (default).
+    --microbench, -m    Run the Strategy 3 cost model microbenchmark (default).
     --pilot             Run the T3.7 100k pilot benchmark suite across Strategies 1-3.
-    --output, -o <PATH>
-                        Output path for structured JSON benchmark report.
-                        If omitted or '-', JSON is written to stdout (microbench)
-                        or results/phase5/pilot/pilot_100k.json (pilot).
-    --data-dir <PATH>   Dataset cache directory (default: data).
-    --scale <USIZE>     Pilot base vector prefix scale N (default: 100000).
-    --queries <USIZE>   Pilot query count Q (default: 10000).
+    --matrix            Run the Option C resumable Phase 5 matrix runner (T3.8 / T3.9).
+    --smoke             Run fast 10k smoke matrix (defaults: scale=10000, 4 tiers,
+                        output-dir=results/phase5/smoke).
+    --output, -o <PATH> Output path for structured JSON report (microbench / pilot).
+    --output-dir <PATH> Output directory for per-cell & summary JSONs (default: results/phase5).
+    --data-dir <PATH>   Dataset & Phase 5 versioned cache directory (default: data).
+    --scale <USIZE>     Base vector scale N (default: 100000, or 10000 for --smoke).
+    --modes <CSV>       Comma-separated metadata modes: independent,correlated.
+    --sigmas <CSV>      Comma-separated selectivity values (e.g. 0.5,0.1,0.01).
+    --queries <USIZE>   Query count override Q (default: full dataset query count / Option C).
+    --synthetic         Use offline deterministic synthetic vectors instead of SIFT files.
+    --resume            Skip cells whose clean-commit JSON matches current config (default).
+    --no-resume         Force re-execution of all requested cells.
+    --include-sensitivity
+                        Also run H_max, overfetch_factor, and opaque eval_limit sensitivity.
+    --sensitivity-only  Run only the sensitivity suite and write sensitivity_n<N>.json.
+    --include-1m-opaque-spotcheck
+                        Include the 1M opaque LambdaPredicate eval_limit spot check in sensitivity.
+    --1m-opaque-spotcheck-only
+                        Execute only the 1M opaque spot check (writes opaque_spotcheck_1m.json).
+    --gt-threads <USIZE> Threads for exact filtered GT cache misses (0 = all cores; default: 0).
     --slow-probe-queries <USIZE>
-                        Query count for slow HNSW arms at sigma <= 0.01 (2x at 0.01 < sigma < 0.5; default: 500).
+                        Pilot query count for slow HNSW arms at sigma <= 0.01 (default: 500).
     --uncapped-probe-queries <USIZE>
-                        Query count for Strategy 1 uncapped probes at sigma <= 0.01 (default: 200).
-    --dim <USIZE>       Vector dimensionality for microbenchmark (default: 128).
+                        Pilot query count for Strategy 1 uncapped probes at sigma <= 0.01 (default: 200).
+    --dim <USIZE>       Vector dimensionality for microbenchmark or --synthetic (default: 128).
     --k <USIZE>         Top-k neighbor count (default: 10).
     --reps <USIZE>      Timed repetitions after 1 warmup (default: 5).
     --words <USIZE>     Word count for bitset scan microbenchmark (default: 500000).
@@ -120,6 +176,17 @@ fn parse_next_usize(args: &[String], idx: &mut usize, flag: &str) -> Result<usiz
     Ok(val)
 }
 
+fn parse_next_string<'a>(args: &'a [String], idx: &mut usize, flag: &str) -> Result<&'a str> {
+    if *idx + 1 >= args.len() {
+        return Err(VectorSearchError::InvalidArgument(format!(
+            "Missing argument for {flag}"
+        )));
+    }
+    let val = args[*idx + 1].as_str();
+    *idx += 2;
+    Ok(val)
+}
+
 fn parse_cli_args(args: &[String]) -> Result<CliConfig> {
     let mut config = CliConfig::default();
     let mut i = 0;
@@ -127,33 +194,117 @@ fn parse_cli_args(args: &[String]) -> Result<CliConfig> {
     while i < args.len() {
         match args[i].as_str() {
             "--microbench" | "-m" => {
+                config.mode = Phase5RunMode::Microbench;
                 config.run_pilot = false;
                 i += 1;
             }
             "--pilot" => {
+                config.mode = Phase5RunMode::Pilot;
                 config.run_pilot = true;
                 i += 1;
             }
+            "--matrix" => {
+                config.mode = Phase5RunMode::Matrix;
+                config.run_pilot = false;
+                i += 1;
+            }
+            "--smoke" => {
+                config.mode = Phase5RunMode::Matrix;
+                config.smoke = true;
+                i += 1;
+            }
             "--output" | "-o" => {
-                if i + 1 >= args.len() {
-                    return Err(VectorSearchError::InvalidArgument(
-                        "Missing argument for --output".to_string(),
-                    ));
-                }
-                config.output_path = Some(PathBuf::from(&args[i + 1]));
-                i += 2;
+                config.output_path =
+                    Some(PathBuf::from(parse_next_string(args, &mut i, "--output")?));
+            }
+            "--output-dir" => {
+                config.output_dir = PathBuf::from(parse_next_string(args, &mut i, "--output-dir")?);
+                config.output_dir_explicit = true;
             }
             "--data-dir" => {
-                if i + 1 >= args.len() {
+                config.data_dir = PathBuf::from(parse_next_string(args, &mut i, "--data-dir")?);
+            }
+            "--scale" => {
+                config.scale = parse_next_usize(args, &mut i, "--scale")?;
+                config.scale_explicit = true;
+            }
+            "--modes" => {
+                let raw = parse_next_string(args, &mut i, "--modes")?;
+                let mut parsed = Vec::new();
+                for part in raw.split(',').filter(|p| !p.trim().is_empty()) {
+                    let m = MetadataMode::parse(part)?;
+                    if !parsed.contains(&m) {
+                        parsed.push(m);
+                    }
+                }
+                if parsed.is_empty() {
                     return Err(VectorSearchError::InvalidArgument(
-                        "Missing argument for --data-dir".to_string(),
+                        "--modes list cannot be empty".to_string(),
                     ));
                 }
-                config.data_dir = PathBuf::from(&args[i + 1]);
-                i += 2;
+                config.modes = parsed;
             }
-            "--scale" => config.scale = parse_next_usize(args, &mut i, "--scale")?,
-            "--queries" => config.queries = parse_next_usize(args, &mut i, "--queries")?,
+            "--sigmas" => {
+                let raw = parse_next_string(args, &mut i, "--sigmas")?;
+                let mut parsed = Vec::new();
+                for part in raw.split(',').filter(|p| !p.trim().is_empty()) {
+                    let s = part.trim().parse::<f64>().map_err(|e| {
+                        VectorSearchError::InvalidArgument(format!("Invalid sigma '{part}': {e}"))
+                    })?;
+                    if !s.is_finite() || s <= 0.0 || s > 1.0 {
+                        return Err(VectorSearchError::InvalidArgument(format!(
+                            "Sigma must lie in (0.0, 1.0], got {s}"
+                        )));
+                    }
+                    parsed.push(s);
+                }
+                if parsed.is_empty() {
+                    return Err(VectorSearchError::InvalidArgument(
+                        "--sigmas list cannot be empty".to_string(),
+                    ));
+                }
+                config.sigmas = parsed;
+                config.sigmas_explicit = true;
+            }
+            "--queries" => {
+                config.queries = parse_next_usize(args, &mut i, "--queries")?;
+                config.queries_explicit = true;
+            }
+            "--synthetic" => {
+                config.synthetic = true;
+                i += 1;
+            }
+            "--resume" => {
+                config.resume = true;
+                i += 1;
+            }
+            "--no-resume" => {
+                config.resume = false;
+                i += 1;
+            }
+            "--include-sensitivity" => {
+                config.include_sensitivity = true;
+                i += 1;
+            }
+            "--sensitivity-only" => {
+                config.mode = Phase5RunMode::Matrix;
+                config.sensitivity_only = true;
+                config.include_sensitivity = true;
+                i += 1;
+            }
+            "--include-1m-opaque-spotcheck" => {
+                config.include_1m_opaque_spotcheck = true;
+                i += 1;
+            }
+            "--1m-opaque-spotcheck-only" => {
+                config.mode = Phase5RunMode::Matrix;
+                config.opaque_1m_spotcheck_only = true;
+                config.include_1m_opaque_spotcheck = true;
+                i += 1;
+            }
+            "--gt-threads" => {
+                config.gt_threads = parse_next_usize(args, &mut i, "--gt-threads")?;
+            }
             "--slow-probe-queries" => {
                 config.slow_probe_queries = parse_next_usize(args, &mut i, "--slow-probe-queries")?;
             }
@@ -178,6 +329,18 @@ fn parse_cli_args(args: &[String]) -> Result<CliConfig> {
                     "Unrecognized option: {other}"
                 )));
             }
+        }
+    }
+
+    if config.smoke {
+        if !config.scale_explicit {
+            config.scale = 10_000;
+        }
+        if !config.sigmas_explicit {
+            config.sigmas = SMOKE_SELECTIVITY_LADDER.to_vec();
+        }
+        if !config.output_dir_explicit {
+            config.output_dir = PathBuf::from("results/phase5/smoke");
         }
     }
 
@@ -1198,6 +1361,44 @@ fn run_microbenchmark(config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
+fn run_matrix_cli(config: &CliConfig) -> Result<()> {
+    let matrix_cfg = Phase5MatrixConfig {
+        data_dir: config.data_dir.clone(),
+        output_dir: config.output_dir.clone(),
+        scale: config.scale,
+        modes: config.modes.clone(),
+        sigmas: config.sigmas.clone(),
+        k: config.k,
+        reps: config.reps,
+        synthetic: config.synthetic,
+        synthetic_dim: config.dim,
+        synthetic_queries: if config.queries_explicit {
+            Some(config.queries)
+        } else {
+            None
+        },
+        smoke: config.smoke,
+        resume: config.resume,
+        include_sensitivity: config.include_sensitivity,
+        sensitivity_only: config.sensitivity_only,
+        include_1m_opaque_spotcheck: config.include_1m_opaque_spotcheck,
+        opaque_1m_spotcheck_only: config.opaque_1m_spotcheck_only,
+        gt_threads: config.gt_threads,
+        ..Default::default()
+    };
+
+    let summary = run_phase5_matrix(&matrix_cfg)?;
+    eprintln!(
+        "[DONE] Phase 5 matrix: scale={}, total_cells={}, newly_measured={}, resumed={}, summary={}",
+        summary.scale,
+        summary.total_cells,
+        summary.newly_measured_count,
+        summary.resumed_skipped_count,
+        summary.summary_path.display()
+    );
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     let config = match parse_cli_args(&args) {
@@ -1209,10 +1410,10 @@ fn main() -> ExitCode {
         }
     };
 
-    let res = if config.run_pilot {
-        run_pilot(&config)
-    } else {
-        run_microbenchmark(&config)
+    let res = match config.mode {
+        Phase5RunMode::Microbench => run_microbenchmark(&config),
+        Phase5RunMode::Pilot => run_pilot(&config),
+        Phase5RunMode::Matrix => run_matrix_cli(&config),
     };
 
     match res {

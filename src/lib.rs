@@ -22,6 +22,7 @@ pub mod hardware;
 pub mod hnsw;
 pub mod matrix;
 pub mod phase4;
+pub mod phase5;
 pub mod recall;
 pub mod rng;
 
