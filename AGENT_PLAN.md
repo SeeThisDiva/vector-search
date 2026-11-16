@@ -188,7 +188,7 @@ Do not start until G1 is signed.
   Plain, readable styling: labeled axes with units, legend, no decoration. Each chart's caption states hardware, dataset, scale, repetitions.
 - [x] **T2.5 Run the 1M finals** (Benchmarker) and add them to chart 1 as a separate marker style.
 - [x] **T2.6 Write-up.** README section with the frontier, the recommended operating points, and what changed with scale. Every number goes in `CLAIMS.md`.
-- [ ] **Gate G3 (Dev):** signs off Phase 4.
+- [x] **Gate G3 (Dev):** signs off Phase 4 (approved progression through M3; M3 Phase 5 complete, `b9fc648`).
 
 ### M3. Phase 5: filtered search (design brief; expand after G3)
 
@@ -197,14 +197,14 @@ Agent produces `results/phase5/DESIGN.md` first; no code before Dev approves it.
 - Strategies to compare: (a) post-filter with over-fetch, (b) in-traversal predicate (traverse non-matching nodes for connectivity, only admit matching ones to the result set), (c) pre-filter with brute force over the matching ids when selectivity is low. Find the selectivity where the fallback beats traversal, and report it.
 - Ground truth: filtered brute force per predicate.
 - Metrics: Recall@10 vs selectivity, latency vs selectivity, and the failure mode where the traversal returns fewer than k results.
-- Gate G4 (Dev): approves the design.
+- [x] Gate G4 / G4.5 (Dev): approved (`results/phase5/G4_DECISIONS.md`, `results/phase5/G4_5_DECISIONS.md`; M3 `T3.1`–`T3.11` complete).
 
 ### M4. Phase 6: quantization (design brief; expand after G4)
 
 - SQ8 first: per-dimension min and max, `u8` codes, asymmetric distance (float query vs `u8` code) in safe Rust, optional rerank of top-R with full-precision vectors. Report recall cost, memory per vector, latency.
 - PQ as a stretch goal: deterministic k-means (own implementation, seeded), 8-bit codes with 16 subquantizers as the starting point (16 B per vector), ADC lookup tables. Compare against SQ8 on the same recall-vs-latency chart.
 - Constraint: the `PRESERVING` guarantees from M1 do not apply here, so each variant is `GRAPH-CHANGING` or a new index type. Keep float32 paths intact and tested.
-- Gate G5 (Dev): approves the design.
+- [x] Gate G5 (Dev): approved (`results/phase6/G5_DECISIONS.md`, Option B SQ8 + PQ).
 
 ### M5. Phase 7: head-to-head with FAISS (design brief; expand after G5)
 
@@ -214,7 +214,7 @@ Protocol decisions Dev must confirm before any run:
 - Match efSearch semantics and compare at matched recall (curves), not at equal efSearch.
 - Record FAISS version, how it was installed (Windows wheel vs built), CPU instruction set in use, and the `keep_pruned` setting on the Rust side, since the graph structures will differ.
 - Report where Rust loses as plainly as where it wins.
-- Gate G6 (Dev): approves the protocol.
+- [x] Gate G6 (Dev): approved (`results/phase7/G6_DECISIONS.md`, Option A Frontier + C2-nkp, stock SSE2 parity, MT search scaling).
 
 ---
 

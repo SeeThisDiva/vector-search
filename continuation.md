@@ -140,9 +140,9 @@ Tip for quick iteration: release builds use `lto = "thin"` and `codegen-units = 
 - [x] Dev signs off Phase 3 (Gate G0).
 - [x] Dev signs off Phase 3.5 optimization decisions (Gate G1).
 - [x] Dev approves Phase 4 grid & time budget (Gate G2).
-- [ ] Dev signs off Phase 4 evaluation & Pareto write-up (Gate G3).
+- [x] Dev signs off Phase 4 evaluation & Pareto write-up (Gate G3).
 - [x] Dev approves Phase 5 design & Option C matrix (`Gate G4` + `Gate G4.5`).
-- [ ] Dev approves Phase 6 Quantization design (`Gate G5`, [`results/phase6/DESIGN.md`](results/phase6/DESIGN.md)).
-- [ ] Dev approves Phase 7 FAISS protocol (`Gate G6`, [`results/phase7/DESIGN.md`](results/phase7/DESIGN.md)).
+- [x] Dev approves Phase 6 Quantization design (`Gate G5`, [`results/phase6/G5_DECISIONS.md`](results/phase6/G5_DECISIONS.md)).
+- [x] Dev approves Phase 7 FAISS protocol (`Gate G6`, [`results/phase7/G6_DECISIONS.md`](results/phase7/G6_DECISIONS.md)).
 - [ ] CI: confirm green on a fresh clone after pushing.
 - [x] Update `CLAUDE.md`, `CONTEXT_AND_MEMORY.md` and README test counts whenever tests are added.
