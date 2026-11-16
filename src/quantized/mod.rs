@@ -4,6 +4,7 @@
 //! and search paths remain untouched (`PRESERVING` non-regression guarantee).
 
 pub mod graph;
+pub mod pq;
 pub mod sq8;
 
 use std::io::{Read, Write};
@@ -15,6 +16,11 @@ pub use graph::{
     results_to_knn_search_result, CompactHnswGraph, Neighbor, QuantizedBuildMode,
     QuantizedBuildTimings, QuantizedDistanceSource, QuantizedMemoryProfile, QuantizedSearchScratch,
     QuantizedStorageMode, SearchMetrics, TimedQuantizedSearch,
+};
+pub use pq::{
+    pq_adc_distance, pq_sdc_distance, HnswPqIndex, PqBuildTimings, PqCodebook, PqConfig,
+    PqQueryState, PqTrainer, PqVectors, PqWithSdc, PQ_DEFAULT_MAX_LLOYD_ITERS,
+    PQ_DEFAULT_MAX_TRAIN_VECTORS, PQ_DEFAULT_SEED, PQ_K_CENTROIDS,
 };
 pub use sq8::{
     inner_product_sq8, inner_product_sq8_symmetric, l2_squared_sq8_expanded,
