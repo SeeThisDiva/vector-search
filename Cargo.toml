@@ -43,6 +43,10 @@ path = "src/bin/phase5.rs"
 name = "phase7"
 path = "src/bin/phase7.rs"
 
+[[bin]]
+name = "phase6"
+path = "src/bin/phase6.rs"
+
 [features]
 default = []
 instrument = []

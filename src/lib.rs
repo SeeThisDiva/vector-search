@@ -23,6 +23,7 @@ pub mod hnsw;
 pub mod matrix;
 pub mod phase4;
 pub mod phase5;
+pub mod phase6;
 pub mod quantized;
 pub mod recall;
 pub mod rng;

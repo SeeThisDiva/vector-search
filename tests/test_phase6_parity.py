@@ -11,13 +11,15 @@ Covers Milestone M4 Tasks T4.7b and T4.9:
 - End-to-end tests of `scripts/plot_phase6.py` (full matrix, partial subset runs,
   Phase 4 baseline merge, scale auto-discovery, and deterministic SVG output) into `tmp_path`.
 
-Note: Cross-binary Rust `phase6.exe` CLI parity checks will be added in Stage 2 once
-`src/bin/phase6.rs` lands. Every test in this module runs and passes standalone with 0 skips.
+Note: Includes both pure NumPy unit checks and live cross-binary Rust `phase6` CLI parity
+and end-to-end `scripts/plot_phase6.py` integration verification with 0 skipped tests.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -28,6 +30,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from scripts.plot_phase6 import generate_all_phase6_charts
+from src.hnsw_phase1.dataset import write_fvecs
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -1254,3 +1257,260 @@ def test_plot_phase6_deterministic_svg_and_multiscale_error(tmp_path: Path) -> N
         raise AssertionError("Expected ValueError when multiple scales exist and scale=None")
     except ValueError:
         pass
+
+
+# ============================================================================
+# Live Rust `phase6` Binary Parity & End-to-End Plotter Integration Tests
+# ============================================================================
+
+
+def _resolve_rust_phase6_binary() -> Path:
+    """Locate (or build if absent) the compiled release `phase6` binary without skipping."""
+    exe_name = "phase6.exe" if os.name == "nt" else "phase6"
+    release_bin = REPO_ROOT / "target" / "release" / exe_name
+    if release_bin.is_file():
+        return release_bin
+
+    cargo = shutil.which("cargo")
+    if cargo is None:
+        raise FileNotFoundError(
+            f"Compiled binary missing at {release_bin} and `cargo` is not on PATH."
+        )
+    proc = subprocess.run(
+        [cargo, "build", "--release", "--bin", "phase6"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0 or not release_bin.is_file():
+        raise RuntimeError(
+            f"Failed to build release phase6 binary (rc={proc.returncode}):\n{proc.stderr}"
+        )
+    return release_bin
+
+
+def _make_parity_clustered_dataset(
+    num_base: int = 160,
+    num_queries: int = 8,
+    dim: int = 32,
+    num_clusters: int = 8,
+    seed: int = 2026,
+) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
+    """Build deterministic clustered float32 arrays with well-separated cluster centers."""
+    rng = np.random.default_rng(seed)
+    centers = rng.normal(loc=0.0, scale=15.0, size=(num_clusters, dim)).astype(np.float32)
+    base_labels = np.arange(num_base) % num_clusters
+    base = centers[base_labels] + rng.normal(loc=0.0, scale=0.8, size=(num_base, dim)).astype(
+        np.float32
+    )
+    query_labels = np.arange(num_queries) % num_clusters
+    queries = centers[query_labels] + rng.normal(
+        loc=0.0, scale=0.6, size=(num_queries, dim)
+    ).astype(np.float32)
+    return np.ascontiguousarray(base, dtype=np.float32), np.ascontiguousarray(
+        queries, dtype=np.float32
+    )
+
+
+def test_live_rust_phase6_parity_check(tmp_path: Path) -> None:
+    """Verify live `phase6 --parity-check` SQ8, PQ, and HNSW rerank parity against NumPy."""
+    phase6_bin = _resolve_rust_phase6_binary()
+    base, queries = _make_parity_clustered_dataset(
+        num_base=160,
+        num_queries=8,
+        dim=32,
+        num_clusters=8,
+        seed=2026,
+    )
+    base_path = tmp_path / "base.fvecs"
+    query_path = tmp_path / "query.fvecs"
+    parity_json = tmp_path / "parity.json"
+    write_fvecs(str(base_path), base)
+    write_fvecs(str(query_path), queries)
+
+    k = 5
+    ef = 48
+    m_pq = 8
+    proc = subprocess.run(
+        [
+            str(phase6_bin),
+            "--parity-check",
+            "--base-fvecs",
+            str(base_path),
+            "--query-fvecs",
+            str(query_path),
+            "--m-pq",
+            str(m_pq),
+            "--k",
+            str(k),
+            "--ef",
+            str(ef),
+            "--seed",
+            "123",
+            "--json-out",
+            str(parity_json),
+        ],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, (
+        f"phase6 --parity-check failed (rc={proc.returncode}):\n{proc.stderr}"
+    )
+    doc = json.loads(parity_json.read_text(encoding="utf-8"))
+    assert doc["command"] == "parity_check"
+    assert doc["num_base"] == 160
+    assert doc["num_queries"] == 8
+    assert doc["dim"] == 32
+    assert doc["k"] == k
+    assert doc["m_pq"] == m_pq
+
+    # 1. Exact GT parity
+    exact_gt_py = exact_l2_squared_topk(queries, base, k)
+    exact_gt_rs = np.asarray(doc["exact_gt_topk_ids"], dtype=np.int32)
+    np.testing.assert_array_equal(exact_gt_rs, exact_gt_py)
+
+    # 2. SQ8 calibration, encoding, asymmetric L2^2, and rerank recall parity
+    sq8_doc = doc["sq8"]
+    cal = sq8_calibrate(base)
+    np.testing.assert_allclose(np.asarray(sq8_doc["mins"], dtype=np.float32), cal.mins, rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(np.asarray(sq8_doc["scales"], dtype=np.float32), cal.scales, rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(
+        np.asarray(sq8_doc["inv_scales"], dtype=np.float32),
+        cal.inv_scales,
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+    sq8_codes_rs = np.asarray(sq8_doc["codes"], dtype=np.uint8)
+    sq8_codes_py = sq8_encode(base, cal)
+    assert int(np.max(np.abs(sq8_codes_rs.astype(np.int16) - sq8_codes_py.astype(np.int16)))) <= 1
+    assert float(np.mean(sq8_codes_rs == sq8_codes_py)) >= 0.99
+
+    sq8_dists_rs = np.asarray(sq8_doc["asymmetric_l2_sq"], dtype=np.float32)
+    for qi in range(queries.shape[0]):
+        d2_py = sq8_asymmetric_l2_squared(queries[qi], sq8_codes_rs, cal)
+        np.testing.assert_allclose(sq8_dists_rs[qi], d2_py, rtol=1e-4, atol=1e-3)
+        top_ids_py = np.argsort(sq8_dists_rs[qi], kind="mergesort")[:k].astype(np.int32)
+        np.testing.assert_array_equal(
+            np.asarray(sq8_doc["exhaustive_topk_ids"][qi], dtype=np.int32), top_ids_py
+        )
+
+    sq8_only_ids = np.asarray(sq8_doc["hnsw_only_topk_ids"], dtype=np.int32)
+    sq8_rerank_ids = np.asarray(sq8_doc["hnsw_rerank_topk_ids"], dtype=np.int32)
+    sq8_only_recall = compute_recall_at_k(sq8_only_ids, exact_gt_py, k)
+    sq8_rerank_recall = compute_recall_at_k(sq8_rerank_ids, exact_gt_py, k)
+    assert sq8_rerank_recall >= sq8_only_recall - 1e-12
+    assert sq8_rerank_recall >= 0.95
+
+    # 3. PQ codebook encode, ADC lookup table, and rerank recall parity
+    pq_doc = doc["pq"]
+    centroids = np.asarray(pq_doc["centroids"], dtype=np.float32)
+    assert centroids.shape == (m_pq, 256, 4)
+    cb = PqCodebook(
+        m_pq=m_pq,
+        k_centroids=256,
+        k_eff=int(pq_doc["k_effective"]),
+        d_sub=4,
+        centroids=centroids,
+    )
+    pq_codes_rs = np.asarray(pq_doc["codes"], dtype=np.uint8)
+    pq_codes_py = pq_encode(base, cb)
+    assert float(np.mean(pq_codes_rs == pq_codes_py)) >= 0.98
+
+    pq_dists_rs = np.asarray(pq_doc["adc_distances"], dtype=np.float32)
+    for qi in range(queries.shape[0]):
+        adc_tbl = pq_compute_adc_table(queries[qi], cb)
+        adc_py = pq_adc_distances(adc_tbl, pq_codes_rs)
+        np.testing.assert_allclose(pq_dists_rs[qi], adc_py, rtol=1e-4, atol=1e-3)
+        top_ids_py = np.argsort(pq_dists_rs[qi], kind="mergesort")[:k].astype(np.int32)
+        np.testing.assert_array_equal(
+            np.asarray(pq_doc["exhaustive_topk_ids"][qi], dtype=np.int32), top_ids_py
+        )
+
+    pq_only_ids = np.asarray(pq_doc["hnsw_only_topk_ids"], dtype=np.int32)
+    pq_rerank_ids = np.asarray(pq_doc["hnsw_rerank_topk_ids"], dtype=np.int32)
+    pq_only_recall = compute_recall_at_k(pq_only_ids, exact_gt_py, k)
+    pq_rerank_recall = compute_recall_at_k(pq_rerank_ids, exact_gt_py, k)
+    assert pq_rerank_recall >= pq_only_recall - 1e-12
+    assert pq_rerank_recall >= 0.90
+
+
+def test_live_rust_phase6_matrix_to_plot_phase6(tmp_path: Path) -> None:
+    """Run live `phase6 --matrix --synthetic` subset and feed JSON output into `plot_phase6.py`."""
+    phase6_bin = _resolve_rust_phase6_binary()
+    data_dir = tmp_path / "data"
+    results_dir = tmp_path / "results"
+    charts_py = tmp_path / "charts_py"
+    charts_cli = tmp_path / "charts_cli"
+
+    arms = "f32_m16,sq8_only_f32graph,sq8_only_qbuild,sq8_rerank_f32graph,pq16_only_f32graph,pq16_rerank_f32graph"
+    proc = subprocess.run(
+        [
+            str(phase6_bin),
+            "--matrix",
+            "--synthetic",
+            "--scale",
+            "100",
+            "--queries",
+            "10",
+            "--dim",
+            "32",
+            "--num-clusters",
+            "4",
+            "--k",
+            "5",
+            "--reps",
+            "2",
+            "--ef-search-list",
+            "10,20,40",
+            "--rerank-list",
+            "15,full_beam",
+            "--arms",
+            arms,
+            "--data-dir",
+            str(data_dir),
+            "--output-dir",
+            str(results_dir),
+            "--seed",
+            "42",
+        ],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, (
+        f"phase6 --matrix --synthetic failed (rc={proc.returncode}):\n{proc.stderr}"
+    )
+
+    for arm in arms.split(","):
+        assert (results_dir / f"arm_n100_{arm}.json").is_file(), f"Missing arm report for {arm}"
+
+    created = generate_all_phase6_charts(results_dir=results_dir, output_dir=charts_py, scale=100)
+    assert len(created) == 8
+    _assert_valid_charts_created(charts_py)
+
+    plot_proc = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "plot_phase6.py"),
+            "--results-dir",
+            str(results_dir),
+            "--output-dir",
+            str(charts_cli),
+            "--scale",
+            "100",
+        ],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert plot_proc.returncode == 0, (
+        f"plot_phase6.py CLI failed (rc={plot_proc.returncode}):\n{plot_proc.stderr}"
+    )
+    _assert_valid_charts_created(charts_cli)
+
