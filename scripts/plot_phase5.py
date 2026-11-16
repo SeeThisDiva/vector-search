@@ -283,7 +283,14 @@ def _build_provenance_caption(data: LoadedPhase5Data) -> str:
     prov = first.get("provenance", {})
     cpu = str(prov.get("cpu_model", "unknown CPU"))
     os_name = str(prov.get("os", "unknown OS"))
-    affinity = str(prov.get("processor_affinity_mask", "unknown"))
+    affinities = sorted(
+        {
+            str(c.get("provenance", {}).get("processor_affinity_mask", "")).strip()
+            for c in data.cells
+        }
+        - {""}
+    )
+    affinity = ",".join(affinities) if affinities else "unknown"
     commit = str(first.get("git_commit", "unknown"))[:10]
     dirty_suffix = "-dirty" if bool(first.get("git_dirty", False)) else ""
     reps = int(first.get("reps", 0))
@@ -680,12 +687,15 @@ def plot_chart4_matched_recall_crossover(data: LoadedPhase5Data, output_dir: Pat
                 markersize=5.8,
                 zorder=6,
             )
+            s3_by_sigma = {round(sx, 8): sy for sx, sy in s3_pts}
             for x_v, y_v, ef_v in zip(x95, y95, ef95, strict=True):
+                s3_y = s3_by_sigma.get(round(x_v, 8))
+                y_off = -12 if (s3_y is not None and y_v * 0.9 <= s3_y <= y_v * 2.8) else 7
                 ax.annotate(
                     f"ef{ef_v}",
                     (x_v, y_v),
                     textcoords="offset points",
-                    xytext=(0, 7),
+                    xytext=(0, y_off),
                     ha="center",
                     fontsize=7.2,
                     color="#004D7A",

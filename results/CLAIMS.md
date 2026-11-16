@@ -287,4 +287,28 @@ Documented in `README.md` lines 197–248. All benchmarks executed single-thread
 | **$M=48, \text{efC}=400$ (1M) Recall (ef=200)** | `0.99922` | `README.md:222` | `results/phase4/scale_1000000_m48_efc400.json` | `ef_search_sweep[8].recall_at_k` | `0.999220` | `cd48e7f` | QPS: 643.9, p99: 2.3104 ms |
 | **$M=48, \text{efC}=400$ (1M) Recall (ef=600)** | `0.99944` | `README.md:222,239` | `results/phase4/scale_1000000_m48_efc400.json` | `ef_search_sweep[11].recall_at_k` | `0.999440` | `cd48e7f` | Accuracy saturation point |
 
+---
+
+## 11. Phase 5 Filtered Search & Crossover Claims (`T3.6`–`T3.11`, Option C Matrix + Sensitivity)
+
+Documented in [`results/phase5/FINDINGS.md`](phase5/FINDINGS.md) and [`README.md`](../README.md). Executed on authentic INRIA Texmex `SIFT1M` ($M=16, \text{efConstruction}=100, \text{seed}=42, k=10, \text{reps}=5$) under clean commits (`84e3c81` for `T3.6`/`T3.7`, `a4621bc` for `100k` matrix + sensitivity on solo P-core `0x0004`, `c39c92b` for `1M` matrix + sensitivity across P-cores `0x0004,0x0010,0x0040,0x0100`). Every value traces directly to a repository JSON artifact with `"git_dirty": false`.
+
+| Metric / Claim | Documented Value | Doc Reference | Source Report JSON | JSON Key Path | Actual JSON Value | Generating Commit | Verification / Notes |
+|---|---|---|---|---|---|---|---|
+| **T3.6 Cost Model Constants** | `t_word=0.3042ns`, `t_cand=23.878ns` | `FINDINGS.md` §3, `README.md` | `results/phase5/pilot/microbench_cost.json` | `measurements.{t_word_ns,t_cand_ns}` | `0.3042`, `23.878` | `84e3c81` | L1-hot primitive timings (`dim=128, k=10`) |
+| **100k Matrix Graph Fingerprint** | `0x80af03bd7aebaade` | `FINDINGS.md` §1 | `results/phase5/cell_n100000_independent_s0.000500.json` | `index_build.graph_fingerprint_hex` | `"0x80af03bd7aebaade"` | `a4621bc` | Bit-exact Phase 4 100k M=16 parity (`27.365 s` build) |
+| **100k Mode A Crossover (`R>=0.95` & `0.99`)** | $\sigma^* = 0.079149$ (`[0.075, 0.10]`) | `FINDINGS.md` §2, `README.md` | `results/phase5/summary_n100000.json` | `crossovers_primary_0_95[0].crossover_sigma_loglog` | `0.079149` | `a4621bc` | `S2_ef20` (`[lo,hi]=[0.075,0.1]`); identical for `0.99` |
+| **100k Mode B Crossover (`R>=0.95`)** | $\sigma^* = 0.252372$ (`[0.20, 0.50]`) | `FINDINGS.md` §2, `README.md` | `results/phase5/summary_n100000.json` | `crossovers_primary_0_95[1].crossover_sigma_loglog` | `0.252372` | `a4621bc` | `S2 ef=400 -> ef=50` (`0.99`: bracket `[0.20,0.50]`, `ef=100` at `hi`) |
+| **1M Matrix Graph Fingerprint & RSS** | `0x44044886c62bca5e`, `1,015.69 MiB` | `FINDINGS.md` §1 | `results/phase5/cell_n1000000_independent_s0.001000.json` | `index_build.{graph_fingerprint_hex,peak_rss_mb}` | `"0x44044886c62bca5e"`, `1015.69` | `c39c92b` | Bit-exact Phase 3/4 1M M=16 parity (`606.488 s` build) |
+| **1M Mode A Crossover (`R>=0.95` & `0.99`)** | $\sigma^* = 0.023799$ (`[0.020, 0.035]`) | `FINDINGS.md` §2, `README.md` | `results/phase5/summary_n1000000.json` | `crossovers_primary_0_95[0].crossover_sigma_loglog` | `0.023799` | `c39c92b` | `3.33x` leftward shift vs 100k; `S2_ef20` at both brackets |
+| **1M Mode B Crossover (`R>=0.95`)** | $\sigma^* = 0.120868$ (`[0.10, 0.20]`) | `FINDINGS.md` §2, `README.md` | `results/phase5/summary_n1000000.json` | `crossovers_primary_0_95[1].crossover_sigma_loglog` | `0.120868` | `c39c92b` | `2.09x` leftward shift vs 100k (`S2 ef=400 -> 100`) |
+| **1M Mode B Crossover (`R>=0.99`)** | Bracket `[0.10, 0.20]` (`ef=400` at `0.20`) | `FINDINGS.md` §2, `README.md` | `results/phase5/summary_n1000000.json` | `crossovers_secondary_0_99[1]` | `bracket=[0.10,0.20], hi_ef=400, null` | `c39c92b` | `target_not_reached_at_lower_bracket` (`0.10`) |
+| **1M Mode A `S3` vs `S2_ef20` (`sigma=0.035`)** | `S3` `55.38 QPS` vs `S2_ef20` `92.37 QPS` | `FINDINGS.md` §2, §4.3 | `results/phase5/cell_n1000000_independent_s0.035000.json` | `arms[0].qps`, `arms[1].{qps,recall_at_k}` | `55.38`, `92.37` (`0.990700`) | `c39c92b` | Post-crossover `S2` win at `1M` `0.035` (`0x0004`) |
+| **1M Mode A `S3` (`sigma=0.50`) Speedup** | `S2_ef50` `1,328.34 QPS` vs `S3` `15.84 QPS` | `FINDINGS.md` §2, §4.3 | `results/phase5/cell_n1000000_independent_s0.500000.json` | `arms[2].qps`, `arms[0].qps` | `1328.34`, `15.84` | `c39c92b` | `83.9x` speedup at `R@10=0.969050` (`0x0010`) |
+| **1M Mode B `S1_uncap` vs `S3` (`sigma=0.05`)** | `S1u` `5.45 QPS` (`183.4ms`) vs `S3` `131.50 QPS` | `FINDINGS.md` §4.4, §5 | `results/phase5/cell_n1000000_correlated_s0.050000.json` | `arms[10].{qps,mean_ms,recall_at_k}`, `arms[0].qps` | `5.45`, `183.413132`, `0.993800`, `131.50` | `c39c92b` | `S2_ef600` max `0.7860`, `S1_cap4096` `0.4482` |
+| **1M Opaque Guardrail (Ind `0.10`, `limit=16384`)** | `R@10=0.998500`, `1.0%` hit (vs `69.0%` at `10k`) | `FINDINGS.md` §6, `README.md` | `results/phase5/sensitivity_n1000000.json` | `opaque_eval_probes[2,4].{recall_at_k,eval_limit_reached_rate}` | `0.998500`, `0.010000` (`0.690000` at `10k`) | `c39c92b` | Preserves recall of `None` (`0.998500`, max `16,503`) |
+| **1M Opaque Tail Bound (Corr `0.01`, `limit=16384`)** | `p99` `53.729ms -> 4.797ms` (`11.20x` cap) | `FINDINGS.md` §6, `README.md` | `results/phase5/sensitivity_n1000000.json` | `opaque_eval_probes[6,8].{p99_ms,eval_count_max}` | `53.728891` (`max=196017`) -> `4.797383` (`16384`) | `c39c92b` | Bounds runaway opaque closure evaluations |
+| **1M Bridge-Hop Sensitivity (`H_max`, Ind `0.001`)** | `ef=100`: `0.3000 -> 0.8046 -> 0.9920` | `FINDINGS.md` §5 | `results/phase5/sensitivity_n1000000.json` | `sensitivity_arms[6..8].arm.{recall_at_k,mean_ms}` | `0.3000 -> 0.8046 -> 0.9920` (`11.8 -> 121.8ms`) | `c39c92b` | Mode B `0.001` capped at `0.2548` even at `10*ef` |
+
+
 

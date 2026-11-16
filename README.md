@@ -37,8 +37,8 @@ Layer L_0   :   [Node A] -> [D] -> [C] -> [E] -> [Node B] -> ...   (All N vector
   - `m_max`, `m_max0` and `m_l` are derived from `M` unless explicitly overridden; vector ids must be inserted in order `0..n`
 - [x] **Phase 3: Scale to 1M Vectors (`SIFT1M`), Profile Memory & Build Time**
   - `phase3` CLI: SIFT1M build, official-ground-truth recall vs efSearch, per-component memory breakdown, peak RSS, bit-exact reproducibility check (see results below)
-- [ ] **Phase 4: Parameter Sweep (`M`, `efConstruction`, `efSearch`), Plot `Recall@10` vs `p99` Latency**
-- [ ] **Phase 5: Filtered Search with Metadata Predicates (Including High-Selectivity Filters)**
+- [x] **Phase 4: Parameter Sweep (`M`, `efConstruction`, `efSearch`), Plot `Recall@10` vs `p99` Latency**
+- [x] **Phase 5: Filtered Search with Metadata Predicates (Including High-Selectivity Filters)**
 - [ ] **Phase 6: Scalar or Product Quantization & Recall Cost Measurement**
 - [ ] **Phase 7: Head-to-Head Benchmark vs FAISS on Identical Data & Hardware**
 
@@ -130,16 +130,22 @@ cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/p
 │   ├── bin/phase2.rs          # Rust Phase 2 CLI runner (`phase2`)
 │   ├── bin/phase3.rs          # Rust Phase 3 CLI runner (`phase3`, SIFT1M)
 │   ├── bin/phase4.rs          # Rust Phase 4 CLI runner (`phase4`, parameter sweep)
+│   ├── bin/phase5.rs          # Rust Phase 5 CLI runner (`phase5`, filtered matrix & sensitivity)
 │   ├── matrix.rs              # Contiguous row-major RowMatrix<T> storage
 │   ├── distance.rs            # 8-way unrolled L2^2, Euclidean, and Inner Product kernels
 │   ├── rng.rs                 # Deterministic SplitMix64 + Xoshiro256** PRNG
 │   ├── dataset.rs             # Texmex .fvecs/.ivecs I/O, SIFT downloader & seeded generator
 │   ├── exact_knn.rs           # Brute-force ExactKnn (single-query, timed, & multi-threaded)
+│   ├── filter.rs              # DenseBitset, metadata generators & FilteredSearchParams
 │   ├── recall.rs              # Recall@k harness, self-verification & latency percentiles
 │   ├── hardware.rs            # Cross-platform CPU / RAM / OS hardware probe
 │   ├── benchmark.rs           # End-to-end Phase 1 benchmark pipeline & JSON reporter
 │   ├── phase4.rs              # Phase 4 resumable parameter sweep runner & prefix GT caching
+│   ├── phase5.rs              # Phase 5 Option C matrix, versioned GT/bitset cache & sensitivity
 │   └── hnsw_phase1/           # Python reference implementation & FAISS comparison helpers
+├── scripts/
+│   ├── plot_phase4.py         # Phase 4 Pareto & scaling chart generator
+│   └── plot_phase5.py         # Phase 5 filtered recall, latency & crossover chart generator
 ├── tests/
 │   ├── rust_phase1_tests.rs   # Rust integration & edge-case test suite (16 tests)
 │   ├── rust_phase2_tests.rs   # HNSW correctness, topology & recall tests (23 tests)
@@ -148,8 +154,13 @@ cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/p
 │   ├── challenge_m1_p35_tests.rs # Phase 3.5 instrumentation, golden & layout tests (8 tests)
 │   ├── rust_phase3_tests.rs   # Phase 3 report semantics + parallel-search input validation (11 tests)
 │   ├── rust_phase4_tests.rs   # Phase 4 grid parsing, GT caching & resumable sweep tests (4 tests)
+│   ├── rust_filtered_search_tests.rs # Filtered HNSW strategy, parity & eval_limit tests
+│   ├── rust_filtered_counters_tests.rs # Instrumented filtered distance & bridge-hop counter tests
+│   ├── rust_phase5_tests.rs   # Phase 5 cache verification, crossover & CLI matrix tests
 │   ├── test_phase1.py         # Python reference unit tests (23 tests)
-│   └── test_rust_parity.py    # Cross-language Rust <-> Python <-> FAISS parity tests (4 tests)
+│   ├── test_rust_parity.py    # Cross-language Rust <-> Python <-> FAISS parity tests (4 tests)
+│   ├── test_filtered_parity.py # Filtered strategy & FAISS parity verification tests
+│   └── test_phase5_pipeline.py # End-to-end Phase 5 CLI + resume + plotting pipeline tests
 └── run_phase1.py              # Python reference runner
 ```
 
@@ -245,4 +256,25 @@ Evaluated against the official Texmex 100-NN ground truth ([`data/sift1m/sift_gr
 - **Recall Degradation at Fixed $\text{efSearch}$:** For reference point $M=16, \text{efC}=100$, recall at $\text{efSearch}=50$ decreases from $98.02\%$ at 100k to $94.70\%$ at 1M. As the vector volume expands by $10\times$, search depth $\text{efSearch}$ must be scaled from $\approx 50$ to $\approx 100\text{–}150$ to preserve $\ge 98\%$ recall.
 - **Graph Adjacency Memory Invariance:** Because of the contiguous flat $u32$ edge storage with fixed upper-layer geometry, graph memory per vector remains strictly bounded and scale-invariant ($M=8$: $81.9 \to 85.4\text{ B/vec}$; $M=16$: $145.6 \to 148.9\text{ B/vec}$; $M=32$: $273.4 \to 272.3\text{ B/vec}$; $M=48$: $404.0 \to 402.4\text{ B/vec}$).
 - **Construction Scaling:** Index build time scales cleanly at $O(N \log N)$ (e.g. $M=16, \text{efC}=100$ builds in $26.1\text{ s}$ at 100k and $450.3\text{ s}$ at 1M, a scaling factor of $17.3\times$ for $10\times$ vectors).
+
+---
+
+## Phase 5: Filtered Search, Crossovers & Opaque Predicate Guardrail
+
+Phase 5 evaluates three filtered k-NN strategies (`S1_post_filter` capped at $K'_{\max}=4,096$ and uncapped for $\sigma \ge 0.05$, `S2_in_traversal` across `efSearch` $\in \{20, 50, 100, 200, 400, 600\}$, and `S3_pre_filter` exact brute-force scan over `DenseBitset`) across two metadata modes (Mode A: independent Bernoulli; Mode B: cluster-correlated), 12 selectivity tiers $\sigma \in [0.0005, 0.50]$, and two scales ($100\text{k}$ and $1\text{M}$) on `M=16, efConstruction=100, seed=42` (`Option C`, `reps=5`). See [`results/phase5/FINDINGS.md`](results/phase5/FINDINGS.md) and [`results/CLAIMS.md`](results/CLAIMS.md#L292) §11 for full per-cell evidence.
+
+### Recall-Matched Strategy Crossover (`S2` vs `S3`)
+
+| Scale ($N$) | Metadata Mode | Primary Crossover $\sigma^*$ (`R@10 >= 0.95`) | Empirical Bracket | `1M` Transition Highlight |
+|---:|---|---:|---|---|
+| `100,000` | Mode A (`independent`) | **`0.079149`** | `[0.075, 0.100]` | Baseline (`S2 ef=20`) |
+| `1,000,000` | Mode A (`independent`) | **`0.023799`** | `[0.020, 0.035]` | **$3.33\times$ leftward shift** (`S2 ef=20`: `92.37` vs `S3` `55.38 QPS` at `0.035`; `1,328.34` vs `15.84 QPS` at `0.50`) |
+| `100,000` | Mode B (`correlated`) | **`0.252372`** | `[0.200, 0.500]` | Baseline (`S2 ef=400 -> 50`) |
+| `1,000,000` | Mode B (`correlated`) | **`0.120868`** | `[0.100, 0.200]` | **$2.09\times$ leftward shift** (`S3` wins every correlated point $\le 0.10$ with `1.0000` recall and `0%` under-fill) |
+
+### Opaque Closure `eval_limit` Guardrail & Charts
+
+- `FilteredSearchParams::default().eval_limit` remains `None`; `DEFAULT_OPAQUE_EVAL_LIMIT = 16_384` (accessible via `FilteredSearchParams::with_opaque_eval_limit()`) caps runaway opaque closure evaluations (`predicate.bitset().is_none()`) without truncating typical workloads. On `1M` `independent` $\sigma = 0.10$ (`S2_ef100`), `16_384` preserves `Recall@10 = 0.998500` (`1.0%` hit rate vs `69.0%` at `10_000`); on pathological `1M` `correlated` $\sigma = 0.01$, it bounds worst-case `eval_count_max` from `196,017` (`p99 = 53.729 ms`) down to `16,384` (`p99 = 4.797 ms`, an **`11.20x` tail-latency cap**).
+- Charts in [`results/phase5/charts_1m/`](results/phase5/charts_1m/) (`charts_100k/` for `100k`, and root [`results/phase5/`](results/phase5/)): `chart1_recall_vs_selectivity`, `chart2_latency_vs_selectivity`, `chart3_failure_rate_vs_selectivity`, `chart4_matched_recall_crossover`, and `chart5_distance_evals_and_sensitivity` (PNG + SVG).
+
 
