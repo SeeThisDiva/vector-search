@@ -39,6 +39,10 @@ path = "src/bin/filtered_exact_knn.rs"
 name = "phase5"
 path = "src/bin/phase5.rs"
 
+[[bin]]
+name = "phase7"
+path = "src/bin/phase7.rs"
+
 [features]
 default = []
 instrument = []
