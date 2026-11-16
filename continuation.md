@@ -3,7 +3,7 @@
 Read this first, then `CLAUDE.md` and `CONTEXT_AND_MEMORY.md`. This file is the most recent state; if they disagree, this wins.
 
 ## Project in one line
-From-scratch HNSW ANN search in Rust (`#![forbid(unsafe_code)]`, std only), benchmarked against brute force and FAISS. Milestones M0, M1 (Phase 3.5), and M2 (Phase 4) are complete (`T0.1`–`T2.6`). **Paused at Gate G3 awaiting Dev's sign-off before Milestone M3 (Phase 5: Filtered Search).**
+From-scratch HNSW ANN search in Rust (`#![forbid(unsafe_code)]`, std only), benchmarked against brute force and FAISS. Milestones M0–M3 (Phases 1–5) are complete (`T0.1`–`T3.11`). **Paused at Gates G5 & G6 awaiting Dev's sign-off on [`results/phase6/DESIGN.md`](results/phase6/DESIGN.md) (Phase 6 Quantization) and [`results/phase7/DESIGN.md`](results/phase7/DESIGN.md) (Phase 7 vs FAISS) before any M4/M5 implementation code begins.**
 
 ## Working agreement
 - Dev designs, agents code. Do not start a later phase until the current one is reviewed.
@@ -13,9 +13,10 @@ From-scratch HNSW ANN search in Rust (`#![forbid(unsafe_code)]`, std only), benc
 - A check that did not run must never be reported as passed. (This rule exists because of review finding 1 below.)
 
 ## Current verified state
-- `cargo test --release`: 84 pass (12 `adversarial_hnsw` + 10 `adversarial_graph_fingerprint` + 8 `challenge_m1_p35` + 16 `phase1` + 23 `phase2` + 11 `phase3` + 4 `phase4`). Siftsmall tests skip when `data/siftsmall/*.fvecs` is missing (helper: `tests/common/mod.rs`). Phase 3 and Phase 3.5 tests use small synthetic data and need no download.
-- `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` clean.
-- `pytest`: 27 pass (needs `faiss-cpu`, in `requirements.txt`); `ruff check .` and `mypy src tests` clean. The 4 Rust-parity tests only run when `target/release/phase1` exists, so build it first (`cargo build --release --bin phase1`) or they skip silently and show as 23 passed, 4 skipped.
+- `cargo test --release`: **184 pass** (`35` lib unit + `16` `phase1` + `23` `phase2` + `12` `adversarial_hnsw` + `10` `adversarial_graph_fingerprint` + `8` `challenge_m1_p35` + `11` `phase3` + `4` `phase4` + `10` `rust_metadata` + `7` `rust_filtered_knn` + `14` `rust_filtered_strategy1` + `13` `rust_filtered_strategy2` + `14` `rust_filtered_strategy3` + `3` `rust_filtered_counters` + `4` `rust_phase5`).
+- `cargo test --release --features instrument --test challenge_m1_p35_tests --test rust_filtered_counters_tests`: **11 pass** (`8 + 3`).
+- `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` (both default and `--features instrument`) clean.
+- `pytest`: **33 pass** (`23` `test_phase1` + `4` `test_rust_parity` + `5` `test_filtered_parity` + `1` `test_phase5_pipeline`, 0 skipped); `ruff check .` and `mypy src tests scripts` clean.
 - Needs Rust >= 1.88 (`rust-version` in `Cargo.toml`; `as_chunks` and lockfile v4).
 - Git: Phase 1 to 3, the Phase 3 review fixes (`review_fixes.patch`, commit `d4b6fed` + `9e3c1a2`), the Phase 3 follow-up fixes, and **Phase 3.5 (Milestone M1)** are implemented and verified:
   - `T1.1` / `T1.4`: Zero-cost `--features instrument` phase timing and distance evaluation counters (`search_layer` 78.83%, `shrink` 14.19%, `heuristic` 4.80% on 1M).
@@ -114,16 +115,22 @@ Order matters. Do not skip ahead, and stop for Dev's review after each numbered 
    - Implemented and kept `T1.7` (`u32` ids and flat fixed-capacity adjacency in `layer0` + `upper_arena`), cutting graph-only memory by 56.0% (`338.67 -> 148.91 B/vector`), 1M Peak RSS by 199.7 MiB (`845.75 -> 646.05 MiB`), and 100k 3-run median build time by 10.37% (`30.299 s -> 27.157 s`);
    - Implemented and evaluated `T1.9` (`keep_pruned_shrink = Some(false)` behind config flag) at 100k (`21.351 s`, `-29.53%`) and 1M (`415.076 s`, `-18.81%`), recording the full `efSearch` sweep and matched-latency comparison in `results/phase3_5/LOG.md` for Dev's **Gate G1** decision.
 4. **Every optimization keeps `--repro-check` passing and all tests green.** *(Verified: 84 Rust tests + 27 Python tests pass; golden 10k/100k fixtures and 1M `--repro-check` match bit-for-bit.)*
-5. **Phase 4:** T2.1 (proposal & pilot), T2.2 (resumable sweep runner), T2.3 (23-config 100k sweep), T2.4 (publication-grade Pareto plots), T2.5 (1M finals on 4 Pareto points), and T2.6 (README write-up & CLAIMS.md Section 10) are 100% complete. Paused at **Gate G3** awaiting Dev's sign-off before Phase 5 (`results/phase5/DESIGN.md`).
+5. **Phase 4:** T2.1–T2.6 complete (100k 23-config grid + 1M 4-point confirmations, charts, CLAIMS.md §10; see `results/phase4/G3_CHECKLIST.md`).
+6. **Phase 5 (Milestone M3, `T3.1`–`T3.11`):** Complete (`b9fc648`).
+   - Added `DenseBitset`, Mode A/B deterministic metadata generators, filtered `ExactKnn`, `S1`/`S2`/`S3` filtered HNSW strategies, `DEFAULT_OPAQUE_EVAL_LIMIT = 16_384` + `with_opaque_eval_limit()` (keeping `FilteredSearchParams::default().eval_limit == None`), zero-overhead `FilteredSearchCounters`, versioned `.bin`/`.ivecs`/`.fvecs` caches (`data/phase5/`), Option C benchmark suite (`100k` solo `0x0004` + `1M` sharded across P-cores `0x0004/0x0010/0x0040/0x0100`, `48` cells + `100k`/`1M` sensitivity), charts (`scripts/plot_phase5.py`), [`results/phase5/FINDINGS.md`](results/phase5/FINDINGS.md), and [`results/CLAIMS.md`](results/CLAIMS.md#L292) §11.
+   - Observed `0.95` recall crossovers $\sigma^*$: `100k` Mode A `0.079149` -> `1M` `0.023799` ($3.33\times$ shift); `100k` Mode B `0.252372` -> `1M` `0.120868` ($2.09\times$ shift).
+7. **Next — Gates G5 & G6 (Before M4 & M5):** Authored [`results/phase6/DESIGN.md`](results/phase6/DESIGN.md) (`SQ8`/`PQ` quantization) and [`results/phase7/DESIGN.md`](results/phase7/DESIGN.md) (`FAISS IndexHNSWFlat` head-to-head protocol). **Stopped for Dev's sign-off at Gates G5 & G6 before writing M4/M5 implementation code.**
 
 ## Commands
 ```bash
 cargo test --release
+cargo test --release --features instrument --test challenge_m1_p35_tests --test rust_filtered_counters_tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo run --release --bin phase2 -- --dataset siftsmall --json-out data/phase2_report.json
 cargo run --release --bin phase3 -- --dataset sift1m --json-out data/phase3_report.json
-python -m pytest tests -q && ruff check . && mypy src tests
+cargo run --release --bin phase5 -- --matrix --scale 100000 --reps 5 --include-sensitivity --output-dir results/phase5
+python -m pytest tests -q -rs && ruff check . && mypy src tests scripts
 ```
 Tip for quick iteration: release builds use `lto = "thin"` and `codegen-units = 1`, which is slow to compile. For test runs only, `CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 cargo test --release` compiles in about 10 s. Never use those overrides for numbers you report.
 
@@ -134,5 +141,8 @@ Tip for quick iteration: release builds use `lto = "thin"` and `codegen-units = 
 - [x] Dev signs off Phase 3.5 optimization decisions (Gate G1).
 - [x] Dev approves Phase 4 grid & time budget (Gate G2).
 - [ ] Dev signs off Phase 4 evaluation & Pareto write-up (Gate G3).
+- [x] Dev approves Phase 5 design & Option C matrix (`Gate G4` + `Gate G4.5`).
+- [ ] Dev approves Phase 6 Quantization design (`Gate G5`, [`results/phase6/DESIGN.md`](results/phase6/DESIGN.md)).
+- [ ] Dev approves Phase 7 FAISS protocol (`Gate G6`, [`results/phase7/DESIGN.md`](results/phase7/DESIGN.md)).
 - [ ] CI: confirm green on a fresh clone after pushing.
 - [x] Update `CLAUDE.md`, `CONTEXT_AND_MEMORY.md` and README test counts whenever tests are added.

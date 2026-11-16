@@ -13,10 +13,10 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 - [x] **Phase 2: HNSW Insert + Search, Correctness-Checked on 10k Vectors** *(COMPLETED & VERIFIED)*
 - [x] **Phase 3: Scale to 1M Vectors (`SIFT1M`), Profile Memory & Build Time** *(COMPLETED & VERIFIED — Gate G0)*
 - [x] **Phase 3.5: Memory Optimization & Adjacency Flattening** *(COMPLETED & VERIFIED — Gate G1)*
-- [x] **Phase 4: Parameter Sweep ($M$, $efConstruction$, $efSearch$), Plot Recall@10 vs. p99 Latency** *(COMPLETED & VERIFIED — Paused at Gate G3)*
-- [ ] **Phase 5: Filtered Search with Metadata Predicates (Including Selective Filters)** *(Milestone M3: pending Gate G3 sign-off)*
-- [ ] **Phase 6: Scalar (SQ8) or Product Quantization (PQ), Measure Recall Cost**
-- [ ] **Phase 7: Head-to-Head Benchmark vs. FAISS on Identical Hardware**
+- [x] **Phase 4: Parameter Sweep ($M$, $efConstruction$, $efSearch$), Plot Recall@10 vs. p99 Latency** *(COMPLETED & VERIFIED — formal Gate G3 tick in `AGENT_PLAN.md` optional)*
+- [x] **Phase 5: Filtered Search with Metadata Predicates (Including Selective Filters)** *(Milestone M3 `T3.1`–`T3.11` COMPLETED & VERIFIED)*
+- [ ] **Phase 6: Scalar (SQ8) or Product Quantization (PQ), Measure Recall Cost** *(Draft `results/phase6/DESIGN.md` ready — awaiting **Gate G5**)*
+- [ ] **Phase 7: Head-to-Head Benchmark vs. FAISS on Identical Hardware** *(Draft `results/phase7/DESIGN.md` ready — awaiting **Gate G6**)*
 
 ---
 
@@ -32,38 +32,60 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
 ## 3. Current Repository Architecture & File Map
 
 ```text
-├── Cargo.toml                  # Rust crate manifest: 'vector-search' v0.1.0, binaries 'phase1', 'phase2', 'phase3', 'phase4'
+├── Cargo.toml                  # Rust crate manifest: 'vector-search' v0.1.0, binaries phase1..5, generate_metadata, filtered_exact_knn
 ├── docs/
 │   └── HNSW_ALGORITHM.md       # Authoritative math & pseudocode spec (Algorithms 1-5)
 ├── src/
 │   ├── lib.rs                  # Crate root (#![forbid(unsafe_code)])
 │   ├── main.rs                 # CLI entry point for Phase 1 runner (`phase1`)
-│   ├── hnsw.rs                 # HNSW multi-layer graph index (Algorithms 1-5, compact u32 flat adjacency)
+│   ├── hnsw.rs                 # HNSW multi-layer graph index (Algorithms 1-5, filtered search, compact u32 flat adjacency)
 │   ├── bin/phase2.rs           # CLI entry point for Phase 2 runner (`phase2`)
 │   ├── bin/phase3.rs           # CLI entry point for Phase 3 SIFT1M runner (`phase3`)
 │   ├── bin/phase4.rs           # CLI entry point for Phase 4 parameter sweep runner (`phase4`)
+│   ├── bin/phase5.rs           # CLI entry point for Phase 5 filtered benchmark CLI (`phase5`)
+│   ├── bin/generate_metadata.rs # Deterministic Mode A/B predicate bitset CLI
+│   ├── bin/filtered_exact_knn.rs # Multi-threaded exact filtered k-NN CLI
 │   ├── matrix.rs               # Contiguous row-major RowMatrix<f32>
 │   ├── distance.rs             # 8-way unrolled L2^2, Euclidean, Inner Product kernels
 │   ├── rng.rs                  # Deterministic SplitMix64 + Xoshiro256** PRNG
-│   ├── dataset.rs              # Texmex .fvecs/.ivecs I/O, SIFT downloader & Gaussian generator
-│   ├── exact_knn.rs            # ExactKnn engine (single-query, parallel, timed)
+│   ├── dataset.rs              # Texmex .fvecs/.ivecs I/O, SIFT downloader, Gaussian & Mode A/B generators
+│   ├── exact_knn.rs            # ExactKnn engine (single-query, parallel, filtered, timed)
+│   ├── filter.rs               # DenseBitset, metadata predicates & FilteredSearchParams
 │   ├── recall.rs               # Recall@k, verify_self_recall, latency percentiles
 │   ├── hardware.rs             # System CPU / RAM / OS hardware detection
 │   ├── benchmark.rs            # End-to-end benchmark orchestrator & JSON reporter
 │   ├── phase4.rs               # Phase 4 resumable parameter sweep runner & prefix GT caching
+│   ├── phase5.rs               # Phase 5 Option C matrix, versioned GT/bitset cache & sensitivity
 │   └── hnsw_phase1/            # Python reference implementation & BLAS GEMM baseline
+├── scripts/
+│   ├── plot_phase4.py          # Phase 4 Pareto & scaling chart generator
+│   └── plot_phase5.py          # Phase 5 filtered recall, latency & crossover chart generator
 ├── tests/
-│   ├── rust_phase1_tests.rs    # 16 Rust Phase 1 integration & edge-case tests (PASSING)
-│   ├── rust_phase2_tests.rs    # 23 Rust Phase 2 HNSW correctness & recall tests (PASSING)
-│   ├── adversarial_hnsw_tests.rs # 12 Rust HNSW stress & boundary tests (PASSING)
-│   ├── adversarial_graph_fingerprint_tests.rs # 10 Rust graph fingerprint & mutation tests (PASSING)
-│   ├── challenge_m1_p35_tests.rs # 8 Rust Phase 3.5 instrumentation, golden & layout tests (PASSING)
-│   ├── rust_phase3_tests.rs    # 11 Rust Phase 3 report semantics, GT check & sweep tests (PASSING)
-│   ├── rust_phase4_tests.rs    # 4 Rust Phase 4 grid parsing, GT caching & sweep tests (PASSING)
-│   ├── test_phase1.py          # 23 Python reference tests (PASSING)
-│   └── test_rust_parity.py     # 4 Rust <-> Python <-> FAISS parity tests (PASSING)
-├── results/phase3_5/           # Phase 3.5 golden fixtures, baseline/final reports & LOG.md
-├── data/                       # Contains SIFT corpora & JSON benchmark reports (gitignored)
+│   ├── rust_phase1_tests.rs    # 16 Rust Phase 1 integration & edge-case tests
+│   ├── rust_phase2_tests.rs    # 23 Rust Phase 2 HNSW correctness & recall tests
+│   ├── adversarial_hnsw_tests.rs # 12 Rust HNSW stress & boundary tests
+│   ├── adversarial_graph_fingerprint_tests.rs # 10 Rust graph fingerprint & mutation tests
+│   ├── challenge_m1_p35_tests.rs # 8 Rust Phase 3.5 instrumentation, golden & layout tests
+│   ├── rust_phase3_tests.rs    # 11 Rust Phase 3 report semantics, GT check & sweep tests
+│   ├── rust_phase4_tests.rs    # 4 Rust Phase 4 grid parsing, GT caching & sweep tests
+│   ├── rust_metadata_tests.rs  # 10 Rust Mode A/B predicate tests
+│   ├── rust_filtered_knn_tests.rs # 7 Rust filtered exact k-NN tests
+│   ├── rust_filtered_strategy1_tests.rs # 14 Rust S1 post-filter tests
+│   ├── rust_filtered_strategy2_tests.rs # 13 Rust S2 in-traversal & eval_limit tests
+│   ├── rust_filtered_strategy3_tests.rs # 14 Rust S3 pre-filter bitset tests
+│   ├── rust_filtered_counters_tests.rs # 3 Rust instrumented filtered counter tests
+│   ├── rust_phase5_tests.rs    # 4 Rust Phase 5 cache, crossover & matrix CLI tests
+│   ├── test_phase1.py          # 23 Python reference tests
+│   ├── test_rust_parity.py     # 4 Rust <-> Python <-> FAISS parity tests
+│   ├── test_filtered_parity.py # 5 Filtered search & FAISS parity tests
+│   └── test_phase5_pipeline.py # 1 End-to-end Phase 5 CLI + resume + plot test
+├── results/
+│   ├── phase3_5/               # Phase 3.5 golden fixtures, baseline/final reports & LOG.md
+│   ├── phase4/                 # Phase 4 JSON reports, Pareto charts, PROPOSAL.md, G3_CHECKLIST.md
+│   ├── phase5/                 # Phase 5 100k/1M JSONs, sensitivity, charts, DESIGN.md, PROPOSAL.md, FINDINGS.md
+│   ├── phase6/DESIGN.md        # Draft Gate G5 design spec (SQ8 + PQ stretch goal)
+│   └── phase7/DESIGN.md        # Draft Gate G6 protocol spec (Rust vs FAISS IndexHNSWFlat)
+├── data/                       # SIFT corpora & gitignored Phase 4/5 GT/bitset caches
 └── run_phase1.py               # Python reference runner
 ```
 
@@ -126,31 +148,41 @@ Build a production-grade **Hierarchical Navigable Small World (HNSW)** Approxima
   - $M=16, \text{efC}=100$ (Phase 3 baseline): 450.3 s build, 148.9 B/vec graph, 0.9806 Recall@10 at ef=100 (2,383.9 QPS, 0.55 ms p99). Bit-exact graph fingerprint `0x44044886c62bca5e`.
   - $M=32, \text{efC}=200$: 1,288.9 s build, 272.3 B/vec graph, 0.9828 Recall@10 at ef=50 (2,579.7 QPS), 0.9988 at ef=200.
   - $M=48, \text{efC}=400$: 2,828.0 s build, 402.4 B/vec graph, 0.9917 Recall@10 at ef=50 (1,918.8 QPS), 0.9992 at ef=200.
-- [x] **Documentation & Claims Ledger (`T2.6`)**: Authored comprehensive Phase 4 section in `README.md` and registered every number in `results/CLAIMS.md` Section 10.
-- [ ] **Current Gate Status**: Strictly paused at **Gate G3** awaiting Dev's sign-off before Milestone M3 (Phase 5).
+- [x] **Documentation & Claims Ledger (`T2.6`)**: Authored Phase 4 section in `README.md` and registered numbers in `results/CLAIMS.md` Section 10.
+
+---
+
+## 7.5. Phase 5 (Milestone M3) Verified Results & Next Gates (`G5` / `G6`)
+
+- [x] **Filtered Search & Provenance (`T3.1`–`T3.8`)**: Implemented `DenseBitset`, Mode A/B deterministic generators, `S1`/`S2`/`S3` filtered strategies, zero-cost `FilteredSearchCounters`, `DEFAULT_OPAQUE_EVAL_LIMIT = 16_384` (`FilteredSearchParams::default().eval_limit == None`), and versioned disk caches under `data/phase5/`.
+- [x] **Option C Matrix & Sensitivity (`T3.9`)**: Executed all 24 `100k` cells + sensitivity (`a4621bc`, solo `0x0004`) and 24 `1M` cells + sensitivity (`c39c92b`, `0x0004/0x0010/0x0040/0x0100`). Mode A $\sigma^*_{0.95}$ shifts `0.079149` (`100k`) $\to$ `0.023799` (`1M`); Mode B shifts `0.252372` (`100k`) $\to$ `0.120868` (`1M`); `16_384` bounds `1M` Mode B `0.01` opaque `p99` from `53.729 ms` to `4.797 ms` (`11.20x`).
+- [x] **Visualization & Claims Synthesis (`T3.10`–`T3.11`)**: Authored [`results/phase5/FINDINGS.md`](results/phase5/FINDINGS.md), generated PNG/SVG charts via `scripts/plot_phase5.py`, updated `README.md`, and logged Section 11 in `results/CLAIMS.md`.
+- [ ] **Current Gate Status**: Drafted **`results/phase6/DESIGN.md`** (**Gate G5**) and **`results/phase7/DESIGN.md`** (**Gate G6**); paused awaiting Dev sign-off before M4/M5 implementation begins.
 
 ---
 
 ## 8. Key Commands for Quick Verification
 
 ```powershell
-# Run all Rust unit & integration tests (84 tests)
+# Run all Rust unit & integration tests (184 tests) and instrumented checks (11 tests)
 cargo test --release
+cargo test --release --features instrument --test challenge_m1_p35_tests --test rust_filtered_counters_tests
 
 # Run Rust in release mode with clippy checks
 cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --features instrument -- -D warnings
 
 # Check code formatting
 cargo fmt --all -- --check
 
-# Run all Python reference & parity tests (27 tests, 0 skipped)
+# Run all Python reference & parity tests (33 tests, 0 skipped)
 python -m pytest tests -q -rs
 
 # Run Python lint & type checks
 ruff check . ; mypy src tests scripts
 
-# Execute Phase 4 parameter sweep runner
-cargo run --release --bin phase4 -- --scale 100000 --output-dir results/phase4
+# Execute Phase 5 filtered benchmark matrix
+cargo run --release --bin phase5 -- --matrix --scale 100000 --reps 5 --include-sensitivity --output-dir results/phase5
 ```
 
 ---

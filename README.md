@@ -120,26 +120,28 @@ cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/p
 ## Repository Structure
 
 ```text
-├── Cargo.toml                 # Rust crate manifest (vector_search lib + phase1/phase2/phase3/phase4 CLIs)
+├── Cargo.toml                 # Rust crate manifest (vector_search lib + phase1..5, generate_metadata, filtered_exact_knn)
 ├── docs/
 │   └── HNSW_ALGORITHM.md      # HNSW mathematical derivations, layer theory & pseudocode
 ├── src/
 │   ├── lib.rs                 # Rust crate root (#![forbid(unsafe_code)])
 │   ├── main.rs                # Rust Phase 1 CLI runner (`phase1`)
-│   ├── hnsw.rs                # HNSW index (insert, search-layer, heuristic selection, k-NN)
+│   ├── hnsw.rs                # HNSW index (insert, search-layer, heuristic selection, k-NN, filtered search)
 │   ├── bin/phase2.rs          # Rust Phase 2 CLI runner (`phase2`)
 │   ├── bin/phase3.rs          # Rust Phase 3 CLI runner (`phase3`, SIFT1M)
 │   ├── bin/phase4.rs          # Rust Phase 4 CLI runner (`phase4`, parameter sweep)
 │   ├── bin/phase5.rs          # Rust Phase 5 CLI runner (`phase5`, filtered matrix & sensitivity)
+│   ├── bin/generate_metadata.rs # Deterministic Mode A/B bitset & metadata generator CLI
+│   ├── bin/filtered_exact_knn.rs # Multi-threaded filtered exact k-NN ground-truth CLI
 │   ├── matrix.rs              # Contiguous row-major RowMatrix<T> storage
 │   ├── distance.rs            # 8-way unrolled L2^2, Euclidean, and Inner Product kernels
 │   ├── rng.rs                 # Deterministic SplitMix64 + Xoshiro256** PRNG
-│   ├── dataset.rs             # Texmex .fvecs/.ivecs I/O, SIFT downloader & seeded generator
-│   ├── exact_knn.rs           # Brute-force ExactKnn (single-query, timed, & multi-threaded)
-│   ├── filter.rs              # DenseBitset, metadata generators & FilteredSearchParams
+│   ├── dataset.rs             # Texmex .fvecs/.ivecs I/O, SIFT downloader, seeded & Mode A/B generators
+│   ├── exact_knn.rs           # Brute-force ExactKnn (single-query, timed, filtered & multi-threaded)
+│   ├── filter.rs              # DenseBitset, metadata predicates & FilteredSearchParams
 │   ├── recall.rs              # Recall@k harness, self-verification & latency percentiles
 │   ├── hardware.rs            # Cross-platform CPU / RAM / OS hardware probe
-│   ├── benchmark.rs           # End-to-end Phase 1 benchmark pipeline & JSON reporter
+│   ├── benchmark.rs           # End-to-end Phase 1-3 benchmark pipeline & JSON reporter
 │   ├── phase4.rs              # Phase 4 resumable parameter sweep runner & prefix GT caching
 │   ├── phase5.rs              # Phase 5 Option C matrix, versioned GT/bitset cache & sensitivity
 │   └── hnsw_phase1/           # Python reference implementation & FAISS comparison helpers
@@ -154,13 +156,17 @@ cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/p
 │   ├── challenge_m1_p35_tests.rs # Phase 3.5 instrumentation, golden & layout tests (8 tests)
 │   ├── rust_phase3_tests.rs   # Phase 3 report semantics + parallel-search input validation (11 tests)
 │   ├── rust_phase4_tests.rs   # Phase 4 grid parsing, GT caching & resumable sweep tests (4 tests)
-│   ├── rust_filtered_search_tests.rs # Filtered HNSW strategy, parity & eval_limit tests
-│   ├── rust_filtered_counters_tests.rs # Instrumented filtered distance & bridge-hop counter tests
-│   ├── rust_phase5_tests.rs   # Phase 5 cache verification, crossover & CLI matrix tests
+│   ├── rust_metadata_tests.rs # Mode A/B predicate determinism & popcount tests (10 tests)
+│   ├── rust_filtered_knn_tests.rs # Exact filtered k-NN & canonical tie-breaking tests (7 tests)
+│   ├── rust_filtered_strategy1_tests.rs # S1 post-filter & overfetch cap tests (14 tests)
+│   ├── rust_filtered_strategy2_tests.rs # S2 in-traversal, bridge-hop & eval_limit tests (13 tests)
+│   ├── rust_filtered_strategy3_tests.rs # S3 pre-filter bitset scan tests (14 tests)
+│   ├── rust_filtered_counters_tests.rs # Instrumented filtered distance & bridge-hop counter tests (3 tests)
+│   ├── rust_phase5_tests.rs   # Phase 5 cache verification, crossover & CLI matrix tests (4 tests)
 │   ├── test_phase1.py         # Python reference unit tests (23 tests)
 │   ├── test_rust_parity.py    # Cross-language Rust <-> Python <-> FAISS parity tests (4 tests)
-│   ├── test_filtered_parity.py # Filtered strategy & FAISS parity verification tests
-│   └── test_phase5_pipeline.py # End-to-end Phase 5 CLI + resume + plotting pipeline tests
+│   ├── test_filtered_parity.py # Filtered strategy & FAISS parity verification tests (5 tests)
+│   └── test_phase5_pipeline.py # End-to-end Phase 5 CLI + resume + plotting pipeline tests (1 test)
 └── run_phase1.py              # Python reference runner
 ```
 
@@ -270,7 +276,7 @@ Phase 5 evaluates three filtered k-NN strategies (`S1_post_filter` capped at $K'
 | `100,000` | Mode A (`independent`) | **`0.079149`** | `[0.075, 0.100]` | Baseline (`S2 ef=20`) |
 | `1,000,000` | Mode A (`independent`) | **`0.023799`** | `[0.020, 0.035]` | **$3.33\times$ leftward shift** (`S2 ef=20`: `92.37` vs `S3` `55.38 QPS` at `0.035`; `1,328.34` vs `15.84 QPS` at `0.50`) |
 | `100,000` | Mode B (`correlated`) | **`0.252372`** | `[0.200, 0.500]` | Baseline (`S2 ef=400 -> 50`) |
-| `1,000,000` | Mode B (`correlated`) | **`0.120868`** | `[0.100, 0.200]` | **$2.09\times$ leftward shift** (`S3` wins every correlated point $\le 0.10$ with `1.0000` recall and `0%` under-fill) |
+| `1,000,000` | Mode B (`correlated`) | **`0.120868`** | `[0.100, 0.200]` | **$2.09\times$ leftward shift** (`S3` beats all `S2` and `S1_cap4096` arms for $\sigma \le 0.10$ with `1.0000` recall and `0%` under-fill; `S1_uncap_ef100` reaches higher mean QPS `36.46` at $\sigma=0.10$ with `399.162 ms p99`) |
 
 ### Opaque Closure `eval_limit` Guardrail & Charts
 

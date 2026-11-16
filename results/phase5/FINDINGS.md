@@ -20,7 +20,7 @@ All runs obey the approved **Gate G4.5** parameters:
 3. **Opaque `eval_limit` Guardrail:** `FilteredSearchParams::default().eval_limit` stays `None` for backwards API parity; `DEFAULT_OPAQUE_EVAL_LIMIT = 16_384` (derived from the `100k` pilot opaque evaluation distribution: $4 \times K'_{\max} = 4 \times 4,096$) is exposed via `FilteredSearchParams::with_opaque_eval_limit()`, and tested across `{None, 16_384, 10_000}` directly at both `100k` and `1M`. Note bitset predicates never hit `eval_limit`.
 4. **Concurrency & Pinning Transparency:**
    - The `100k` matrix (`24` cells + sensitivity) ran **solo** pinned to physical P-core 1 (`processor_affinity_mask = "0x0004"`). Peak RSS: `127.32 MiB`; build time: `27.365 s` (`3,654.3 vec/s`, fingerprint `0x80af03bd7aebaade`).
-   - At `1M`, `independent` $\sigma \in \{0.0005, 0.001, 0.002\}$ (`0x0004`) and `sensitivity_n1000000.json` (`0x0004`, `1,015.69 MiB` peak RSS at matrix build `606.488 s` / `1,648.84 vec/s`, fingerprint `0x44044886c62bca5e`) ran pinned to `0x0004`. To complete the full `1M` matrix within interactive schedule, the remaining `21` `1M` cells executed in sharded batches across `4` separate physical P-cores (`0x0004`, `0x0010`, `0x0040`, `0x0100`, up to `4` processes / `~4.1 GiB` peak RSS leaving `~1.4 GiB` free headroom out of `5.36 GiB` available RAM). Exact P-core affinity is stamped in every cell JSON (`provenance.processor_affinity_mask`). Parallel `1M` DRAM/L3 bus sharing increases `S3` high-$\sigma$ linear-scan latency slightly relative to a fully idle memory bus.
+   - At `1M`, `independent` $\sigma \in \{0.0005, 0.001, 0.002\}$ (fingerprint `0x44044886c62bca5e`, `606.488 s` build / `1,648.84 vec/s`, `1,015.69 MiB` peak RSS) and `sensitivity_n1000000.json` *(omits `processor_affinity_mask`/`peak_rss_mb` keys in its header, though launched pinned to `0x0004`)* ran solo on `0x0004`. To complete the remaining `21` `1M` cells within schedule, those cells executed in sharded batches across `4` separate physical P-cores (`0x0004`, `0x0010`, `0x0040`, `0x0100`, up to `4` processes / `~4.1 GiB` peak RSS leaving `~1.4 GiB` free headroom out of `5.36 GiB` available RAM; note `independent` `0.005..0.035` carry `0x0004` as one shard of that 4-core run). Exact P-core affinity is stamped in every cell JSON (`provenance.processor_affinity_mask`). Parallel `1M` DRAM/L3 bus sharing increases `S3` high-$\sigma$ linear-scan latency slightly relative to a fully idle memory bus.
 
 ---
 
@@ -61,7 +61,7 @@ Comparing predicted vs measured `S3_pre_filter` mean latency at representative s
 
 | Scale & Mode | $\sigma$ | Matches | T3.6 Predicted (ms) | Measured `S3` Mean (ms) | Empirical / Predicted | Physical Bottleneck |
 |---|---:|---:|---:|---:|---:|---|
-| `100k` Ind | `0.001` | `100` | `0.0029` | `0.0066` | `2.28x` | Non-contiguous bitset-ID jumps miss `48.8 MiB` L3-overflow buffer |
+| `100k` Ind | `0.001` | `100` | `0.0029` | `0.0066` | `2.31x` | Non-contiguous bitset-ID jumps miss `48.8 MiB` L3-overflow buffer |
 | `100k` Ind | `0.010` | `1,000` | `0.0244` | `0.0422` | `1.73x` | Strided access partially prefetched |
 | `100k` Ind | `0.100` | `10,000` | `0.2393` | `0.6763` | `2.83x` | Base array (`48.8 MiB`) > `24 MiB` shared L3 cache |
 | `100k` Ind | `0.500` | `50,000` | `1.1944` | `3.5570` | `2.98x` | Sustained DRAM read bandwidth |
@@ -69,6 +69,17 @@ Comparing predicted vs measured `S3_pre_filter` mean latency at representative s
 | `1M` Ind | `0.010` | `10,000` | `0.2435` | `1.1697` | `4.80x` | Full `488.3 MiB` working set (`~20x` L3); concurrent `w1` run |
 | `1M` Ind | `0.100` | `100,000` | `2.3926` | `18.6933` | `7.81x` | Full DRAM saturation under `4`-way concurrent P-core runs (`0x0010`) |
 | `1M` Ind | `0.500` | `500,000` | `11.9438` | `63.1197` | `5.28x` | Every second vector streamed from DRAM (`0x0010`) |
+
+### 3.1 Graph Traversal Work Scaling ($N_{\text{eval}} \propto \sigma^{-\beta}$, `S2_ef100`)
+
+Fitting `log(dist_evals_mean) = log(A) - beta * log(sigma)` over the active beam-search regime ([`DESIGN.md`](./DESIGN.md) §4.2, $\sigma \ge 0.005$ in Mode A, $\sigma \ge 0.020$ in Mode B, `ef_search = 100`, `M = 16`, reference `ef * M = 1,600`):
+
+| Scale ($N$) | Mode | Fitted Prefactor $A$ | Exponent $\beta$ | $R^2$ | Interpretation |
+|---:|---|---:|---:|---:|---|
+| `100,000` | Mode A (`independent`) | `1,836.9` | **`0.6000`** | **`0.9934`** | Tight power law near $1.15 \cdot (\text{ef} \cdot M)$; sub-linear $\sigma^{-0.60}$ penalty from bridge filtering |
+| `1,000,000` | Mode A (`independent`) | `2,099.3` | **`0.7403`** | **`0.9991`** | Steeper exponent on `1M` graph ($\beta$ climbs from `0.60 -> 0.74`) |
+| `100,000` | Mode B (`correlated`) | `3,553.1` | `0.4119` | `0.5025` | Weak power-law fit due to Voronoi boundary stalling / `<k` early termination |
+| `1,000,000` | Mode B (`correlated`) | `6,030.7` | `0.5157` | `0.5191` | Non-monotonic cluster isolation breaks clean $\sigma^{-\beta}$ scaling |
 
 ---
 
@@ -148,7 +159,7 @@ Comparing predicted vs measured `S3_pre_filter` mean latency at representative s
 
 1. **Graph Navigation Purity ($\eta_{\text{graph}} = \text{visited matching} / \text{visited total}$):**
    - In Mode A (`independent`), $\eta_{\text{graph}}$ tracks selectivity almost identically across both scales (`100k`: `0.0004` at $\sigma=0.0005$ to `0.4995` at $\sigma=0.50$; `1M`: `0.0004` at $\sigma=0.0005$ to `0.5002` at $\sigma=0.50$). At `1M` $\sigma=0.001$ `S2_ef100`, an average query computes `179,478.0` distances, of which **`179,298.3` (`99.90%`) are bridge evaluations** over non-matching nodes, yet still under-fills `k = 10` on `34.0%` of queries (`Recall@10 = 0.7753`).
-   - In Mode B (`correlated`), matching nodes are clustered (`C = max(64, floor(2 / sigma))` centroids; half of clusters pass). Notice the non-monotonic dip between $\sigma = 0.002$ (`C = 1000`, `1M S2_ef100 R@10 = 0.3153`) and $\sigma = 0.005$ (`C = 400`, `R@10 = 0.1277`): as `C` shrinks faster than $\sigma$ doubles here, matching vectors concentrate into larger separated Voronoi pockets where out-edges of `M=16` HNSW do not easily cross non-matching Voronoi boundaries. Even when $\eta_{\text{graph}}$ climbs above $\sigma$ once a matching cluster is entered (`0.1622` vs `0.10` at `1M` `0.10`), queries whose spatial nearest cluster fails the predicate still suffer `34.2%–92.3%` `<k` starvation for $\sigma \le 0.075$.
+   - In Mode B (`correlated`), matching nodes are assigned by greedy spatial clustering (`C = max(64, floor(2 / sigma))` centroids; clusters are marked passing sequentially until `floor(sigma * N)` capacity plus a partial shortfall cluster — i.e., ~2 clusters out of `C` at $\sigma \le 0.035$, rising to ~half of the 64 clusters only at $\sigma = 0.50$). Notice the non-monotonic dip between $\sigma = 0.002$ (`C = 1000`, `1M S2_ef100 R@10 = 0.3153`) and $\sigma = 0.005$ (`C = 400`, `R@10 = 0.1277`): as `C` shrinks faster than $\sigma$ doubles here, matching vectors concentrate into larger separated Voronoi pockets where out-edges of `M=16` HNSW do not easily cross non-matching Voronoi boundaries. Even when $\eta_{\text{graph}}$ climbs above $\sigma$ once a matching cluster is entered (`0.1622` vs `0.10` at `1M` `0.10`), queries whose spatial nearest cluster fails the predicate still suffer `34.2%–92.3%` `<k` starvation for $\sigma \le 0.075$.
    - **`S1_cap4096` vs `S1_uncap`:** Capped post-filtering hits the `4096` fetch limit (`post_filter_cap_reached_rate = 66%–100%` at Mode A $\sigma \le 0.002$ and `60%–96%` at Mode B $\sigma \le 0.05$ on `1M`), yielding poor recall unless overfetching is uncapped. Uncapped `S1` reaches `0.988–0.994` recall on Mode B $\sigma \in \{0.05, 0.075\}$, but pays **`183.4–315.0 ms`** (`3.2–5.5 QPS`) vs **`7.6–11.3 ms`** (`88.5–131.5 QPS`) for `S3`.
 2. **Bridge-Hop Budget Sensitivity (`H_max` $\in \{1\times, 3\times, 10\times\} \cdot \text{efSearch}$, [`sensitivity_n1000000.json`](./sensitivity_n1000000.json)):**
    - **Mode A $\sigma=0.001, \text{ef}=100$ (`1M`):** Expanding $H_{\max}$ from `1x -> 3x -> 10x` rescues recall (`0.3000 -> 0.8046 -> 0.9920`) and drops under-fill rate (`91.4% -> 29.8% -> 1.4%`), at the cost of $10.4\times$ higher mean latency (`11.752 -> 87.195 -> 121.816 ms` — over `1,700x` slower than `S3`).

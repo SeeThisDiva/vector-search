@@ -241,51 +241,51 @@ Documented in `CLAUDE.md`, `continuation.md`, and `results/phase4/PROPOSAL.md`. 
 
 ---
 
-## 10. Phase 4 Parameter Sweep & 1M Finals Claims (`README.md:197-248`)
+## 10. Phase 4 Parameter Sweep & 1M Finals Claims (`README.md:214-264`)
 
-Documented in `README.md` lines 197–248. All benchmarks executed single-threaded, pinned to Performance core `0x0004` on a 12th Gen Intel(R) Core(TM) i7-12650H under clean Git commits (`cd48e7f` / `e897092`).
+Documented in `README.md` lines 214–264. All benchmarks executed single-threaded, pinned to Performance core `0x0004` on a 12th Gen Intel(R) Core(TM) i7-12650H under clean Git commits (`cd48e7f` / `e897092`).
 
 | Metric / Parameter | Documented Value (`README.md`) | Doc + Line | Source Report JSON | JSON Key Path | Actual JSON Value | Generating Commit | Verification / Notes |
 |---|---|---|---|---|---|---|---|
-| **100k Sweep Grid Size** | `23 configurations` | `README.md:199` | `results/phase4/summary.json` | `total_configs` | `23` | `e897092` | Cartesian product of $M \times \text{efC}$ with $\text{efC} \ge M$ |
-| **100k Sweep Base Scale** | `100,000` | `README.md:199` | `results/phase4/summary.json` | `scale_vectors` | `100000` | `e897092` | Texmex SIFT1M prefix |
-| **1M Finals Scale** | `1,000,000` | `README.md:199,213` | `results/phase4/scale_1000000_*.json` | `scale_vectors` | `1000000` | `cd48e7f` | Full authentic Texmex SIFT1M base |
-| **1M Finals Query Count** | `10,000` | `README.md:215` | `results/phase4/scale_1000000_*.json` | `dataset.num_query` | `10000` | `cd48e7f` | Standard SIFT query set |
-| **1M Finals Repetitions** | `5 timed passes` | `README.md:215` | `results/phase4/scale_1000000_*.json` | `sweep_runs` | `5` | `cd48e7f` | 1 untimed warmup + 5 timed runs |
-| **1M Finals Ground Truth** | `official Texmex 100-NN` | `README.md:215` | `results/phase4/scale_1000000_*.json` | `ground_truth_source` | `"official_texmex_sift1m_groundtruth_ivecs"` | `cd48e7f` | `data/sift1m/sift_groundtruth.ivecs` |
-| **$M=8, \text{efC}=100$ (1M) Build Time** | `266.541 s` | `README.md:219` | `results/phase4/scale_1000000_m8_efc100.json` | `index_build.build_time_s` | `266.540707` | `cd48e7f` | Build throughput: 3,751.8 vec/s |
-| **$M=8, \text{efC}=100$ (1M) Graph Memory** | `85.44 B/vec` (`81.5 MiB`) | `README.md:219,227` | `results/phase4/scale_1000000_m8_efc100.json` | `memory_profile.graph_only_bytes_per_vector` | `85.44` | `cd48e7f` | Graph total: 81.48 MiB |
-| **$M=8, \text{efC}=100$ (1M) Peak RSS** | `583.42 MiB` | `README.md:219,227` | `results/phase4/scale_1000000_m8_efc100.json` | `memory_profile.peak_rss_mb` | `583.42` | `cd48e7f` | Lowest RSS among 1M configurations |
-| **$M=8, \text{efC}=100$ (1M) Recall (ef=10)** | `0.57222` | `README.md:219` | `results/phase4/scale_1000000_m8_efc100.json` | `ef_search_sweep[0].recall_at_k` | `0.572220` | `cd48e7f` | QPS: 20,150.7, p99: 0.0830 ms |
-| **$M=8, \text{efC}=100$ (1M) Recall (ef=50)** | `0.86072` | `README.md:219` | `results/phase4/scale_1000000_m8_efc100.json` | `ef_search_sweep[4].recall_at_k` | `0.860720` | `cd48e7f` | QPS: 6,743.3, p99: 0.2109 ms |
-| **$M=8, \text{efC}=100$ (1M) Recall (ef=100)** | `0.93304` | `README.md:219` | `results/phase4/scale_1000000_m8_efc100.json` | `ef_search_sweep[6].recall_at_k` | `0.933040` | `cd48e7f` | QPS: 3,861.6, p99: 0.3390 ms |
-| **$M=8, \text{efC}=100$ (1M) Recall (ef=200)** | `0.97330` | `README.md:219` | `results/phase4/scale_1000000_m8_efc100.json` | `ef_search_sweep[8].recall_at_k` | `0.973300` | `cd48e7f` | QPS: 2,071.0, p99: 0.6434 ms |
-| **$M=8, \text{efC}=100$ (1M) Recall (ef=600)** | `0.99470` | `README.md:219` | `results/phase4/scale_1000000_m8_efc100.json` | `ef_search_sweep[11].recall_at_k` | `0.994700` | `cd48e7f` | QPS: 781.7, p99: 1.6119 ms |
-| **$M=16, \text{efC}=100$ (1M) Build Time** | `450.301 s` | `README.md:220` | `results/phase4/scale_1000000_m16_efc100.json` | `index_build.build_time_s` | `450.301138` | `cd48e7f` | Build throughput: 2,220.7 vec/s |
-| **$M=16, \text{efC}=100$ (1M) Graph Memory** | `148.91 B/vec` (`142.0 MiB`) | `README.md:220,231` | `results/phase4/scale_1000000_m16_efc100.json` | `memory_profile.graph_only_bytes_per_vector` | `148.91` | `cd48e7f` | Matches Phase 3 baseline memory exactly |
-| **$M=16, \text{efC}=100$ (1M) Peak RSS** | `647.26 MiB` | `README.md:220,231` | `results/phase4/scale_1000000_m16_efc100.json` | `memory_profile.peak_rss_mb` | `647.26` | `cd48e7f` | Process lifetime high-water mark |
+| **100k Sweep Grid Size** | `23 configurations` | `README.md:216` | `results/phase4/summary.json` | `total_configs` | `23` | `e897092` | Cartesian product of $M \times \text{efC}$ with $\text{efC} \ge M$ |
+| **100k Sweep Base Scale** | `100,000` | `README.md:216` | `results/phase4/summary.json` | `scale_vectors` | `100000` | `e897092` | Texmex SIFT1M prefix |
+| **1M Finals Scale** | `1,000,000` | `README.md:216,230` | `results/phase4/scale_1000000_*.json` | `scale_vectors` | `1000000` | `cd48e7f` | Full authentic Texmex SIFT1M base |
+| **1M Finals Query Count** | `10,000` | `README.md:232` | `results/phase4/scale_1000000_*.json` | `dataset.num_query` | `10000` | `cd48e7f` | Standard SIFT query set |
+| **1M Finals Repetitions** | `5 timed passes` | `README.md:232` | `results/phase4/scale_1000000_*.json` | `sweep_runs` | `5` | `cd48e7f` | 1 untimed warmup + 5 timed runs |
+| **1M Finals Ground Truth** | `official Texmex 100-NN` | `README.md:232` | `results/phase4/scale_1000000_*.json` | `ground_truth_source` | `"official_texmex_sift1m_groundtruth_ivecs"` | `cd48e7f` | `data/sift1m/sift_groundtruth.ivecs` |
+| **$M=8, \text{efC}=100$ (1M) Build Time** | `266.541 s` | `README.md:236` | `results/phase4/scale_1000000_m8_efc100.json` | `index_build.build_time_s` | `266.540707` | `cd48e7f` | Build throughput: 3,751.8 vec/s |
+| **$M=8, \text{efC}=100$ (1M) Graph Memory** | `85.44 B/vec` (`81.5 MiB`) | `README.md:236,244` | `results/phase4/scale_1000000_m8_efc100.json` | `memory_profile.graph_only_bytes_per_vector` | `85.44` | `cd48e7f` | Graph total: 81.48 MiB |
+| **$M=8, \text{efC}=100$ (1M) Peak RSS** | `583.42 MiB` | `README.md:236,244` | `results/phase4/scale_1000000_m8_efc100.json` | `memory_profile.peak_rss_mb` | `583.42` | `cd48e7f` | Lowest RSS among 1M configurations |
+| **$M=8, \text{efC}=100$ (1M) Recall (ef=10)** | `0.57222` | `README.md:236` | `results/phase4/scale_1000000_m8_efc100.json` | `ef_search_sweep[0].recall_at_k` | `0.572220` | `cd48e7f` | QPS: 20,150.7, p99: 0.0830 ms |
+| **$M=8, \text{efC}=100$ (1M) Recall (ef=50)** | `0.86072` | `README.md:236` | `results/phase4/scale_1000000_m8_efc100.json` | `ef_search_sweep[4].recall_at_k` | `0.860720` | `cd48e7f` | QPS: 6,743.3, p99: 0.2109 ms |
+| **$M=8, \text{efC}=100$ (1M) Recall (ef=100)** | `0.93304` | `README.md:236` | `results/phase4/scale_1000000_m8_efc100.json` | `ef_search_sweep[6].recall_at_k` | `0.933040` | `cd48e7f` | QPS: 3,861.6, p99: 0.3390 ms |
+| **$M=8, \text{efC}=100$ (1M) Recall (ef=200)** | `0.97330` | `README.md:236` | `results/phase4/scale_1000000_m8_efc100.json` | `ef_search_sweep[8].recall_at_k` | `0.973300` | `cd48e7f` | QPS: 2,071.0, p99: 0.6434 ms |
+| **$M=8, \text{efC}=100$ (1M) Recall (ef=600)** | `0.99470` | `README.md:236` | `results/phase4/scale_1000000_m8_efc100.json` | `ef_search_sweep[11].recall_at_k` | `0.994700` | `cd48e7f` | QPS: 781.7, p99: 1.6119 ms |
+| **$M=16, \text{efC}=100$ (1M) Build Time** | `450.301 s` | `README.md:237` | `results/phase4/scale_1000000_m16_efc100.json` | `index_build.build_time_s` | `450.301138` | `cd48e7f` | Build throughput: 2,220.7 vec/s |
+| **$M=16, \text{efC}=100$ (1M) Graph Memory** | `148.91 B/vec` (`142.0 MiB`) | `README.md:237,248` | `results/phase4/scale_1000000_m16_efc100.json` | `memory_profile.graph_only_bytes_per_vector` | `148.91` | `cd48e7f` | Matches Phase 3 baseline memory exactly |
+| **$M=16, \text{efC}=100$ (1M) Peak RSS** | `647.26 MiB` | `README.md:237,248` | `results/phase4/scale_1000000_m16_efc100.json` | `memory_profile.peak_rss_mb` | `647.26` | `cd48e7f` | Process lifetime high-water mark |
 | **$M=16, \text{efC}=100$ (1M) Graph Fingerprint** | `0x44044886c62bca5e` | Log / Verification | `results/phase4/scale_1000000_m16_efc100.json` | `index_build.graph_fingerprint_hex` | `"0x44044886c62bca5e"` | `cd48e7f` | **Bit-for-bit identical** to Phase 3.5 baseline |
-| **$M=16, \text{efC}=100$ (1M) Recall (ef=10)** | `0.73315` | `README.md:220` | `results/phase4/scale_1000000_m16_efc100.json` | `ef_search_sweep[0].recall_at_k` | `0.733150` | `cd48e7f` | QPS: 12,711.7, p99: 0.1284 ms |
-| **$M=16, \text{efC}=100$ (1M) Recall (ef=50)** | `0.94703` | `README.md:220,245` | `results/phase4/scale_1000000_m16_efc100.json` | `ef_search_sweep[4].recall_at_k` | `0.947030` | `cd48e7f` | Exact match with Phase 3 report |
-| **$M=16, \text{efC}=100$ (1M) Recall (ef=100)** | `0.98061` | `README.md:220,232` | `results/phase4/scale_1000000_m16_efc100.json` | `ef_search_sweep[6].recall_at_k` | `0.980610` | `cd48e7f` | QPS: 2,383.9, p99: 0.5515 ms |
-| **$M=16, \text{efC}=100$ (1M) Recall (ef=200)** | `0.99376` | `README.md:220,232` | `results/phase4/scale_1000000_m16_efc100.json` | `ef_search_sweep[8].recall_at_k` | `0.993760` | `cd48e7f` | QPS: 1,296.0, p99: 1.0673 ms |
-| **$M=16, \text{efC}=100$ (1M) Recall (ef=600)** | `0.99804` | `README.md:220` | `results/phase4/scale_1000000_m16_efc100.json` | `ef_search_sweep[11].recall_at_k` | `0.998040` | `cd48e7f` | QPS: 515.5, p99: 2.6370 ms |
-| **$M=32, \text{efC}=200$ (1M) Build Time** | `1,288.897 s` | `README.md:221` | `results/phase4/scale_1000000_m32_efc200.json` | `index_build.build_time_s` | `1288.896758` | `cd48e7f` | Build throughput: 775.9 vec/s |
-| **$M=32, \text{efC}=200$ (1M) Graph Memory** | `272.33 B/vec` (`259.7 MiB`) | `README.md:221` | `results/phase4/scale_1000000_m32_efc200.json` | `memory_profile.graph_only_bytes_per_vector` | `272.33` | `cd48e7f` | Graph total: 259.71 MiB |
-| **$M=32, \text{efC}=200$ (1M) Peak RSS** | `767.40 MiB` | `README.md:221` | `results/phase4/scale_1000000_m32_efc200.json` | `memory_profile.peak_rss_mb` | `767.40` | `cd48e7f` | Lifetime high-water mark |
-| **$M=32, \text{efC}=200$ (1M) Recall (ef=10)** | `0.84614` | `README.md:221` | `results/phase4/scale_1000000_m32_efc200.json` | `ef_search_sweep[0].recall_at_k` | `0.846140` | `cd48e7f` | QPS: 7,953.7, p99: 0.2041 ms |
-| **$M=32, \text{efC}=200$ (1M) Recall (ef=50)** | `0.98278` | `README.md:221,235` | `results/phase4/scale_1000000_m32_efc200.json` | `ef_search_sweep[4].recall_at_k` | `0.982780` | `cd48e7f` | QPS: 2,579.7, p99: 0.5304 ms |
-| **$M=32, \text{efC}=200$ (1M) Recall (ef=100)** | `0.99572` | `README.md:221,235` | `results/phase4/scale_1000000_m32_efc200.json` | `ef_search_sweep[6].recall_at_k` | `0.995720` | `cd48e7f` | QPS: 1,476.8, p99: 0.9404 ms |
-| **$M=32, \text{efC}=200$ (1M) Recall (ef=200)** | `0.99881` | `README.md:221,235` | `results/phase4/scale_1000000_m32_efc200.json` | `ef_search_sweep[8].recall_at_k` | `0.998810` | `cd48e7f` | QPS: 842.2, p99: 1.6854 ms |
-| **$M=32, \text{efC}=200$ (1M) Recall (ef=600)** | `0.99944` | `README.md:221` | `results/phase4/scale_1000000_m32_efc200.json` | `ef_search_sweep[11].recall_at_k` | `0.999440` | `cd48e7f` | QPS: 348.6, p99: 4.2463 ms |
-| **$M=48, \text{efC}=400$ (1M) Build Time** | `2,827.980 s` | `README.md:222` | `results/phase4/scale_1000000_m48_efc400.json` | `index_build.build_time_s` | `2827.980183` | `cd48e7f` | Build throughput: 353.6 vec/s |
-| **$M=48, \text{efC}=400$ (1M) Graph Memory** | `402.42 B/vec` (`383.8 MiB`) | `README.md:222` | `results/phase4/scale_1000000_m48_efc400.json` | `memory_profile.graph_only_bytes_per_vector` | `402.42` | `cd48e7f` | Graph total: 383.78 MiB |
-| **$M=48, \text{efC}=400$ (1M) Peak RSS** | `889.69 MiB` | `README.md:222` | `results/phase4/scale_1000000_m48_efc400.json` | `memory_profile.peak_rss_mb` | `889.69` | `cd48e7f` | Safe: 5.6% of 15.78 GB host RAM |
-| **$M=48, \text{efC}=400$ (1M) Recall (ef=10)** | `0.89372` | `README.md:222` | `results/phase4/scale_1000000_m48_efc400.json` | `ef_search_sweep[0].recall_at_k` | `0.893720` | `cd48e7f` | QPS: 5,905.2, p99: 0.2685 ms |
-| **$M=48, \text{efC}=400$ (1M) Recall (ef=50)** | `0.99165` | `README.md:222,239` | `results/phase4/scale_1000000_m48_efc400.json` | `ef_search_sweep[4].recall_at_k` | `0.991650` | `cd48e7f` | QPS: 1,918.8, p99: 0.7254 ms |
-| **$M=48, \text{efC}=400$ (1M) Recall (ef=100)** | `0.99803` | `README.md:222` | `results/phase4/scale_1000000_m48_efc400.json` | `ef_search_sweep[6].recall_at_k` | `0.998030` | `cd48e7f` | QPS: 1,110.1, p99: 1.2947 ms |
-| **$M=48, \text{efC}=400$ (1M) Recall (ef=200)** | `0.99922` | `README.md:222` | `results/phase4/scale_1000000_m48_efc400.json` | `ef_search_sweep[8].recall_at_k` | `0.999220` | `cd48e7f` | QPS: 643.9, p99: 2.3104 ms |
-| **$M=48, \text{efC}=400$ (1M) Recall (ef=600)** | `0.99944` | `README.md:222,239` | `results/phase4/scale_1000000_m48_efc400.json` | `ef_search_sweep[11].recall_at_k` | `0.999440` | `cd48e7f` | Accuracy saturation point |
+| **$M=16, \text{efC}=100$ (1M) Recall (ef=10)** | `0.73315` | `README.md:237` | `results/phase4/scale_1000000_m16_efc100.json` | `ef_search_sweep[0].recall_at_k` | `0.733150` | `cd48e7f` | QPS: 12,711.7, p99: 0.1284 ms |
+| **$M=16, \text{efC}=100$ (1M) Recall (ef=50)** | `0.94703` | `README.md:237,262` | `results/phase4/scale_1000000_m16_efc100.json` | `ef_search_sweep[4].recall_at_k` | `0.947030` | `cd48e7f` | Exact match with Phase 3 report |
+| **$M=16, \text{efC}=100$ (1M) Recall (ef=100)** | `0.98061` | `README.md:237,249` | `results/phase4/scale_1000000_m16_efc100.json` | `ef_search_sweep[6].recall_at_k` | `0.980610` | `cd48e7f` | QPS: 2,383.9, p99: 0.5515 ms |
+| **$M=16, \text{efC}=100$ (1M) Recall (ef=200)** | `0.99376` | `README.md:237,249` | `results/phase4/scale_1000000_m16_efc100.json` | `ef_search_sweep[8].recall_at_k` | `0.993760` | `cd48e7f` | QPS: 1,296.0, p99: 1.0673 ms |
+| **$M=16, \text{efC}=100$ (1M) Recall (ef=600)** | `0.99804` | `README.md:237` | `results/phase4/scale_1000000_m16_efc100.json` | `ef_search_sweep[11].recall_at_k` | `0.998040` | `cd48e7f` | QPS: 515.5, p99: 2.6370 ms |
+| **$M=32, \text{efC}=200$ (1M) Build Time** | `1,288.897 s` | `README.md:238` | `results/phase4/scale_1000000_m32_efc200.json` | `index_build.build_time_s` | `1288.896758` | `cd48e7f` | Build throughput: 775.9 vec/s |
+| **$M=32, \text{efC}=200$ (1M) Graph Memory** | `272.33 B/vec` (`259.7 MiB`) | `README.md:238` | `results/phase4/scale_1000000_m32_efc200.json` | `memory_profile.graph_only_bytes_per_vector` | `272.33` | `cd48e7f` | Graph total: 259.71 MiB |
+| **$M=32, \text{efC}=200$ (1M) Peak RSS** | `767.40 MiB` | `README.md:238` | `results/phase4/scale_1000000_m32_efc200.json` | `memory_profile.peak_rss_mb` | `767.40` | `cd48e7f` | Lifetime high-water mark |
+| **$M=32, \text{efC}=200$ (1M) Recall (ef=10)** | `0.84614` | `README.md:238` | `results/phase4/scale_1000000_m32_efc200.json` | `ef_search_sweep[0].recall_at_k` | `0.846140` | `cd48e7f` | QPS: 7,953.7, p99: 0.2041 ms |
+| **$M=32, \text{efC}=200$ (1M) Recall (ef=50)** | `0.98278` | `README.md:238,252` | `results/phase4/scale_1000000_m32_efc200.json` | `ef_search_sweep[4].recall_at_k` | `0.982780` | `cd48e7f` | QPS: 2,579.7, p99: 0.5304 ms |
+| **$M=32, \text{efC}=200$ (1M) Recall (ef=100)** | `0.99572` | `README.md:238,252` | `results/phase4/scale_1000000_m32_efc200.json` | `ef_search_sweep[6].recall_at_k` | `0.995720` | `cd48e7f` | QPS: 1,476.8, p99: 0.9404 ms |
+| **$M=32, \text{efC}=200$ (1M) Recall (ef=200)** | `0.99881` | `README.md:238,252` | `results/phase4/scale_1000000_m32_efc200.json` | `ef_search_sweep[8].recall_at_k` | `0.998810` | `cd48e7f` | QPS: 842.2, p99: 1.6854 ms |
+| **$M=32, \text{efC}=200$ (1M) Recall (ef=600)** | `0.99944` | `README.md:238` | `results/phase4/scale_1000000_m32_efc200.json` | `ef_search_sweep[11].recall_at_k` | `0.999440` | `cd48e7f` | QPS: 348.6, p99: 4.2463 ms |
+| **$M=48, \text{efC}=400$ (1M) Build Time** | `2,827.980 s` | `README.md:239` | `results/phase4/scale_1000000_m48_efc400.json` | `index_build.build_time_s` | `2827.980183` | `cd48e7f` | Build throughput: 353.6 vec/s |
+| **$M=48, \text{efC}=400$ (1M) Graph Memory** | `402.42 B/vec` (`383.8 MiB`) | `README.md:239` | `results/phase4/scale_1000000_m48_efc400.json` | `memory_profile.graph_only_bytes_per_vector` | `402.42` | `cd48e7f` | Graph total: 383.78 MiB |
+| **$M=48, \text{efC}=400$ (1M) Peak RSS** | `889.69 MiB` | `README.md:239` | `results/phase4/scale_1000000_m48_efc400.json` | `memory_profile.peak_rss_mb` | `889.69` | `cd48e7f` | Safe: 5.6% of 15.78 GB host RAM |
+| **$M=48, \text{efC}=400$ (1M) Recall (ef=10)** | `0.89372` | `README.md:239` | `results/phase4/scale_1000000_m48_efc400.json` | `ef_search_sweep[0].recall_at_k` | `0.893720` | `cd48e7f` | QPS: 5,905.2, p99: 0.2685 ms |
+| **$M=48, \text{efC}=400$ (1M) Recall (ef=50)** | `0.99165` | `README.md:239,256` | `results/phase4/scale_1000000_m48_efc400.json` | `ef_search_sweep[4].recall_at_k` | `0.991650` | `cd48e7f` | QPS: 1,918.8, p99: 0.7254 ms |
+| **$M=48, \text{efC}=400$ (1M) Recall (ef=100)** | `0.99803` | `README.md:239` | `results/phase4/scale_1000000_m48_efc400.json` | `ef_search_sweep[6].recall_at_k` | `0.998030` | `cd48e7f` | QPS: 1,110.1, p99: 1.2947 ms |
+| **$M=48, \text{efC}=400$ (1M) Recall (ef=200)** | `0.99922` | `README.md:239` | `results/phase4/scale_1000000_m48_efc400.json` | `ef_search_sweep[8].recall_at_k` | `0.999220` | `cd48e7f` | QPS: 643.9, p99: 2.3104 ms |
+| **$M=48, \text{efC}=400$ (1M) Recall (ef=600)** | `0.99944` | `README.md:239,256` | `results/phase4/scale_1000000_m48_efc400.json` | `ef_search_sweep[11].recall_at_k` | `0.999440` | `cd48e7f` | Accuracy saturation point |
 
 ---
 
@@ -308,7 +308,7 @@ Documented in [`results/phase5/FINDINGS.md`](phase5/FINDINGS.md) and [`README.md
 | **1M Mode B `S1_uncap` vs `S3` (`sigma=0.05`)** | `S1u` `5.45 QPS` (`183.4ms`) vs `S3` `131.50 QPS` | `FINDINGS.md` §4.4, §5 | `results/phase5/cell_n1000000_correlated_s0.050000.json` | `arms[10].{qps,mean_ms,recall_at_k}`, `arms[0].qps` | `5.45`, `183.413132`, `0.993800`, `131.50` | `c39c92b` | `S2_ef600` max `0.7860`, `S1_cap4096` `0.4482` |
 | **1M Opaque Guardrail (Ind `0.10`, `limit=16384`)** | `R@10=0.998500`, `1.0%` hit (vs `69.0%` at `10k`) | `FINDINGS.md` §6, `README.md` | `results/phase5/sensitivity_n1000000.json` | `opaque_eval_probes[2,4].{recall_at_k,eval_limit_reached_rate}` | `0.998500`, `0.010000` (`0.690000` at `10k`) | `c39c92b` | Preserves recall of `None` (`0.998500`, max `16,503`) |
 | **1M Opaque Tail Bound (Corr `0.01`, `limit=16384`)** | `p99` `53.729ms -> 4.797ms` (`11.20x` cap) | `FINDINGS.md` §6, `README.md` | `results/phase5/sensitivity_n1000000.json` | `opaque_eval_probes[6,8].{p99_ms,eval_count_max}` | `53.728891` (`max=196017`) -> `4.797383` (`16384`) | `c39c92b` | Bounds runaway opaque closure evaluations |
-| **1M Bridge-Hop Sensitivity (`H_max`, Ind `0.001`)** | `ef=100`: `0.3000 -> 0.8046 -> 0.9920` | `FINDINGS.md` §5 | `results/phase5/sensitivity_n1000000.json` | `sensitivity_arms[6..8].arm.{recall_at_k,mean_ms}` | `0.3000 -> 0.8046 -> 0.9920` (`11.8 -> 121.8ms`) | `c39c92b` | Mode B `0.001` capped at `0.2548` even at `10*ef` |
+| **1M Bridge-Hop Sensitivity (`H_max`, Ind `0.001`)** | `ef=100`: `0.3000 -> 0.8046 -> 0.9920` | `FINDINGS.md` §5 | `results/phase5/sensitivity_n1000000.json` | `sensitivity_arms[3..5].arm.{recall_at_k,mean_ms}` | `0.3000 -> 0.8046 -> 0.9920` (`11.8 -> 121.8ms`) | `c39c92b` | Mode B `0.001` capped at `0.2548` even at `10*ef` |
 
 
 
