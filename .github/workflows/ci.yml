@@ -21,10 +21,14 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy linter
-        run: cargo clippy --all-targets -- -D warnings
+        run: |
+          cargo clippy --all-targets -- -D warnings
+          cargo clippy --all-targets --features instrument -- -D warnings
 
       - name: Run Rust test suite (release)
-        run: cargo test --release
+        run: |
+          cargo test --release
+          cargo test --release --features instrument --test challenge_m1_p35_tests --test rust_filtered_counters_tests
 
   test:
     runs-on: ubuntu-latest
@@ -57,7 +61,7 @@ jobs:
 
       - name: Run Mypy Type Checker
         run: |
-          mypy src tests
+          mypy --config-file mypy.ini src tests scripts
 
       - name: Run Pytest & Cross-Language Parity Suite
         run: |

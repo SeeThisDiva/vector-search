@@ -14,7 +14,13 @@ from pathlib import Path
 
 import numpy as np
 
-from src.hnsw_phase1.dataset import read_fvecs, read_ivecs, write_fvecs, write_ivecs
+from src.hnsw_phase1.dataset import (
+    generate_synthetic_sift,
+    read_fvecs,
+    read_ivecs,
+    write_fvecs,
+    write_ivecs,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -88,80 +94,98 @@ def numpy_filtered_exact_knn(
 
 
 def test_filtered_parity_sift_10k_all_four_selectivity_tiers() -> None:
-    """Verifies 100% ID and numerical parity on 10k SIFT smoke data across 4 tiers."""
+    """Verifies 100% ID and numerical parity on 10k SIFT (or fresh-clone fallback) across 4 tiers."""
     rust_bin = _resolve_rust_filtered_exact_knn_binary()
-    base_path = REPO_ROOT / "data" / "siftsmall" / "siftsmall_base.fvecs"
-    query_path = REPO_ROOT / "data" / "siftsmall" / "siftsmall_query.fvecs"
+    cached_base = REPO_ROOT / "data" / "siftsmall" / "siftsmall_base.fvecs"
+    cached_query = REPO_ROOT / "data" / "siftsmall" / "siftsmall_query.fvecs"
 
-    assert base_path.is_file(), f"SIFT smoke base file not found at {base_path}"
-    assert query_path.is_file(), f"SIFT smoke query file not found at {query_path}"
-
-    base = read_fvecs(str(base_path))
-    query = read_fvecs(str(query_path))
-    num_base = len(base)
-    assert num_base == 10_000, f"Expected 10k base vectors, got {num_base}"
-
-    tiers = [0.5, 0.1, 0.01, 0.001]
-    k = 10
-
-    for sigma in tiers:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            json_report_path = os.path.join(tmpdir, "report.json")
-            proc = subprocess.run(
-                [
-                    str(rust_bin),
-                    "--base-fvecs",
-                    str(base_path),
-                    "--query-fvecs",
-                    str(query_path),
-                    "--selectivity",
-                    str(sigma),
-                    "--k",
-                    str(k),
-                    "--output-dir",
-                    tmpdir,
-                    "--json-out",
-                    json_report_path,
-                ],
-                cwd=str(REPO_ROOT),
-                capture_output=True,
-                text=True,
-                check=False,
+    with tempfile.TemporaryDirectory() as fallback_dir:
+        if cached_base.is_file() and cached_query.is_file():
+            base_path = cached_base
+            query_path = cached_query
+        else:
+            # Fresh clones/CI do not track gitignored `data/siftsmall/*.fvecs`; keep test offline
+            # with deterministic integer-valued 10k x 128 vectors (0 skips in CI).
+            syn_base, syn_query = generate_synthetic_sift(
+                num_base=10_000,
+                num_query=100,
+                dim=128,
+                num_clusters=10,
+                seed=42,
             )
-            assert proc.returncode == 0, (
-                f"Rust binary failed for sigma={sigma}:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
-            )
+            base_int = np.clip(np.rint(syn_base), 0.0, 255.0).astype(np.float32)
+            query_int = np.clip(np.rint(syn_query), 0.0, 255.0).astype(np.float32)
+            base_path = Path(fallback_dir) / "siftsmall_fallback_base.fvecs"
+            query_path = Path(fallback_dir) / "siftsmall_fallback_query.fvecs"
+            write_fvecs(str(base_path), base_int)
+            write_fvecs(str(query_path), query_int)
 
-            # 1. Inspect provenance report
-            with open(json_report_path, encoding="utf-8") as f:
-                report = json.load(f)
+        base = read_fvecs(str(base_path))
+        query = read_fvecs(str(query_path))
+        num_base = len(base)
+        assert num_base == 10_000, f"Expected 10k base vectors, got {num_base}"
 
-            expected_popcount = int(np.floor(sigma * num_base))
-            assert report["filter"]["selectivity"] == sigma
-            assert report["filter"]["popcount"] == expected_popcount
-            assert report["recall"]["self_verified"] is True
-            assert report["recall"]["self_recall_at_k"] == 1.0
-            assert report["exact_knn"]["effective_k"] == min(k, expected_popcount)
+        tiers = [0.5, 0.1, 0.01, 0.001]
+        k = 10
 
-            # 2. Load outputs
-            rust_indices = read_ivecs(os.path.join(tmpdir, "groundtruth.ivecs"))
-            rust_distances = read_fvecs(os.path.join(tmpdir, "groundtruth.fvecs"))
-            filter_ids = read_ivecs(os.path.join(tmpdir, "filter.ivecs"))[0]
+        for sigma in tiers:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                json_report_path = os.path.join(tmpdir, "report.json")
+                proc = subprocess.run(
+                    [
+                        str(rust_bin),
+                        "--base-fvecs",
+                        str(base_path),
+                        "--query-fvecs",
+                        str(query_path),
+                        "--selectivity",
+                        str(sigma),
+                        "--k",
+                        str(k),
+                        "--output-dir",
+                        tmpdir,
+                        "--json-out",
+                        json_report_path,
+                    ],
+                    cwd=str(REPO_ROOT),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert proc.returncode == 0, (
+                    f"Rust binary failed for sigma={sigma}:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+                )
 
-            assert len(filter_ids) == expected_popcount
+                # 1. Inspect provenance report
+                with open(json_report_path, encoding="utf-8") as f:
+                    report = json.load(f)
 
-            # 3. Compute pure NumPy reference
-            py_indices, py_distances = numpy_filtered_exact_knn(base, query, filter_ids, k)
+                expected_popcount = int(np.floor(sigma * num_base))
+                assert report["filter"]["selectivity"] == sigma
+                assert report["filter"]["popcount"] == expected_popcount
+                assert report["recall"]["self_verified"] is True
+                assert report["recall"]["self_recall_at_k"] == 1.0
+                assert report["exact_knn"]["effective_k"] == min(k, expected_popcount)
 
-            # 4. Strict parity assertion (100% ID and numerical equality)
-            assert np.array_equal(rust_indices, py_indices), (
-                f"Index mismatch for tier sigma={sigma}!\nRust:\n{rust_indices[:3]}\nNumPy:\n{py_indices[:3]}"
-            )
-            assert np.allclose(rust_distances, py_distances, atol=1e-5, rtol=1e-5), (
-                f"Distance mismatch for tier sigma={sigma}!\nRust:\n{rust_distances[:3]}\nNumPy:\n{py_distances[:3]}"
-            )
-            # SIFT coordinates are integers, so squared distances are bit-exact integers
-            assert np.array_equal(rust_distances, py_distances)
+                # 2. Load outputs
+                rust_indices = read_ivecs(os.path.join(tmpdir, "groundtruth.ivecs"))
+                rust_distances = read_fvecs(os.path.join(tmpdir, "groundtruth.fvecs"))
+                filter_ids = read_ivecs(os.path.join(tmpdir, "filter.ivecs"))[0]
+
+                assert len(filter_ids) == expected_popcount
+
+                # 3. Compute pure NumPy reference
+                py_indices, py_distances = numpy_filtered_exact_knn(base, query, filter_ids, k)
+
+                # 4. Strict parity assertion (100% ID and numerical equality)
+                assert np.array_equal(rust_indices, py_indices), (
+                    f"Index mismatch for tier sigma={sigma}!\nRust:\n{rust_indices[:3]}\nNumPy:\n{py_indices[:3]}"
+                )
+                assert np.allclose(rust_distances, py_distances, atol=1e-5, rtol=1e-5), (
+                    f"Distance mismatch for tier sigma={sigma}!\nRust:\n{rust_distances[:3]}\nNumPy:\n{py_distances[:3]}"
+                )
+                # Integer coordinates produce bit-exact integer squared distances in IEEE-754 f32
+                assert np.array_equal(rust_distances, py_distances)
 
 
 def test_filtered_parity_synthetic_10k_all_four_selectivity_tiers() -> None:

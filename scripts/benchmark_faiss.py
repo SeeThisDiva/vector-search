@@ -201,6 +201,13 @@ def set_process_affinity_mask(requested_mask: int) -> tuple[int, int]:
         return previous_mask, masked
 
     if hasattr(os, "sched_setaffinity") and hasattr(os, "sched_getaffinity"):
+        n_cpus = os.cpu_count() or 1
+        system_mask = (1 << n_cpus) - 1
+        if (requested_mask & system_mask) != requested_mask:
+            raise ValueError(
+                f"Requested affinity {format_affinity_mask(requested_mask)} exceeds "
+                f"system affinity mask {format_affinity_mask(system_mask)}"
+            )
         prev_cpus = os.sched_getaffinity(0)
         previous_mask = 0
         for cpu in prev_cpus:
@@ -208,7 +215,12 @@ def set_process_affinity_mask(requested_mask: int) -> tuple[int, int]:
         target_cpus = {
             bit for bit in range(requested_mask.bit_length()) if (requested_mask >> bit) & 1
         }
-        os.sched_setaffinity(0, target_cpus)
+        try:
+            os.sched_setaffinity(0, target_cpus)
+        except OSError as exc:
+            raise ValueError(
+                f"Failed to set CPU affinity {format_affinity_mask(requested_mask)}: {exc}"
+            ) from exc
         actual_cpus = os.sched_getaffinity(0)
         masked = 0
         for cpu in actual_cpus:
