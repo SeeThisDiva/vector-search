@@ -31,7 +31,9 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+from matplotlib.transforms import Bbox
 
 plt.rcParams["svg.hashsalt"] = "vector-search-phase6"
 
@@ -1158,51 +1160,148 @@ def _annotate_scatter_points(
 ) -> None:
     if not entries:
         return
-    xs = [e[0] for e in entries]
-    ys = [e[1] for e in entries]
-    x_span = max(max(xs) - min(xs), 1.0)
-    y_span = max(max(ys) - min(ys), 0.05)
-    norm_pts = [(x_v / x_span, y_v / y_span) for x_v, y_v, _ in entries]
-
-    placed_offsets: list[tuple[float, float, int, int]] = []
-    for idx, (x_val, y_val, text) in enumerate(entries):
-        nx, ny = norm_pts[idx]
-        has_above = any(
-            j != idx and abs(ox - nx) < 0.14 and 0.0 < (oy - ny) < 0.14
-            for j, (ox, oy) in enumerate(norm_pts)
+    fig = ax.get_figure()
+    if not isinstance(fig, Figure) or not isinstance(fig.canvas, FigureCanvasAgg):
+        return
+    renderer = fig.canvas.get_renderer()
+    ax_box = ax.get_window_extent(renderer=renderer)
+    dpi_scale = fig.dpi / 72.0
+    pad_px = 2.5 * dpi_scale
+    marker_r_px = 4.2 * dpi_scale
+    pt_pixels = [ax.transData.transform((xv, yv)) for xv, yv, _ in entries]
+    marker_boxes = [
+        Bbox.from_bounds(
+            px - marker_r_px,
+            py - marker_r_px,
+            2.0 * marker_r_px,
+            2.0 * marker_r_px,
         )
-        has_below = any(
-            j != idx and abs(ox - nx) < 0.14 and 0.0 < (ny - oy) < 0.14
-            for j, (ox, oy) in enumerate(norm_pts)
-        )
-        exact_ties = sum(
-            1 for px, py, _, _ in placed_offsets if abs(px - nx) < 0.02 and abs(py - ny) < 0.02
-        )
-
-        if exact_ties > 0:
-            dx, dy = (-8, 8) if exact_ties % 2 == 1 else (8, -11)
-        elif has_above and not has_below:
-            dx, dy = (7, -11)
-        elif has_below and not has_above:
-            dx, dy = (7, 7)
-        elif has_above and has_below:
-            dx, dy = (-8, 0)
-        else:
-            dx, dy = (7, 6)
-
-        ha = "left" if dx >= 0 else "right"
+        for px, py in pt_pixels
+    ]
+    candidates: list[tuple[int, int, str]] = [
+        (8, 8, "left"),
+        (8, -10, "left"),
+        (-8, 8, "right"),
+        (-8, -10, "right"),
+        (0, 12, "center"),
+        (0, -14, "center"),
+        (10, 18, "left"),
+        (-10, 18, "right"),
+        (10, -20, "left"),
+        (-10, -20, "right"),
+        (0, 26, "center"),
+        (0, -28, "center"),
+        (16, 28, "left"),
+        (-16, 28, "right"),
+        (16, -32, "left"),
+        (-16, -32, "right"),
+        (0, 38, "center"),
+        (0, -40, "center"),
+        (24, 34, "left"),
+        (-24, 34, "right"),
+        (24, -44, "left"),
+        (-24, -44, "right"),
+        (0, -54, "center"),
+        (32, -56, "left"),
+        (-32, -56, "right"),
+        (0, -68, "center"),
+        (-55, -24, "right"),
+        (55, -24, "left"),
+        (-65, -45, "right"),
+        (65, -45, "left"),
+    ]
+    order = sorted(
+        range(len(entries)),
+        key=lambda i: (round(entries[i][0], 2), -entries[i][1], entries[i][2]),
+    )
+    placed_boxes: list[Bbox] = []
+    for idx in order:
+        xv, yv, text = entries[idx]
+        best_choice: tuple[int, int, str, Bbox] | None = None
+        best_penalty = float("inf")
+        for rank, (dx, dy, ha) in enumerate(candidates):
+            ann = ax.annotate(
+                text,
+                (xv, yv),
+                textcoords="offset points",
+                xytext=(dx, dy),
+                ha=ha,
+                va="center",
+                fontsize=7.3,
+                color="#222222",
+                bbox={
+                    "boxstyle": "round,pad=0.14",
+                    "facecolor": "white",
+                    "edgecolor": "none",
+                    "alpha": 0.85,
+                },
+                zorder=9,
+            )
+            bb = ann.get_window_extent(renderer=renderer)
+            ann.remove()
+            out_penalty = (
+                max(0.0, ax_box.x0 + 2.0 - bb.x0)
+                + max(0.0, bb.x1 - (ax_box.x1 - 2.0))
+                + max(0.0, ax_box.y0 + 2.0 - bb.y0)
+                + max(0.0, bb.y1 - (ax_box.y1 - 2.0))
+            ) * 100.0
+            pbb = Bbox.from_extents(
+                bb.x0 - pad_px,
+                bb.y0 - pad_px,
+                bb.x1 + pad_px,
+                bb.y1 + pad_px,
+            )
+            overlap_area = 0.0
+            for ob in placed_boxes:
+                if pbb.overlaps(ob):
+                    ix = max(0.0, min(pbb.x1, ob.x1) - max(pbb.x0, ob.x0))
+                    iy = max(0.0, min(pbb.y1, ob.y1) - max(pbb.y0, ob.y0))
+                    overlap_area += ix * iy + 500.0
+            for j, mb in enumerate(marker_boxes):
+                chk = bb if j == idx else pbb
+                if chk.overlaps(mb):
+                    ix = max(0.0, min(chk.x1, mb.x1) - max(chk.x0, mb.x0))
+                    iy = max(0.0, min(chk.y1, mb.y1) - max(chk.y0, mb.y0))
+                    overlap_area += ix * iy + (200.0 if j != idx else 80.0)
+            penalty = (
+                overlap_area * 10.0 + out_penalty + rank * 0.5 + math.hypot(dx, dy) * 0.2
+            )
+            if penalty < best_penalty:
+                best_penalty = penalty
+                best_choice = (dx, dy, ha, bb)
+            if overlap_area == 0.0 and out_penalty == 0.0:
+                break
+        assert best_choice is not None
+        dx, dy, ha, bb = best_choice
+        placed_boxes.append(bb)
+        use_leader = math.hypot(dx, dy) > 15.0
         ax.annotate(
             text,
-            (x_val, y_val),
+            (xv, yv),
             textcoords="offset points",
             xytext=(dx, dy),
             ha=ha,
+            va="center",
             fontsize=7.3,
             color="#222222",
-            bbox={"boxstyle": "round,pad=0.14", "facecolor": "white", "edgecolor": "none", "alpha": 0.80},
+            bbox={
+                "boxstyle": "round,pad=0.14",
+                "facecolor": "white",
+                "edgecolor": "#CCCCCC" if use_leader else "none",
+                "linewidth": 0.4,
+                "alpha": 0.88,
+            },
+            arrowprops={
+                "arrowstyle": "-",
+                "color": "#666666",
+                "linewidth": 0.75,
+                "shrinkA": 0,
+                "shrinkB": 3.5,
+            }
+            if use_leader
+            else None,
             zorder=9,
         )
-        placed_offsets.append((nx, ny, dx, dy))
 
 
 def plot_chart3_memory_vs_recall(
@@ -1286,8 +1385,7 @@ def plot_chart3_memory_vs_recall(
                 label="Memory-Recall Pareto",
                 zorder=3,
             )
-        _annotate_scatter_points(axes[0], payload_annots)
-        axes[0].set_xlim(left=0.0, right=max(p[0] for p in payload_pts) * 1.14)
+        axes[0].set_xlim(left=0.0, right=max(p[0] for p in payload_pts) * 1.18)
     else:
         axes[0].text(
             0.5,
@@ -1312,8 +1410,7 @@ def plot_chart3_memory_vs_recall(
                 label="Memory-Recall Pareto",
                 zorder=3,
             )
-        _annotate_scatter_points(axes[1], rss_annots)
-        axes[1].set_xlim(left=0.0, right=max(p[0] for p in rss_pts) * 1.14)
+        axes[1].set_xlim(left=0.0, right=max(p[0] for p in rss_pts) * 1.18)
     else:
         axes[1].text(
             0.5,
@@ -1328,7 +1425,7 @@ def plot_chart3_memory_vs_recall(
     if all_recalls:
         min_r = min(all_recalls)
         y_lo = max(0.0, math.floor(min_r * 20.0) / 20.0 - 0.04)
-        axes[0].set_ylim(y_lo, 1.03)
+        axes[0].set_ylim(y_lo, 1.07)
 
     match_summary = ", ".join(sorted(match_tags)) if match_tags else f"p99<={latency_budget_ms:g}ms"
     axes[0].set_xlabel("Total Steady-State Index Payload [B/vector]", fontsize=10, fontweight="bold")
@@ -1354,6 +1451,11 @@ def plot_chart3_memory_vs_recall(
     )
     handles, labels = _collect_unique_legend(axes)
     _place_top_legend_and_tight(fig, handles, labels)
+    fig.canvas.draw()
+    if payload_annots:
+        _annotate_scatter_points(axes[0], payload_annots)
+    if rss_annots:
+        _annotate_scatter_points(axes[1], rss_annots)
     _save_figure(fig, output_dir, "chart3_memory_vs_recall")
 
 

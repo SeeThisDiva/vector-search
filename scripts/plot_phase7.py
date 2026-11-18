@@ -813,15 +813,23 @@ def plot_chart3_matched_recall_ratios(
                     zorder=4,
                 )
                 for bar, val in zip(bars, ys_bars, strict=True):
-                    ax.text(
-                        bar.get_x() + bar.get_width() / 2.0,
-                        val,
+                    ax.annotate(
                         f"{val:.2f}x",
+                        xy=(bar.get_x() + bar.get_width() / 2.0, val),
+                        xytext=(0, 2),
+                        textcoords="offset points",
                         ha="center",
                         va="bottom",
                         fontsize=6.8,
                         rotation=90 if n_pairs >= 4 else 0,
                         color="#222222",
+                        bbox={
+                            "boxstyle": "round,pad=0.10",
+                            "facecolor": "white",
+                            "edgecolor": "none",
+                            "alpha": 0.88,
+                        },
+                        zorder=6,
                     )
 
         ax.set_xticks(x_positions)
