@@ -1,0 +1,99 @@
+{
+  "phase": 6,
+  "benchmark": "kernel_microbenchmark",
+  "generated_at": "2026-11-16T17:03:20Z",
+  "git_commit": "9f79165",
+  "git_dirty": false,
+  "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "environment": {
+    "os": "windows",
+    "arch": "x86_64",
+    "cpu_model": "12th Gen Intel(R) Core(TM) i7-12650H",
+    "logical_cores": 16,
+    "total_ram_gb": 15.78,
+    "power_mode": "balanced",
+    "processor_affinity_mask": "0x0004"
+  },
+  "hardware": {
+    "summary": "12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)",
+    "cpu_model": "12th Gen Intel(R) Core(TM) i7-12650H",
+    "logical_cores": 16,
+    "total_ram_gb": 15.78,
+    "os": "windows",
+    "arch": "x86_64"
+  },
+  "measured_this_run": true,
+  "warmup_performed": true,
+  "parameters": {
+    "dim": 128,
+    "num_vectors": 4096,
+    "num_evals": 200000,
+    "reps": 5,
+    "seed": 42
+  },
+  "kernels": [
+    {
+      "kernel_id": "f32_l2_squared",
+      "label": "Raw f32 L2Squared (8-way unrolled)",
+      "bytes_per_vector": 512,
+      "median_ns_per_eval": 39.6600,
+      "min_ns_per_eval": 38.8085,
+      "max_ns_per_eval": 47.4620,
+      "spread_ns_per_eval": 8.6535,
+      "evals_per_sec": 25214321.73,
+      "run_ns_per_eval": [38.8085, 41.2860, 39.0170, 39.6600, 47.4620]
+    },
+    {
+      "kernel_id": "sq8_query_shifted",
+      "label": "SQ8 Way A: Query-Shifted Asymmetric L2^2",
+      "bytes_per_vector": 128,
+      "median_ns_per_eval": 47.1285,
+      "min_ns_per_eval": 44.3215,
+      "max_ns_per_eval": 48.3125,
+      "spread_ns_per_eval": 3.9910,
+      "evals_per_sec": 21218583.24,
+      "run_ns_per_eval": [45.7400, 47.3370, 44.3215, 47.1285, 48.3125]
+    },
+    {
+      "kernel_id": "sq8_norm_expanded",
+      "label": "SQ8 Way B: Norm-Expanded Asymmetric L2^2 (+4 B/vec)",
+      "bytes_per_vector": 132,
+      "median_ns_per_eval": 36.9335,
+      "min_ns_per_eval": 34.5910,
+      "max_ns_per_eval": 37.9405,
+      "spread_ns_per_eval": 3.3495,
+      "evals_per_sec": 27075690.09,
+      "run_ns_per_eval": [34.5910, 36.9335, 37.9405, 37.8980, 35.9075]
+    },
+    {
+      "kernel_id": "pq16_adc",
+      "label": "PQ16 ADC Lookup Table Distance (16 B/vec)",
+      "bytes_per_vector": 16,
+      "median_ns_per_eval": 9.8310,
+      "min_ns_per_eval": 9.8110,
+      "max_ns_per_eval": 11.9375,
+      "spread_ns_per_eval": 2.1265,
+      "evals_per_sec": 101719051.98,
+      "run_ns_per_eval": [9.8310, 10.3130, 11.9375, 9.8215, 9.8110]
+    },
+    {
+      "kernel_id": "pq32_adc",
+      "label": "PQ32 ADC Lookup Table Distance (32 B/vec)",
+      "bytes_per_vector": 32,
+      "median_ns_per_eval": 20.1700,
+      "min_ns_per_eval": 18.9965,
+      "max_ns_per_eval": 23.2495,
+      "spread_ns_per_eval": 4.2530,
+      "evals_per_sec": 49578582.05,
+      "run_ns_per_eval": [18.9965, 23.2495, 20.1700, 19.5645, 22.3345]
+    }
+  ],
+  "way_a_vs_way_b": {
+    "speedup_way_b_over_way_a": 1.2760,
+    "standard_max_rel_err_way_a": 1.715610461837e-7,
+    "standard_max_rel_err_way_b": 3.940569102027e-6,
+    "adversarial_offset_max_abs_err_way_a": 4.611538315658e-5,
+    "adversarial_offset_max_abs_err_way_b": 6.399096236752e1,
+    "recommended_default_kernel": "query_shifted"
+  }
+}
