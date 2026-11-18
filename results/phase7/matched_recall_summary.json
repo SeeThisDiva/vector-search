@@ -1,0 +1,3591 @@
+{
+  "schema_version": 1,
+  "git_commit": "9f79165",
+  "git_dirty": false,
+  "interpolation_method": "log_linear_within_observed_recall_range_zero_extrapolation",
+  "matched_recall_targets": [
+    0.9,
+    0.95,
+    0.98,
+    0.99,
+    0.995
+  ],
+  "comparisons": [
+    {
+      "scale_vectors": 100000,
+      "scale_label": "100k",
+      "pair_label": "C1 vs FAISS C1",
+      "rust_report": "data/bench_staging/phase7/rust_n100000_C1.json",
+      "faiss_report": "data/bench_staging/phase7/faiss_n100000_C1.json",
+      "rust_config_id": "C1",
+      "faiss_config_id": "C1",
+      "threads": 1,
+      "compare_mode": "single",
+      "rust_recall_range": [
+        0.69009,
+        0.99854
+      ],
+      "faiss_recall_range": [
+        0.68726,
+        0.99902
+      ],
+      "targets": [
+        {
+          "target_recall": 0.9,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 12598.364287276734,
+            "interpolated_p99_ms": 0.12469570779773932,
+            "interpolated_mean_ms": 0.07941539000182883,
+            "alpha": 0.483626,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.88346,
+              "qps": 13782.89,
+              "p99_ms": 0.1152
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.91766,
+              "qps": 11445.78,
+              "p99_ms": 0.1357
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 14555.601348709379,
+            "interpolated_p99_ms": 0.11284885954768967,
+            "interpolated_mean_ms": 0.06870001537467343,
+            "alpha": 0.452166,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.88497,
+              "qps": 16182.47,
+              "p99_ms": 0.1029
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.91821,
+              "qps": 12802.06,
+              "p99_ms": 0.1262
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8655337547008191,
+          "p99_ratio_faiss_over_rust": 0.904993937166902,
+          "p99_ratio_rust_over_faiss": 1.1049797782408532,
+          "mean_ms_ratio_faiss_over_rust": 0.865071812567959
+        },
+        {
+          "target_recall": 0.95,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 8454.291616562752,
+            "interpolated_p99_ms": 0.17982838933059897,
+            "interpolated_mean_ms": 0.1182498959906337,
+            "alpha": 0.464651,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.93863,
+              "qps": 9574.48,
+              "p99_ms": 0.1577
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.9631,
+              "qps": 7325.16,
+              "p99_ms": 0.2092
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 9333.418064412466,
+            "interpolated_p99_ms": 0.16496525696418732,
+            "interpolated_mean_ms": 0.10715330272282354,
+            "alpha": 0.477987,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.93936,
+              "qps": 10606.85,
+              "p99_ms": 0.1437
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96162,
+              "qps": 8116.69,
+              "p99_ms": 0.1918
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.9058087356869025,
+          "p99_ratio_faiss_over_rust": 0.9173482428345223,
+          "p99_ratio_rust_over_faiss": 1.0900985615997818,
+          "mean_ms_ratio_faiss_over_rust": 0.9061598052594559
+        },
+        {
+          "target_recall": 0.98,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 5204.073693586294,
+            "interpolated_p99_ms": 0.29740729574227526,
+            "interpolated_mean_ms": 0.19220009656396114,
+            "alpha": 0.081502,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.97911,
+              "qps": 5351.83,
+              "p99_ms": 0.2908
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.99003,
+              "qps": 3795.92,
+              "p99_ms": 0.3831
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 5007.825365701464,
+            "interpolated_p99_ms": 0.28155996750616613,
+            "interpolated_mean_ms": 0.19971314611657193,
+            "alpha": 0.156481,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.97831,
+              "qps": 5348.27,
+              "p99_ms": 0.2635
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.98911,
+              "qps": 3512.96,
+              "p99_ms": 0.4025
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.0391883329696225,
+          "p99_ratio_faiss_over_rust": 0.9467150656255522,
+          "p99_ratio_rust_over_faiss": 1.0562840249502516,
+          "mean_ms_ratio_faiss_over_rust": 1.0390897282931935
+        },
+        {
+          "target_recall": 0.99,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 3799.503952199618,
+            "interpolated_p99_ms": 0.38280998493027507,
+            "interpolated_mean_ms": 0.26315184071073755,
+            "alpha": 0.997253,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.97911,
+              "qps": 5351.83,
+              "p99_ms": 0.2908
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.99003,
+              "qps": 3795.92,
+              "p99_ms": 0.3831
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 3286.28140570806,
+            "interpolated_p99_ms": 0.4292363390056668,
+            "interpolated_mean_ms": 0.3043221271715975,
+            "alpha": 0.209906,
+            "lower_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.98911,
+              "qps": 3512.96,
+              "p99_ms": 0.4025
+            },
+            "upper_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99335,
+              "qps": 2556.62,
+              "p99_ms": 0.5468
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.15617121090121,
+          "p99_ratio_faiss_over_rust": 1.1212778033567956,
+          "p99_ratio_rust_over_faiss": 0.891839646701537,
+          "mean_ms_ratio_faiss_over_rust": 1.1564506877461491
+        },
+        {
+          "target_recall": 0.995,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 2568.209265036774,
+            "interpolated_p99_ms": 0.5717356180983335,
+            "interpolated_mean_ms": 0.3893911219879411,
+            "alpha": 0.380952,
+            "lower_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.9938,
+              "qps": 2911.48,
+              "p99_ms": 0.5031
+            },
+            "upper_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.99695,
+              "qps": 2094.57,
+              "p99_ms": 0.7038
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 2041.1810526761617,
+            "interpolated_p99_ms": 0.6672823924850051,
+            "interpolated_mean_ms": 0.4898693634876252,
+            "alpha": 0.472779,
+            "lower_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99335,
+              "qps": 2556.62,
+              "p99_ms": 0.5468
+            },
+            "upper_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.99684,
+              "qps": 1587.95,
+              "p99_ms": 0.8332
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.2581976800488293,
+          "p99_ratio_faiss_over_rust": 1.1671170578885264,
+          "p99_ratio_rust_over_faiss": 0.8568120851640504,
+          "mean_ms_ratio_faiss_over_rust": 1.2580393743614826
+        }
+      ]
+    },
+    {
+      "scale_vectors": 100000,
+      "scale_label": "100k",
+      "pair_label": "C2 vs FAISS C2",
+      "rust_report": "data/bench_staging/phase7/rust_n100000_C2.json",
+      "faiss_report": "data/bench_staging/phase7/faiss_n100000_C2.json",
+      "rust_config_id": "C2",
+      "faiss_config_id": "C2",
+      "threads": 1,
+      "compare_mode": "single",
+      "rust_recall_range": [
+        0.82103,
+        0.99702
+      ],
+      "faiss_recall_range": [
+        0.77861,
+        0.9999
+      ],
+      "targets": [
+        {
+          "target_recall": 0.9,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 12532.027378886396,
+            "interpolated_p99_ms": 0.1282435749146542,
+            "interpolated_mean_ms": 0.0798230165288657,
+            "alpha": 0.824752,
+            "lower_bracket": {
+              "ef_search": 10,
+              "recall_at_k": 0.82103,
+              "qps": 17893.65,
+              "p99_ms": 0.0927
+            },
+            "upper_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.91678,
+              "qps": 11618.62,
+              "p99_ms": 0.1374
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 17505.17517155932,
+            "interpolated_p99_ms": 0.09855696572454847,
+            "interpolated_mean_ms": 0.057091353228823784,
+            "alpha": 0.141944,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.89356,
+              "qps": 18337.11,
+              "p99_ms": 0.0951
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.93893,
+              "qps": 13221.23,
+              "p99_ms": 0.1223
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.7159041401223563,
+          "p99_ratio_faiss_over_rust": 0.7685138673819557,
+          "p99_ratio_rust_over_faiss": 1.301212694322137,
+          "mean_ms_ratio_faiss_over_rust": 0.7152242011322428
+        },
+        {
+          "target_recall": 0.95,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 8879.064230960217,
+            "interpolated_p99_ms": 0.1670440952421237,
+            "interpolated_mean_ms": 0.1126184190847443,
+            "alpha": 0.893011,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.91678,
+              "qps": 11618.62,
+              "p99_ms": 0.1374
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.95398,
+              "qps": 8597.56,
+              "p99_ms": 0.171
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 11757.671219392103,
+            "interpolated_p99_ms": 0.1367995936341735,
+            "interpolated_mean_ms": 0.08501351625837467,
+            "alpha": 0.476744,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.93893,
+              "qps": 13221.23,
+              "p99_ms": 0.1223
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.96215,
+              "qps": 10337.13,
+              "p99_ms": 0.1547
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.7551720119810668,
+          "p99_ratio_faiss_over_rust": 0.8189430068503049,
+          "p99_ratio_rust_over_faiss": 1.2210861948086587,
+          "mean_ms_ratio_faiss_over_rust": 0.7548811015931842
+        },
+        {
+          "target_recall": 0.98,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 5892.348300461383,
+            "interpolated_p99_ms": 0.2503756463220156,
+            "interpolated_mean_ms": 0.16975544849098245,
+            "alpha": 0.978628,
+            "lower_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.9713,
+              "qps": 6822.88,
+              "p99_ms": 0.2115
+            },
+            "upper_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.98019,
+              "qps": 5873.51,
+              "p99_ms": 0.2513
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 7377.766169552627,
+            "interpolated_p99_ms": 0.2153086710527231,
+            "interpolated_mean_ms": 0.13554358225890978,
+            "alpha": 0.406602,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.97495,
+              "qps": 8390.09,
+              "p99_ms": 0.1942
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.98737,
+              "qps": 6115.46,
+              "p99_ms": 0.2503
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.7986629238506597,
+          "p99_ratio_faiss_over_rust": 0.8599425471909046,
+          "p99_ratio_rust_over_faiss": 1.1628683837851823,
+          "mean_ms_ratio_faiss_over_rust": 0.7984638105215808
+        },
+        {
+          "target_recall": 0.99,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 4272.864797211971,
+            "interpolated_p99_ms": 0.3437803020401837,
+            "interpolated_mean_ms": 0.2340271271876107,
+            "alpha": 0.238589,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.98885,
+              "qps": 4572.13,
+              "p99_ms": 0.3159
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99367,
+              "qps": 3442.68,
+              "p99_ms": 0.4503
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 5371.420494910052,
+            "interpolated_p99_ms": 0.27978410536007164,
+            "interpolated_mean_ms": 0.1861564564381433,
+            "alpha": 0.395489,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.98737,
+              "qps": 6115.46,
+              "p99_ms": 0.2503
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99402,
+              "qps": 4405.27,
+              "p99_ms": 0.3317
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.7954813445085763,
+          "p99_ratio_faiss_over_rust": 0.8138456557856194,
+          "p99_ratio_rust_over_faiss": 1.2287342113225173,
+          "mean_ms_ratio_faiss_over_rust": 0.7954481972891488
+        },
+        {
+          "target_recall": 0.995,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 2794.407377581648,
+            "interpolated_p99_ms": 0.5262817216168858,
+            "interpolated_mean_ms": 0.3578702384852256,
+            "alpha": 0.633333,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99367,
+              "qps": 3442.68,
+              "p99_ms": 0.4503
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.99577,
+              "qps": 2476.47,
+              "p99_ms": 0.576
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 3970.029816014752,
+            "interpolated_p99_ms": 0.36683444959283684,
+            "interpolated_mean_ms": 0.2518925060199347,
+            "alpha": 0.259259,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99402,
+              "qps": 4405.27,
+              "p99_ms": 0.3317
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.9978,
+              "qps": 2949.25,
+              "p99_ms": 0.4891
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.7038756651925518,
+          "p99_ratio_faiss_over_rust": 0.6970305722680583,
+          "p99_ratio_rust_over_faiss": 1.4346573016820678,
+          "mean_ms_ratio_faiss_over_rust": 0.7038654767329412
+        }
+      ]
+    },
+    {
+      "scale_vectors": 100000,
+      "scale_label": "100k",
+      "pair_label": "C3 vs FAISS C3",
+      "rust_report": "data/bench_staging/phase7/rust_n100000_C3.json",
+      "faiss_report": "data/bench_staging/phase7/faiss_n100000_C3.json",
+      "rust_config_id": "C3",
+      "faiss_config_id": "C3",
+      "threads": 1,
+      "compare_mode": "single",
+      "rust_recall_range": [
+        0.90974,
+        0.99999
+      ],
+      "faiss_recall_range": [
+        0.83615,
+        0.99997
+      ],
+      "targets": [
+        {
+          "target_recall": 0.9,
+          "status": "out_of_range",
+          "rust_status": "out_of_range",
+          "faiss_status": "in_range",
+          "rust": null,
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 16417.325127645116,
+            "interpolated_p99_ms": 0.10758060564054528,
+            "interpolated_mean_ms": 0.06089834758508772,
+            "alpha": 0.650601,
+            "lower_bracket": {
+              "ef_search": 10,
+              "recall_at_k": 0.83615,
+              "qps": 22357.39,
+              "p99_ms": 0.0846
+            },
+            "upper_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.93429,
+              "qps": 13908.34,
+              "p99_ms": 0.1224
+            }
+          },
+          "qps_ratio_rust_over_faiss": null,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": null
+        },
+        {
+          "target_recall": 0.95,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 8469.987077392994,
+            "interpolated_p99_ms": 0.19454592552626004,
+            "interpolated_mean_ms": 0.11805206119389032,
+            "alpha": 0.687735,
+            "lower_bracket": {
+              "ef_search": 10,
+              "recall_at_k": 0.90974,
+              "qps": 11499.38,
+              "p99_ms": 0.1429
+            },
+            "upper_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.96828,
+              "qps": 7372.06,
+              "p99_ms": 0.2238
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 12023.146891498856,
+            "interpolated_p99_ms": 0.14199253009612336,
+            "interpolated_mean_ms": 0.08317086313958519,
+            "alpha": 0.473335,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.93429,
+              "qps": 13908.34,
+              "p99_ms": 0.1224
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.96748,
+              "qps": 10224.31,
+              "p99_ms": 0.1675
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.7044733923513672,
+          "p99_ratio_faiss_over_rust": 0.7298663783989505,
+          "p99_ratio_rust_over_faiss": 1.3701138038357377,
+          "mean_ms_ratio_faiss_over_rust": 0.7045269883342758
+        },
+        {
+          "target_recall": 0.98,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 6075.903866846758,
+            "interpolated_p99_ms": 0.261849918868901,
+            "interpolated_mean_ms": 0.1645681684893979,
+            "alpha": 0.678241,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.96828,
+              "qps": 7372.06,
+              "p99_ms": 0.2238
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.98556,
+              "qps": 5543.34,
+              "p99_ms": 0.2821
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 8246.719083158196,
+            "interpolated_p99_ms": 0.2009385395120614,
+            "interpolated_mean_ms": 0.12123183157794469,
+            "alpha": 0.89878,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.96748,
+              "qps": 10224.31,
+              "p99_ms": 0.1675
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.98141,
+              "qps": 8049.48,
+              "p99_ms": 0.2051
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.736766198239398,
+          "p99_ratio_faiss_over_rust": 0.7673805681515762,
+          "p99_ratio_rust_over_faiss": 1.3031343788242444,
+          "mean_ms_ratio_faiss_over_rust": 0.7366663473912022
+        },
+        {
+          "target_recall": 0.99,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 4844.147496898315,
+            "interpolated_p99_ms": 0.3189353432344935,
+            "interpolated_mean_ms": 0.20643969945991372,
+            "alpha": 0.630682,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.98556,
+              "qps": 5543.34,
+              "p99_ms": 0.2821
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.9926,
+              "qps": 4476.4,
+              "p99_ms": 0.3427
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 6170.631880380125,
+            "interpolated_p99_ms": 0.26497991391336456,
+            "interpolated_mean_ms": 0.16201891276618094,
+            "alpha": 0.242567,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.98845,
+              "qps": 6646.89,
+              "p99_ms": 0.2456
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.99484,
+              "qps": 4892.21,
+              "p99_ms": 0.3359
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.7850326499463625,
+          "p99_ratio_faiss_over_rust": 0.8308264340541937,
+          "p99_ratio_rust_over_faiss": 1.2036208274215445,
+          "mean_ms_ratio_faiss_over_rust": 0.7848243975846401
+        },
+        {
+          "target_recall": 0.995,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 3968.1791020249198,
+            "interpolated_p99_ms": 0.3883620013549437,
+            "interpolated_mean_ms": 0.2520445975982843,
+            "alpha": 0.833333,
+            "lower_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.9926,
+              "qps": 4476.4,
+              "p99_ms": 0.3427
+            },
+            "upper_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.99548,
+              "qps": 3873.68,
+              "p99_ms": 0.3982
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 4806.762970575555,
+            "interpolated_p99_ms": 0.3404394971752479,
+            "interpolated_mean_ms": 0.208032127453731,
+            "alpha": 0.053156,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.99484,
+              "qps": 4892.21,
+              "p99_ms": 0.3359
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99785,
+              "qps": 3511.92,
+              "p99_ms": 0.4324
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8255408320143931,
+          "p99_ratio_faiss_over_rust": 0.8766035193646636,
+          "p99_ratio_rust_over_faiss": 1.1407665813671048,
+          "mean_ms_ratio_faiss_over_rust": 0.825378244310947
+        }
+      ]
+    },
+    {
+      "scale_vectors": 100000,
+      "scale_label": "100k",
+      "pair_label": "C2-nkp vs FAISS C2",
+      "rust_report": "data/bench_staging/phase7/rust_n100000_C2-nkp.json",
+      "faiss_report": "data/bench_staging/phase7/faiss_n100000_C2.json",
+      "rust_config_id": "C2-nkp",
+      "faiss_config_id": "C2",
+      "threads": 1,
+      "compare_mode": "single",
+      "rust_recall_range": [
+        0.79912,
+        0.99989
+      ],
+      "faiss_recall_range": [
+        0.77861,
+        0.9999
+      ],
+      "targets": [
+        {
+          "target_recall": 0.9,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 13248.450556647067,
+            "interpolated_p99_ms": 0.12195264558680302,
+            "interpolated_mean_ms": 0.07550002828055899,
+            "alpha": 0.933037,
+            "lower_bracket": {
+              "ef_search": 10,
+              "recall_at_k": 0.79912,
+              "qps": 20105.25,
+              "p99_ms": 0.0827
+            },
+            "upper_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.90724,
+              "qps": 12857.74,
+              "p99_ms": 0.1254
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 17505.17517155932,
+            "interpolated_p99_ms": 0.09855696572454847,
+            "interpolated_mean_ms": 0.057091353228823784,
+            "alpha": 0.141944,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.89356,
+              "qps": 18337.11,
+              "p99_ms": 0.0951
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.93893,
+              "qps": 13221.23,
+              "p99_ms": 0.1223
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.7568305045111369,
+          "p99_ratio_faiss_over_rust": 0.8081576684976296,
+          "p99_ratio_rust_over_faiss": 1.2373823066716751,
+          "mean_ms_ratio_faiss_over_rust": 0.756176580711621
+        },
+        {
+          "target_recall": 0.95,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 9424.994889876263,
+            "interpolated_p99_ms": 0.16219793234453692,
+            "interpolated_mean_ms": 0.10609471450207796,
+            "alpha": 0.040139,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.94919,
+              "qps": 9514.21,
+              "p99_ms": 0.1608
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.96937,
+              "qps": 7523.78,
+              "p99_ms": 0.1995
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 11757.671219392103,
+            "interpolated_p99_ms": 0.1367995936341735,
+            "interpolated_mean_ms": 0.08501351625837467,
+            "alpha": 0.476744,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.93893,
+              "qps": 13221.23,
+              "p99_ms": 0.1223
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.96215,
+              "qps": 10337.13,
+              "p99_ms": 0.1547
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8016038817560639,
+          "p99_ratio_faiss_over_rust": 0.8434114520250918,
+          "p99_ratio_rust_over_faiss": 1.1856609221974965,
+          "mean_ms_ratio_faiss_over_rust": 0.8012983178036602
+        },
+        {
+          "target_recall": 0.98,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 6309.39276566171,
+            "interpolated_p99_ms": 0.22816730151447853,
+            "interpolated_mean_ms": 0.158505426448539,
+            "alpha": 0.986085,
+            "lower_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.96937,
+              "qps": 7523.78,
+              "p99_ms": 0.1995
+            },
+            "upper_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.98015,
+              "qps": 6293.74,
+              "p99_ms": 0.2286
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 7377.766169552627,
+            "interpolated_p99_ms": 0.2153086710527231,
+            "interpolated_mean_ms": 0.13554358225890978,
+            "alpha": 0.406602,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.97495,
+              "qps": 8390.09,
+              "p99_ms": 0.1942
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.98737,
+              "qps": 6115.46,
+              "p99_ms": 0.2503
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8551901240378155,
+          "p99_ratio_faiss_over_rust": 0.9436438509093755,
+          "p99_ratio_rust_over_faiss": 1.0597218421296497,
+          "mean_ms_ratio_faiss_over_rust": 0.8551352801975893
+        },
+        {
+          "target_recall": 0.99,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 4946.132057624797,
+            "interpolated_p99_ms": 0.2961605750401061,
+            "interpolated_mean_ms": 0.20216371369643688,
+            "alpha": 0.952611,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.98015,
+              "qps": 6293.74,
+              "p99_ms": 0.2286
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.99049,
+              "qps": 4887.2,
+              "p99_ms": 0.3
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 5371.420494910052,
+            "interpolated_p99_ms": 0.27978410536007164,
+            "interpolated_mean_ms": 0.1861564564381433,
+            "alpha": 0.395489,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.98737,
+              "qps": 6115.46,
+              "p99_ms": 0.2503
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99402,
+              "qps": 4405.27,
+              "p99_ms": 0.3317
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.9208238420938637,
+          "p99_ratio_faiss_over_rust": 0.9447040860255732,
+          "p99_ratio_rust_over_faiss": 1.0585325233503118,
+          "mean_ms_ratio_faiss_over_rust": 0.9208203244508576
+        },
+        {
+          "target_recall": 0.995,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 3879.398042974816,
+            "interpolated_p99_ms": 0.37022617978450867,
+            "interpolated_mean_ms": 0.2578089806011643,
+            "alpha": 0.849341,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.99049,
+              "qps": 4887.2,
+              "p99_ms": 0.3
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.9958,
+              "qps": 3723.69,
+              "p99_ms": 0.3843
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 3970.029816014752,
+            "interpolated_p99_ms": 0.36683444959283684,
+            "interpolated_mean_ms": 0.2518925060199347,
+            "alpha": 0.259259,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99402,
+              "qps": 4405.27,
+              "p99_ms": 0.3317
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.9978,
+              "qps": 2949.25,
+              "p99_ms": 0.4891
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.977171009478484,
+          "p99_ratio_faiss_over_rust": 0.990838761878898,
+          "p99_ratio_rust_over_faiss": 1.0092459424010924,
+          "mean_ms_ratio_faiss_over_rust": 0.9770509368314731
+        }
+      ]
+    },
+    {
+      "scale_vectors": 100000,
+      "scale_label": "100k",
+      "pair_label": "C2 T=6 vs FAISS C2 T=6",
+      "rust_report": "data/bench_staging/phase7/rust_n100000_C2_t6.json",
+      "faiss_report": "data/bench_staging/phase7/faiss_n100000_C2_t6.json",
+      "rust_config_id": "C2",
+      "faiss_config_id": "C2",
+      "threads": 6,
+      "compare_mode": "multithread",
+      "rust_recall_range": [
+        0.82103,
+        0.99702
+      ],
+      "faiss_recall_range": [
+        0.77861,
+        0.9999
+      ],
+      "targets": [
+        {
+          "target_recall": 0.9,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 78110.68526057892,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.012829875249928213,
+            "alpha": 0.824752,
+            "lower_bracket": {
+              "ef_search": 10,
+              "recall_at_k": 0.82103,
+              "qps": 113581.38,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.91678,
+              "qps": 72137.48,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 86880.0072162386,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.011499018102485358,
+            "alpha": 0.141944,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.89356,
+              "qps": 92518.41,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.93893,
+              "qps": 59407.36,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8990639821905928,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.8962688941616715
+        },
+        {
+          "target_recall": 0.95,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 44974.98876531529,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.022216141701614664,
+            "alpha": 0.893011,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.91678,
+              "qps": 72137.48,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.95398,
+              "qps": 42499.89,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 57005.4426520492,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.017544651625165216,
+            "alpha": 0.476744,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.93893,
+              "qps": 59407.36,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.96215,
+              "qps": 54480.83,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.7889595567187225,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.7897254105059149
+        },
+        {
+          "target_recall": 0.98,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 29731.591757163038,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.03366258931538042,
+            "alpha": 0.978628,
+            "lower_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.9713,
+              "qps": 41043.81,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.98019,
+              "qps": 29522.97,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 38168.91681874028,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.026193060935911196,
+            "alpha": 0.406602,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.97495,
+              "qps": 41276.57,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.98737,
+              "qps": 34048.59,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.7789477468893049,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.7781059469463806
+        },
+        {
+          "target_recall": 0.99,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 21336.873883329958,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.04689649765205636,
+            "alpha": 0.238589,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.98885,
+              "qps": 22246.08,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99367,
+              "qps": 18676.51,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 29542.47114945164,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.03388580220382668,
+            "alpha": 0.395489,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.98737,
+              "qps": 34048.59,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99402,
+              "qps": 23779.91,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.7222440457126759,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.7225657330583368
+        },
+        {
+          "target_recall": 0.995,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 14727.369249577723,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.06787399986914316,
+            "alpha": 0.633333,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99367,
+              "qps": 18676.51,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.99577,
+              "qps": 12834.97,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 21572.577483327328,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.04638779967788221,
+            "alpha": 0.259259,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99402,
+              "qps": 23779.91,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.9978,
+              "qps": 16331.33,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.6826893662085571,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.683439899922135
+        }
+      ]
+    },
+    {
+      "scale_vectors": 100000,
+      "scale_label": "100k",
+      "pair_label": "C2 T=16 vs FAISS C2 T=16",
+      "rust_report": "data/bench_staging/phase7/rust_n100000_C2_t16.json",
+      "faiss_report": "data/bench_staging/phase7/faiss_n100000_C2_t16.json",
+      "rust_config_id": "C2",
+      "faiss_config_id": "C2",
+      "threads": 16,
+      "compare_mode": "multithread",
+      "rust_recall_range": [
+        0.82103,
+        0.99702
+      ],
+      "faiss_recall_range": [
+        0.77861,
+        0.9999
+      ],
+      "targets": [
+        {
+          "target_recall": 0.9,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 86168.96463607113,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.01162799261738405,
+            "alpha": 0.824752,
+            "lower_bracket": {
+              "ef_search": 10,
+              "recall_at_k": 0.82103,
+              "qps": 135310.49,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.91678,
+              "qps": 78290.27,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 131611.88874922672,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.007574562262532391,
+            "alpha": 0.141944,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.89356,
+              "qps": 140362.3,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.93893,
+              "qps": 89187.53,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.6547202190848994,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.6514075568992269
+        },
+        {
+          "target_recall": 0.95,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 76651.73399496188,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.01306757020359704,
+            "alpha": 0.893011,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.91678,
+              "qps": 78290.27,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.95398,
+              "qps": 76457.74,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 78732.69067841528,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.01270889773218777,
+            "alpha": 0.476744,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.93893,
+              "qps": 89187.53,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.96215,
+              "qps": 68663.07,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.9735693437437176,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.9725524741156133
+        },
+        {
+          "target_recall": 0.98,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 46706.296823378194,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.021373622341986028,
+            "alpha": 0.978628,
+            "lower_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.9713,
+              "qps": 49535.85,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.98019,
+              "qps": 46646.34,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 55665.12470277565,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.017929854625820477,
+            "alpha": 0.406602,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.97495,
+              "qps": 65176.6,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.98737,
+              "qps": 44218.24,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.83905851415526,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.8388776754326447
+        },
+        {
+          "target_recall": 0.99,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 31781.79903518778,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.031509120806303054,
+            "alpha": 0.238589,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.98885,
+              "qps": 33056.83,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99367,
+              "qps": 28032.53,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 38827.09855003064,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.025739056103196153,
+            "alpha": 0.395489,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.98737,
+              "qps": 44218.24,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99402,
+              "qps": 31829.14,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8185468454264064,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.8168763660980136
+        },
+        {
+          "target_recall": 0.995,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 23267.19630293829,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.043005516809182666,
+            "alpha": 0.633333,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99367,
+              "qps": 28032.53,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.99577,
+              "qps": 20887.99,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 28597.867007753808,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.03495707767889713,
+            "alpha": 0.259259,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99402,
+              "qps": 31829.14,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.9978,
+              "qps": 21062.09,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8135990106055742,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.8128510077905398
+        }
+      ]
+    },
+    {
+      "scale_vectors": 1000000,
+      "scale_label": "1M",
+      "pair_label": "C1 vs FAISS C1",
+      "rust_report": "data/bench_staging/phase7/rust_n1000000_C1.json",
+      "faiss_report": "data/bench_staging/phase7/faiss_n1000000_C1.json",
+      "rust_config_id": "C1",
+      "faiss_config_id": "C1",
+      "threads": 1,
+      "compare_mode": "single",
+      "rust_recall_range": [
+        0.57222,
+        0.9947
+      ],
+      "faiss_recall_range": [
+        0.57026,
+        0.98955
+      ],
+      "targets": [
+        {
+          "target_recall": 0.9,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 4044.436633260796,
+            "interpolated_p99_ms": 0.36667313219418834,
+            "interpolated_mean_ms": 0.2472425022079139,
+            "alpha": 0.98967,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.86072,
+              "qps": 5216.22,
+              "p99_ms": 0.2955
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.90041,
+              "qps": 4033.71,
+              "p99_ms": 0.3675
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 4980.185113317943,
+            "interpolated_p99_ms": 0.4383989215503072,
+            "interpolated_mean_ms": 0.2007883351675628,
+            "alpha": 0.163298,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.89491,
+              "qps": 5299.08,
+              "p99_ms": 0.4408
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.92608,
+              "qps": 3623.55,
+              "p99_ms": 0.4263
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8121056830689322,
+          "p99_ratio_faiss_over_rust": 1.1956123398704142,
+          "p99_ratio_rust_over_faiss": 0.8363915013694025,
+          "mean_ms_ratio_faiss_over_rust": 0.8121109169115012
+        },
+        {
+          "target_recall": 0.95,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 2445.9455649142374,
+            "interpolated_p99_ms": 0.5962722234030061,
+            "interpolated_mean_ms": 0.40883765193194177,
+            "alpha": 0.627219,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.93304,
+              "qps": 3021.81,
+              "p99_ms": 0.4897
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.96008,
+              "qps": 2157.12,
+              "p99_ms": 0.6703
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 2651.7239148039844,
+            "interpolated_p99_ms": 0.5953295323574913,
+            "interpolated_mean_ms": 0.3770754427963728,
+            "alpha": 0.918234,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.92608,
+              "qps": 3623.55,
+              "p99_ms": 0.4263
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.95213,
+              "qps": 2579.01,
+              "p99_ms": 0.6133
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.9223982750463077,
+          "p99_ratio_faiss_over_rust": 0.9984190257259767,
+          "p99_ratio_rust_over_faiss": 1.0015834777115487,
+          "mean_ms_ratio_faiss_over_rust": 0.9223109491371985
+        },
+        {
+          "target_recall": 0.98,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 1356.9041620814185,
+            "interpolated_p99_ms": 1.0779338474433178,
+            "interpolated_mean_ms": 0.7370017888294313,
+            "alpha": 0.558333,
+            "lower_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.9733,
+              "qps": 1672.37,
+              "p99_ms": 0.9109
+            },
+            "upper_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.9853,
+              "qps": 1150.1,
+              "p99_ms": 1.2315
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 1081.5160649624834,
+            "interpolated_p99_ms": 1.4867549829711126,
+            "interpolated_mean_ms": 0.924621704002675,
+            "alpha": 0.303448,
+            "lower_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.97824,
+              "qps": 1198.73,
+              "p99_ms": 1.3486
+            },
+            "upper_bracket": {
+              "ef_search": 400,
+              "recall_at_k": 0.98404,
+              "qps": 853.99,
+              "p99_ms": 1.8598
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.2546315362670901,
+          "p99_ratio_faiss_over_rust": 1.379263659358551,
+          "p99_ratio_rust_over_faiss": 0.725024539880262,
+          "mean_ms_ratio_faiss_over_rust": 1.2545718585992003
+        },
+        {
+          "target_recall": 0.99,
+          "status": "out_of_range",
+          "rust_status": "in_range",
+          "faiss_status": "out_of_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 865.7404922195145,
+            "interpolated_p99_ms": 1.5942593949939925,
+            "interpolated_mean_ms": 1.1550958561216285,
+            "alpha": 0.928854,
+            "lower_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.9853,
+              "qps": 1150.1,
+              "p99_ms": 1.2315
+            },
+            "upper_bracket": {
+              "ef_search": 400,
+              "recall_at_k": 0.99036,
+              "qps": 847.11,
+              "p99_ms": 1.6261
+            }
+          },
+          "faiss": null,
+          "qps_ratio_rust_over_faiss": null,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": null
+        },
+        {
+          "target_recall": 0.995,
+          "status": "out_of_range",
+          "rust_status": "out_of_range",
+          "faiss_status": "out_of_range",
+          "rust": null,
+          "faiss": null,
+          "qps_ratio_rust_over_faiss": null,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": null
+        }
+      ]
+    },
+    {
+      "scale_vectors": 1000000,
+      "scale_label": "1M",
+      "pair_label": "C2 vs FAISS C2",
+      "rust_report": "data/bench_staging/phase7/rust_n1000000_C2.json",
+      "faiss_report": "data/bench_staging/phase7/faiss_n1000000_C2.json",
+      "rust_config_id": "C2",
+      "faiss_config_id": "C2",
+      "threads": 1,
+      "compare_mode": "single",
+      "rust_recall_range": [
+        0.73315,
+        0.99804
+      ],
+      "faiss_recall_range": [
+        0.69554,
+        0.99872
+      ],
+      "targets": [
+        {
+          "target_recall": 0.9,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 4544.904389782343,
+            "interpolated_p99_ms": 0.34758511007264936,
+            "interpolated_mean_ms": 0.22004844623483277,
+            "alpha": 0.997433,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.84949,
+              "qps": 5936.97,
+              "p99_ms": 0.3057
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.90013,
+              "qps": 4541.78,
+              "p99_ms": 0.3477
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 6950.891053813641,
+            "interpolated_p99_ms": 0.3274537064373707,
+            "interpolated_mean_ms": 0.14388284410197297,
+            "alpha": 0.449288,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.88485,
+              "qps": 7711.07,
+              "p99_ms": 0.3313
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.91857,
+              "qps": 6120.56,
+              "p99_ms": 0.3228
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.6538592469074536,
+          "p99_ratio_faiss_over_rust": 0.9420820885248192,
+          "p99_ratio_rust_over_faiss": 1.061478625037732,
+          "mean_ms_ratio_faiss_over_rust": 0.6538689391536222
+        },
+        {
+          "target_recall": 0.95,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 2755.8408038906973,
+            "interpolated_p99_ms": 1.0875949830105325,
+            "interpolated_mean_ms": 0.3628478899497939,
+            "alpha": 0.144455,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.94703,
+              "qps": 2875.88,
+              "p99_ms": 0.9864
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96759,
+              "qps": 2140.86,
+              "p99_ms": 1.9394
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 4350.540009305361,
+            "interpolated_p99_ms": 0.7316379945137925,
+            "interpolated_mean_ms": 0.22983909572082756,
+            "alpha": 0.477091,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.93865,
+              "qps": 5145.46,
+              "p99_ms": 0.9163
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96244,
+              "qps": 3619.62,
+              "p99_ms": 0.5717
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.6334479853067055,
+          "p99_ratio_faiss_over_rust": 0.6727118145475182,
+          "p99_ratio_rust_over_faiss": 1.4865206443157588,
+          "mean_ms_ratio_faiss_over_rust": 0.633430983304408
+        },
+        {
+          "target_recall": 0.98,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 1516.7090676613834,
+            "interpolated_p99_ms": 1.2385032130940068,
+            "interpolated_mean_ms": 0.6593339326260412,
+            "alpha": 0.953149,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96759,
+              "qps": 2140.86,
+              "p99_ms": 1.9394
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.98061,
+              "qps": 1491.23,
+              "p99_ms": 1.2115
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 2430.2265269034797,
+            "interpolated_p99_ms": 0.597793019009384,
+            "interpolated_mean_ms": 0.41152045521144404,
+            "alpha": 0.16729,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.97821,
+              "qps": 2567.67,
+              "p99_ms": 0.5338
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.98891,
+              "qps": 1848.07,
+              "p99_ms": 1.0503
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.6241019307751231,
+          "p99_ratio_faiss_over_rust": 0.48267377322016636,
+          "p99_ratio_rust_over_faiss": 2.0717927003335666,
+          "mean_ms_ratio_faiss_over_rust": 0.6241457247201151
+        },
+        {
+          "target_recall": 0.99,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 1130.8119370704728,
+            "interpolated_p99_ms": 3.477742438072503,
+            "interpolated_mean_ms": 0.884357038246481,
+            "alpha": 0.995758,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.98061,
+              "qps": 1491.23,
+              "p99_ms": 1.2115
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.99004,
+              "qps": 1129.48,
+              "p99_ms": 3.4934
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 1708.6543205130108,
+            "interpolated_p99_ms": 1.2067853346267157,
+            "interpolated_mean_ms": 0.5852485750900088,
+            "alpha": 0.23956,
+            "lower_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.98891,
+              "qps": 1848.07,
+              "p99_ms": 1.0503
+            },
+            "upper_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99346,
+              "qps": 1332.06,
+              "p99_ms": 1.8754
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.6618143433078698,
+          "p99_ratio_faiss_over_rust": 0.34700250410020644,
+          "p99_ratio_rust_over_faiss": 2.8818235839336266,
+          "mean_ms_ratio_faiss_over_rust": 0.6617786140430908
+        },
+        {
+          "target_recall": 0.995,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 724.3616202761667,
+            "interpolated_p99_ms": 1.7264499953898846,
+            "interpolated_mean_ms": 1.3804927726583256,
+            "alpha": 0.446043,
+            "lower_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99376,
+              "qps": 725.04,
+              "p99_ms": 1.5165
+            },
+            "upper_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.99654,
+              "qps": 723.52,
+              "p99_ms": 2.0281
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 1068.2958621057103,
+            "interpolated_p99_ms": 2.119661308342452,
+            "interpolated_mean_ms": 0.9360589920054463,
+            "alpha": 0.470948,
+            "lower_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99346,
+              "qps": 1332.06,
+              "p99_ms": 1.8754
+            },
+            "upper_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.99673,
+              "qps": 833.75,
+              "p99_ms": 2.4322
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.6780533801267214,
+          "p99_ratio_faiss_over_rust": 1.2277571397970135,
+          "p99_ratio_rust_over_faiss": 0.8144933290026163,
+          "mean_ms_ratio_faiss_over_rust": 0.6780614940873164
+        }
+      ]
+    },
+    {
+      "scale_vectors": 1000000,
+      "scale_label": "1M",
+      "pair_label": "C3 vs FAISS C3",
+      "rust_report": "data/bench_staging/phase7/rust_n1000000_C3.json",
+      "faiss_report": "data/bench_staging/phase7/faiss_n1000000_C3.json",
+      "rust_config_id": "C3",
+      "faiss_config_id": "C3",
+      "threads": 1,
+      "compare_mode": "single",
+      "rust_recall_range": [
+        0.84614,
+        0.99944
+      ],
+      "faiss_recall_range": [
+        0.7752,
+        0.99939
+      ],
+      "targets": [
+        {
+          "target_recall": 0.9,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 3826.102457661566,
+            "interpolated_p99_ms": 1.1506073530383771,
+            "interpolated_mean_ms": 0.26136433214684063,
+            "alpha": 0.647356,
+            "lower_bracket": {
+              "ef_search": 10,
+              "recall_at_k": 0.84614,
+              "qps": 4650.24,
+              "p99_ms": 0.6097
+            },
+            "upper_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.92934,
+              "qps": 3440.38,
+              "p99_ms": 1.6262
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 7617.678513607078,
+            "interpolated_p99_ms": 0.2275777066223087,
+            "interpolated_mean_ms": 0.131255457033565,
+            "alpha": 0.25853,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.88818,
+              "qps": 8229.43,
+              "p99_ms": 0.2143
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.9339,
+              "qps": 6103.92,
+              "p99_ms": 0.2704
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.5022662023380471,
+          "p99_ratio_faiss_over_rust": 0.19778919891425212,
+          "p99_ratio_rust_over_faiss": 5.055887811313355,
+          "mean_ms_ratio_faiss_over_rust": 0.502193455225645
+        },
+        {
+          "target_recall": 0.95,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 3065.9164904717363,
+            "interpolated_p99_ms": 0.7204297811896675,
+            "interpolated_mean_ms": 0.32620180467138854,
+            "alpha": 0.676268,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.92934,
+              "qps": 3440.38,
+              "p99_ms": 1.6262
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.95989,
+              "qps": 2901.37,
+              "p99_ms": 0.4879
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 5223.065847676379,
+            "interpolated_p99_ms": 0.33102122586101546,
+            "interpolated_mean_ms": 0.1914713061792819,
+            "alpha": 0.703364,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.9339,
+              "qps": 6103.92,
+              "p99_ms": 0.2704
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.95679,
+              "qps": 4890.81,
+              "p99_ms": 0.3605
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.5869955654179032,
+          "p99_ratio_faiss_over_rust": 0.45947743208837105,
+          "p99_ratio_rust_over_faiss": 2.176385454786973,
+          "mean_ms_ratio_faiss_over_rust": 0.5869719401833708
+        },
+        {
+          "target_recall": 0.98,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 2356.282561652107,
+            "interpolated_p99_ms": 0.6178290570316194,
+            "interpolated_mean_ms": 0.4243952949922617,
+            "alpha": 0.660147,
+            "lower_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.9746,
+              "qps": 2662.89,
+              "p99_ms": 0.5433
+            },
+            "upper_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.98278,
+              "qps": 2212.47,
+              "p99_ms": 0.6601
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 3338.4659155316863,
+            "interpolated_p99_ms": 0.5059381979676262,
+            "interpolated_mean_ms": 0.29952250763920446,
+            "alpha": 0.730935,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.96984,
+              "qps": 4101.28,
+              "p99_ms": 0.419
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.98374,
+              "qps": 3094.91,
+              "p99_ms": 0.5423
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.7057979986226229,
+          "p99_ratio_faiss_over_rust": 0.818896735609075,
+          "p99_ratio_rust_over_faiss": 1.2211551915104715,
+          "mean_ms_ratio_faiss_over_rust": 0.7057630260596218
+        },
+        {
+          "target_recall": 0.99,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 1676.3645510261185,
+            "interpolated_p99_ms": 0.8848916985569091,
+            "interpolated_mean_ms": 0.596521091628581,
+            "alpha": 0.89246,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.98278,
+              "qps": 2212.47,
+              "p99_ms": 0.6601
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.99087,
+              "qps": 1621.24,
+              "p99_ms": 0.9167
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 2422.2331467100666,
+            "interpolated_p99_ms": 0.6988064499358639,
+            "interpolated_mean_ms": 0.41286290027835726,
+            "alpha": 0.754217,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.98374,
+              "qps": 3094.91,
+              "p99_ms": 0.5423
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99204,
+              "qps": 2236.31,
+              "p99_ms": 0.759
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.692073986892218,
+          "p99_ratio_faiss_over_rust": 0.7897084480230575,
+          "p99_ratio_rust_over_faiss": 1.2662901131466717,
+          "mean_ms_ratio_faiss_over_rust": 0.6921178581484642
+        },
+        {
+          "target_recall": 0.995,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 1265.5262274995414,
+            "interpolated_p99_ms": 1.177146681407017,
+            "interpolated_mean_ms": 0.7902193487506737,
+            "alpha": 0.851546,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.99087,
+              "qps": 1621.24,
+              "p99_ms": 0.9167
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99572,
+              "qps": 1212.04,
+              "p99_ms": 1.2296
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 1752.0735163687011,
+            "interpolated_p99_ms": 0.9626256651767913,
+            "interpolated_mean_ms": 0.5707961700397706,
+            "alpha": 0.656319,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99204,
+              "qps": 2236.31,
+              "p99_ms": 0.759
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.99655,
+              "qps": 1541.9,
+              "p99_ms": 1.0902
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.722302012830167,
+          "p99_ratio_faiss_over_rust": 0.8177618646693939,
+          "p99_ratio_rust_over_faiss": 1.2228498823484286,
+          "mean_ms_ratio_faiss_over_rust": 0.7223262388375984
+        }
+      ]
+    },
+    {
+      "scale_vectors": 1000000,
+      "scale_label": "1M",
+      "pair_label": "C2-nkp vs FAISS C2",
+      "rust_report": "data/bench_staging/phase7/rust_n1000000_C2-nkp.json",
+      "faiss_report": "data/bench_staging/phase7/faiss_n1000000_C2.json",
+      "rust_config_id": "C2-nkp",
+      "faiss_config_id": "C2",
+      "threads": 1,
+      "compare_mode": "single",
+      "rust_recall_range": [
+        0.71017,
+        0.99914
+      ],
+      "faiss_recall_range": [
+        0.69554,
+        0.99872
+      ],
+      "targets": [
+        {
+          "target_recall": 0.9,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 5315.7338218280165,
+            "interpolated_p99_ms": 0.2841477916413938,
+            "interpolated_mean_ms": 0.1880805411964872,
+            "alpha": 0.256886,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.8917,
+              "qps": 5607.11,
+              "p99_ms": 0.2684
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.92401,
+              "qps": 4555.34,
+              "p99_ms": 0.3351
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 6950.891053813641,
+            "interpolated_p99_ms": 0.3274537064373707,
+            "interpolated_mean_ms": 0.14388284410197297,
+            "alpha": 0.449288,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.88485,
+              "qps": 7711.07,
+              "p99_ms": 0.3313
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.91857,
+              "qps": 6120.56,
+              "p99_ms": 0.3228
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.7647557386058458,
+          "p99_ratio_faiss_over_rust": 1.15240630428911,
+          "p99_ratio_rust_over_faiss": 0.8677495049082316,
+          "mean_ms_ratio_faiss_over_rust": 0.7650065402122539
+        },
+        {
+          "target_recall": 0.95,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 3413.068911737918,
+            "interpolated_p99_ms": 0.4500066044334516,
+            "interpolated_mean_ms": 0.29299640430145246,
+            "alpha": 0.31122,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.94301,
+              "qps": 3787.97,
+              "p99_ms": 0.4061
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96547,
+              "qps": 2710.03,
+              "p99_ms": 0.5648
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 4350.540009305361,
+            "interpolated_p99_ms": 0.7316379945137925,
+            "interpolated_mean_ms": 0.22983909572082756,
+            "alpha": 0.477091,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.93865,
+              "qps": 5145.46,
+              "p99_ms": 0.9163
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96244,
+              "qps": 3619.62,
+              "p99_ms": 0.5717
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.7845161530379474,
+          "p99_ratio_faiss_over_rust": 1.6258383483835945,
+          "p99_ratio_rust_over_faiss": 0.6150672980460807,
+          "mean_ms_ratio_faiss_over_rust": 0.7844434004874515
+        },
+        {
+          "target_recall": 0.98,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 2075.279097009403,
+            "interpolated_p99_ms": 0.6354297610834682,
+            "interpolated_mean_ms": 0.4818482836184768,
+            "alpha": 0.991132,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96547,
+              "qps": 2710.03,
+              "p99_ms": 0.5648
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.98013,
+              "qps": 2070.33,
+              "p99_ms": 0.6361
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 2430.2265269034797,
+            "interpolated_p99_ms": 0.597793019009384,
+            "interpolated_mean_ms": 0.41152045521144404,
+            "alpha": 0.16729,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.97821,
+              "qps": 2567.67,
+              "p99_ms": 0.5338
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.98891,
+              "qps": 1848.07,
+              "p99_ms": 1.0503
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.853944714221213,
+          "p99_ratio_faiss_over_rust": 0.940769626512441,
+          "p99_ratio_rust_over_faiss": 1.0629594874434178,
+          "mean_ms_ratio_faiss_over_rust": 0.8540457011096926
+        },
+        {
+          "target_recall": 0.99,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 1585.4170940992371,
+            "interpolated_p99_ms": 0.8550743019796306,
+            "interpolated_mean_ms": 0.6307230614307155,
+            "alpha": 0.98209,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.98013,
+              "qps": 2070.33,
+              "p99_ms": 0.6361
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.99018,
+              "qps": 1577.72,
+              "p99_ms": 0.8597
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 1708.6543205130108,
+            "interpolated_p99_ms": 1.2067853346267157,
+            "interpolated_mean_ms": 0.5852485750900088,
+            "alpha": 0.23956,
+            "lower_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.98891,
+              "qps": 1848.07,
+              "p99_ms": 1.0503
+            },
+            "upper_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99346,
+              "qps": 1332.06,
+              "p99_ms": 1.8754
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.9278746877386103,
+          "p99_ratio_faiss_over_rust": 1.4113221878295477,
+          "p99_ratio_rust_over_faiss": 0.7085554302365824,
+          "mean_ms_ratio_faiss_over_rust": 0.9279010248371867
+        },
+        {
+          "target_recall": 0.995,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 1107.9369582370248,
+            "interpolated_p99_ms": 1.3534524589987786,
+            "interpolated_mean_ms": 0.9026102887578881,
+            "alpha": 0.184375,
+            "lower_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99441,
+              "qps": 1234.01,
+              "p99_ms": 1.1311
+            },
+            "upper_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.99761,
+              "qps": 687.81,
+              "p99_ms": 2.9939
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 1068.2958621057103,
+            "interpolated_p99_ms": 2.119661308342452,
+            "interpolated_mean_ms": 0.9360589920054463,
+            "alpha": 0.470948,
+            "lower_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99346,
+              "qps": 1332.06,
+              "p99_ms": 1.8754
+            },
+            "upper_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.99673,
+              "qps": 833.75,
+              "p99_ms": 2.4322
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.0371068517041508,
+          "p99_ratio_faiss_over_rust": 1.566114342804829,
+          "p99_ratio_rust_over_faiss": 0.6385229817952196,
+          "mean_ms_ratio_faiss_over_rust": 1.0370577464761543
+        }
+      ]
+    },
+    {
+      "scale_vectors": 1000000,
+      "scale_label": "1M",
+      "pair_label": "C2 T=6 vs FAISS C2 T=6",
+      "rust_report": "data/bench_staging/phase7/rust_n1000000_C2_t6.json",
+      "faiss_report": "data/bench_staging/phase7/faiss_n1000000_C2_t6.json",
+      "rust_config_id": "C2",
+      "faiss_config_id": "C2",
+      "threads": 6,
+      "compare_mode": "multithread",
+      "rust_recall_range": [
+        0.73315,
+        0.99804
+      ],
+      "faiss_recall_range": [
+        0.69554,
+        0.99872
+      ],
+      "targets": [
+        {
+          "target_recall": 0.9,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 23210.0407171914,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.04306809598341893,
+            "alpha": 0.997433,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.84949,
+              "qps": 30963.25,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.90013,
+              "qps": 23192.83,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 26126.04547442395,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.038235855724581505,
+            "alpha": 0.449288,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.88485,
+              "qps": 30258.15,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.91857,
+              "qps": 21822.76,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8883870595690738,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.8878000025657549
+        },
+        {
+          "target_recall": 0.95,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 15064.440926584792,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.06639802447988889,
+            "alpha": 0.144455,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.94703,
+              "qps": 15605.16,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96759,
+              "qps": 12224.97,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 17254.83252078489,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.057961243657954915,
+            "alpha": 0.477091,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.93865,
+              "qps": 20042.63,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96244,
+              "qps": 14642.67,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8730563399232308,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.872936267486552
+        },
+        {
+          "target_recall": 0.98,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 8764.921283253134,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.11411703342005174,
+            "alpha": 0.953149,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96759,
+              "qps": 12224.97,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.98061,
+              "qps": 8622.74,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 9331.466376056216,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.10717714358905102,
+            "alpha": 0.16729,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.97821,
+              "qps": 9700.74,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.98891,
+              "qps": 7692.22,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.9392865954854865,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.9391862053979639
+        },
+        {
+          "target_recall": 0.99,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 6202.299117168361,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.16127346649312604,
+            "alpha": 0.995758,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.98061,
+              "qps": 8622.74,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.99004,
+              "qps": 6193.6,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 7091.580972203539,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.1410052492007803,
+            "alpha": 0.23956,
+            "lower_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.98891,
+              "qps": 7692.22,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99346,
+              "qps": 5478.51,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8746003382714171,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.8743239186638948
+        },
+        {
+          "target_recall": 0.995,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 4286.212088983557,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.2332911470973033,
+            "alpha": 0.446043,
+            "lower_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99376,
+              "qps": 4916.47,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.99654,
+              "qps": 3614.76,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 4677.963319623523,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.21375752492397349,
+            "alpha": 0.470948,
+            "lower_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99346,
+              "qps": 5478.51,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.99673,
+              "qps": 3917.3,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.9162560277040621,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.9162693380508667
+        }
+      ]
+    },
+    {
+      "scale_vectors": 1000000,
+      "scale_label": "1M",
+      "pair_label": "C2 T=16 vs FAISS C2 T=16",
+      "rust_report": "data/bench_staging/phase7/rust_n1000000_C2_t16.json",
+      "faiss_report": "data/bench_staging/phase7/faiss_n1000000_C2_t16.json",
+      "rust_config_id": "C2",
+      "faiss_config_id": "C2",
+      "threads": 16,
+      "compare_mode": "multithread",
+      "rust_recall_range": [
+        0.73315,
+        0.99804
+      ],
+      "faiss_recall_range": [
+        0.69554,
+        0.99872
+      ],
+      "targets": [
+        {
+          "target_recall": 0.9,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 27707.894987716507,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.03607377581793651,
+            "alpha": 0.997433,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.84949,
+              "qps": 36745.87,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.90013,
+              "qps": 27687.77,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 33180.22149440831,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.03010407049469791,
+            "alpha": 0.449288,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.88485,
+              "qps": 35668.25,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.91857,
+              "qps": 30366.02,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8350726348341578,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.8345139872973774
+        },
+        {
+          "target_recall": 0.95,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 18608.50723928399,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.053774818132150966,
+            "alpha": 0.144455,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.94703,
+              "qps": 19246.87,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96759,
+              "qps": 15238.93,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 21054.003895458405,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.047509815950744494,
+            "alpha": 0.477091,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.93865,
+              "qps": 23721.05,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96244,
+              "qps": 18474.0,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8838464803028778,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.8834956137646006
+        },
+        {
+          "target_recall": 0.98,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 11026.700044063495,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.09064750693681145,
+            "alpha": 0.953149,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96759,
+              "qps": 15238.93,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.98061,
+              "qps": 10852.73,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 12450.714627038871,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.08032332846060211,
+            "alpha": 0.16729,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.97821,
+              "qps": 13141.95,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.98891,
+              "qps": 9514.61,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8856278835687966,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.8861063163777233
+        },
+        {
+          "target_recall": 0.99,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 8086.638338635042,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.12364476717677035,
+            "alpha": 0.995758,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.98061,
+              "qps": 10852.73,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.99004,
+              "qps": 8076.51,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 8931.534389448429,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.11197070943771203,
+            "alpha": 0.23956,
+            "lower_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.98891,
+              "qps": 9514.61,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99346,
+              "qps": 7307.08,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.9054030344649926,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.9055838916145287
+        },
+        {
+          "target_recall": 0.995,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 5386.49471757708,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.18569045164898654,
+            "alpha": 0.446043,
+            "lower_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99376,
+              "qps": 6095.59,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.99654,
+              "qps": 4619.58,
+              "p99_ms": null
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 6164.291010484027,
+            "interpolated_p99_ms": null,
+            "interpolated_mean_ms": 0.16226278073372907,
+            "alpha": 0.470948,
+            "lower_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99346,
+              "qps": 7307.08,
+              "p99_ms": null
+            },
+            "upper_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.99673,
+              "qps": 5092.25,
+              "p99_ms": null
+            }
+          },
+          "qps_ratio_rust_over_faiss": 0.8738222625141974,
+          "p99_ratio_faiss_over_rust": null,
+          "p99_ratio_rust_over_faiss": null,
+          "mean_ms_ratio_faiss_over_rust": 0.8738348110674902
+        }
+      ]
+    }
+  ],
+  "internal_ablations": [
+    {
+      "scale_vectors": 100000,
+      "scale_label": "100k",
+      "pair_label": "Rust C2-nkp vs Rust C2",
+      "numerator_report": "data/bench_staging/phase7/rust_n100000_C2-nkp.json",
+      "denominator_report": "data/bench_staging/phase7/rust_n100000_C2.json",
+      "numerator_recall_range": [
+        0.79912,
+        0.99989
+      ],
+      "denominator_recall_range": [
+        0.82103,
+        0.99702
+      ],
+      "targets": [
+        {
+          "target_recall": 0.9,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 13248.450556647067,
+            "interpolated_p99_ms": 0.12195264558680302,
+            "interpolated_mean_ms": 0.07550002828055899,
+            "alpha": 0.933037,
+            "lower_bracket": {
+              "ef_search": 10,
+              "recall_at_k": 0.79912,
+              "qps": 20105.25,
+              "p99_ms": 0.0827
+            },
+            "upper_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.90724,
+              "qps": 12857.74,
+              "p99_ms": 0.1254
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 12532.027378886396,
+            "interpolated_p99_ms": 0.1282435749146542,
+            "interpolated_mean_ms": 0.0798230165288657,
+            "alpha": 0.824752,
+            "lower_bracket": {
+              "ef_search": 10,
+              "recall_at_k": 0.82103,
+              "qps": 17893.65,
+              "p99_ms": 0.0927
+            },
+            "upper_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.91678,
+              "qps": 11618.62,
+              "p99_ms": 0.1374
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.0571673805124047,
+          "p99_ratio_faiss_over_rust": 1.0515850172628969,
+          "p99_ratio_rust_over_faiss": 0.9509454619302543,
+          "mean_ms_ratio_faiss_over_rust": 1.0572581010465643
+        },
+        {
+          "target_recall": 0.95,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 9424.994889876263,
+            "interpolated_p99_ms": 0.16219793234453692,
+            "interpolated_mean_ms": 0.10609471450207796,
+            "alpha": 0.040139,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.94919,
+              "qps": 9514.21,
+              "p99_ms": 0.1608
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.96937,
+              "qps": 7523.78,
+              "p99_ms": 0.1995
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 8879.064230960217,
+            "interpolated_p99_ms": 0.1670440952421237,
+            "interpolated_mean_ms": 0.1126184190847443,
+            "alpha": 0.893011,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.91678,
+              "qps": 11618.62,
+              "p99_ms": 0.1374
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.95398,
+              "qps": 8597.56,
+              "p99_ms": 0.171
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.0614851570745993,
+          "p99_ratio_faiss_over_rust": 1.029878080611365,
+          "p99_ratio_rust_over_faiss": 0.9709887207293231,
+          "mean_ms_ratio_faiss_over_rust": 1.0614894400091777
+        },
+        {
+          "target_recall": 0.98,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 6309.39276566171,
+            "interpolated_p99_ms": 0.22816730151447853,
+            "interpolated_mean_ms": 0.158505426448539,
+            "alpha": 0.986085,
+            "lower_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.96937,
+              "qps": 7523.78,
+              "p99_ms": 0.1995
+            },
+            "upper_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.98015,
+              "qps": 6293.74,
+              "p99_ms": 0.2286
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 5892.348300461383,
+            "interpolated_p99_ms": 0.2503756463220156,
+            "interpolated_mean_ms": 0.16975544849098245,
+            "alpha": 0.978628,
+            "lower_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.9713,
+              "qps": 6822.88,
+              "p99_ms": 0.2115
+            },
+            "upper_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.98019,
+              "qps": 5873.51,
+              "p99_ms": 0.2513
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.0707772935228,
+          "p99_ratio_faiss_over_rust": 1.0973335997758111,
+          "p99_ratio_rust_over_faiss": 0.9112999002348087,
+          "mean_ms_ratio_faiss_over_rust": 1.070975627109498
+        },
+        {
+          "target_recall": 0.99,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 4946.132057624797,
+            "interpolated_p99_ms": 0.2961605750401061,
+            "interpolated_mean_ms": 0.20216371369643688,
+            "alpha": 0.952611,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.98015,
+              "qps": 6293.74,
+              "p99_ms": 0.2286
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.99049,
+              "qps": 4887.2,
+              "p99_ms": 0.3
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 4272.864797211971,
+            "interpolated_p99_ms": 0.3437803020401837,
+            "interpolated_mean_ms": 0.2340271271876107,
+            "alpha": 0.238589,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.98885,
+              "qps": 4572.13,
+              "p99_ms": 0.3159
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99367,
+              "qps": 3442.68,
+              "p99_ms": 0.4503
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.1575681170282128,
+          "p99_ratio_faiss_over_rust": 1.1607902300757922,
+          "p99_ratio_rust_over_faiss": 0.861482095636441,
+          "mean_ms_ratio_faiss_over_rust": 1.1576119319761755
+        },
+        {
+          "target_recall": 0.995,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 3879.398042974816,
+            "interpolated_p99_ms": 0.37022617978450867,
+            "interpolated_mean_ms": 0.2578089806011643,
+            "alpha": 0.849341,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.99049,
+              "qps": 4887.2,
+              "p99_ms": 0.3
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.9958,
+              "qps": 3723.69,
+              "p99_ms": 0.3843
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 2794.407377581648,
+            "interpolated_p99_ms": 0.5262817216168858,
+            "interpolated_mean_ms": 0.3578702384852256,
+            "alpha": 0.633333,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.99367,
+              "qps": 3442.68,
+              "p99_ms": 0.4503
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.99577,
+              "qps": 2476.47,
+              "p99_ms": 0.576
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.3882721875477393,
+          "p99_ratio_faiss_over_rust": 1.4215140645191806,
+          "p99_ratio_rust_over_faiss": 0.7034752767910493,
+          "mean_ms_ratio_faiss_over_rust": 1.3881216924667883
+        }
+      ]
+    },
+    {
+      "scale_vectors": 1000000,
+      "scale_label": "1M",
+      "pair_label": "Rust C2-nkp vs Rust C2",
+      "numerator_report": "data/bench_staging/phase7/rust_n1000000_C2-nkp.json",
+      "denominator_report": "data/bench_staging/phase7/rust_n1000000_C2.json",
+      "numerator_recall_range": [
+        0.71017,
+        0.99914
+      ],
+      "denominator_recall_range": [
+        0.73315,
+        0.99804
+      ],
+      "targets": [
+        {
+          "target_recall": 0.9,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 5315.7338218280165,
+            "interpolated_p99_ms": 0.2841477916413938,
+            "interpolated_mean_ms": 0.1880805411964872,
+            "alpha": 0.256886,
+            "lower_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.8917,
+              "qps": 5607.11,
+              "p99_ms": 0.2684
+            },
+            "upper_bracket": {
+              "ef_search": 40,
+              "recall_at_k": 0.92401,
+              "qps": 4555.34,
+              "p99_ms": 0.3351
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 4544.904389782343,
+            "interpolated_p99_ms": 0.34758511007264936,
+            "interpolated_mean_ms": 0.22004844623483277,
+            "alpha": 0.997433,
+            "lower_bracket": {
+              "ef_search": 20,
+              "recall_at_k": 0.84949,
+              "qps": 5936.97,
+              "p99_ms": 0.3057
+            },
+            "upper_bracket": {
+              "ef_search": 30,
+              "recall_at_k": 0.90013,
+              "qps": 4541.78,
+              "p99_ms": 0.3477
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.1696030028219337,
+          "p99_ratio_faiss_over_rust": 1.2232546593616187,
+          "p99_ratio_rust_over_faiss": 0.8174912659003246,
+          "mean_ms_ratio_faiss_over_rust": 1.1699692314525445
+        },
+        {
+          "target_recall": 0.95,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 3413.068911737918,
+            "interpolated_p99_ms": 0.4500066044334516,
+            "interpolated_mean_ms": 0.29299640430145246,
+            "alpha": 0.31122,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.94301,
+              "qps": 3787.97,
+              "p99_ms": 0.4061
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96547,
+              "qps": 2710.03,
+              "p99_ms": 0.5648
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 2755.8408038906973,
+            "interpolated_p99_ms": 1.0875949830105325,
+            "interpolated_mean_ms": 0.3628478899497939,
+            "alpha": 0.144455,
+            "lower_bracket": {
+              "ef_search": 50,
+              "recall_at_k": 0.94703,
+              "qps": 2875.88,
+              "p99_ms": 0.9864
+            },
+            "upper_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96759,
+              "qps": 2140.86,
+              "p99_ms": 1.9394
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.2384855129945624,
+          "p99_ratio_faiss_over_rust": 2.4168422691924505,
+          "p99_ratio_rust_over_faiss": 0.41376303813741816,
+          "mean_ms_ratio_faiss_over_rust": 1.2384039006037562
+        },
+        {
+          "target_recall": 0.98,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 2075.279097009403,
+            "interpolated_p99_ms": 0.6354297610834682,
+            "interpolated_mean_ms": 0.4818482836184768,
+            "alpha": 0.991132,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96547,
+              "qps": 2710.03,
+              "p99_ms": 0.5648
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.98013,
+              "qps": 2070.33,
+              "p99_ms": 0.6361
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 1516.7090676613834,
+            "interpolated_p99_ms": 1.2385032130940068,
+            "interpolated_mean_ms": 0.6593339326260412,
+            "alpha": 0.953149,
+            "lower_bracket": {
+              "ef_search": 70,
+              "recall_at_k": 0.96759,
+              "qps": 2140.86,
+              "p99_ms": 1.9394
+            },
+            "upper_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.98061,
+              "qps": 1491.23,
+              "p99_ms": 1.2115
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.3682776356109478,
+          "p99_ratio_faiss_over_rust": 1.9490796449040113,
+          "p99_ratio_rust_over_faiss": 0.5130626665844885,
+          "mean_ms_ratio_faiss_over_rust": 1.36834342892066
+        },
+        {
+          "target_recall": 0.99,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 1585.4170940992371,
+            "interpolated_p99_ms": 0.8550743019796306,
+            "interpolated_mean_ms": 0.6307230614307155,
+            "alpha": 0.98209,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.98013,
+              "qps": 2070.33,
+              "p99_ms": 0.6361
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.99018,
+              "qps": 1577.72,
+              "p99_ms": 0.8597
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 1130.8119370704728,
+            "interpolated_p99_ms": 3.477742438072503,
+            "interpolated_mean_ms": 0.884357038246481,
+            "alpha": 0.995758,
+            "lower_bracket": {
+              "ef_search": 100,
+              "recall_at_k": 0.98061,
+              "qps": 1491.23,
+              "p99_ms": 1.2115
+            },
+            "upper_bracket": {
+              "ef_search": 150,
+              "recall_at_k": 0.99004,
+              "qps": 1129.48,
+              "p99_ms": 3.4934
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.4020165883696654,
+          "p99_ratio_faiss_over_rust": 4.067181565415995,
+          "p99_ratio_rust_over_faiss": 0.24587050858589324,
+          "mean_ms_ratio_faiss_over_rust": 1.402132080346688
+        },
+        {
+          "target_recall": 0.995,
+          "status": "matched",
+          "rust_status": "in_range",
+          "faiss_status": "in_range",
+          "rust": {
+            "status": "in_range",
+            "interpolated_qps": 1107.9369582370248,
+            "interpolated_p99_ms": 1.3534524589987786,
+            "interpolated_mean_ms": 0.9026102887578881,
+            "alpha": 0.184375,
+            "lower_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99441,
+              "qps": 1234.01,
+              "p99_ms": 1.1311
+            },
+            "upper_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.99761,
+              "qps": 687.81,
+              "p99_ms": 2.9939
+            }
+          },
+          "faiss": {
+            "status": "in_range",
+            "interpolated_qps": 724.3616202761667,
+            "interpolated_p99_ms": 1.7264499953898846,
+            "interpolated_mean_ms": 1.3804927726583256,
+            "alpha": 0.446043,
+            "lower_bracket": {
+              "ef_search": 200,
+              "recall_at_k": 0.99376,
+              "qps": 725.04,
+              "p99_ms": 1.5165
+            },
+            "upper_bracket": {
+              "ef_search": 300,
+              "recall_at_k": 0.99654,
+              "qps": 723.52,
+              "p99_ms": 2.0281
+            }
+          },
+          "qps_ratio_rust_over_faiss": 1.5295357004345673,
+          "p99_ratio_faiss_over_rust": 1.2755896846698496,
+          "p99_ratio_rust_over_faiss": 0.7839511498235593,
+          "mean_ms_ratio_faiss_over_rust": 1.5294449773645584
+        }
+      ]
+    }
+  ]
+}

@@ -102,6 +102,9 @@ results/
   phase3/   phase3_report.json  baseline_profile_report.json  phase2_report.json
   phase3_5/ LOG.md  baseline_*.json  exp_*.json
   phase4/   <one JSON per index config>  summary.json  *.png  *.svg
+  phase5/   DESIGN.md  G4_DECISIONS.md  G4_5_DECISIONS.md  PROPOSAL.md  FINDINGS.md  pilot/  smoke/  charts_100k/  charts_1m/  cell_*.json  sensitivity_*.json  summary_*.json  *.png  *.svg
+  phase6/   DESIGN.md  G5_DECISIONS.md  PROPOSAL.md  FINDINGS.md  pilot/  charts_100k/  charts_1m/  arm_*.json  summary_*.json  *.png  *.svg
+  phase7/   DESIGN.md  G6_DECISIONS.md  FINDINGS.md  matched_recall_summary.json  charts_100k/  charts_1m/  rust_*.json  faiss_*.json  *.png  *.svg
 ```
 
 ---
@@ -205,6 +208,7 @@ Agent produces `results/phase5/DESIGN.md` first; no code before Dev approves it.
 - PQ as a stretch goal: deterministic k-means (own implementation, seeded), 8-bit codes with 16 subquantizers as the starting point (16 B per vector), ADC lookup tables. Compare against SQ8 on the same recall-vs-latency chart.
 - Constraint: the `PRESERVING` guarantees from M1 do not apply here, so each variant is `GRAPH-CHANGING` or a new index type. Keep float32 paths intact and tested.
 - [x] Gate G5 (Dev): approved (`results/phase6/G5_DECISIONS.md`, Option B SQ8 + PQ).
+- [x] **M4 (`T4.1`–`T4.9`) complete.** Implemented `src/quantized/` (`CompactHnswGraph`, `HnswSq8Index`, `HnswPqIndex`), `phase6` CLI runner + parity suite (`416c8f9`, `1074e1d`, `9f79165`), `100k`/`1M` matrix reports (`results/phase6/summary_n100000.json`, `results/phase6/summary_n1000000.json`), and `scripts/plot_phase6.py` charts under `results/phase6/` (keeping `src/hnsw.rs` `f32` paths untouched).
 
 ### M5. Phase 7: head-to-head with FAISS (design brief; expand after G5)
 
@@ -215,6 +219,7 @@ Protocol decisions Dev must confirm before any run:
 - Record FAISS version, how it was installed (Windows wheel vs built), CPU instruction set in use, and the `keep_pruned` setting on the Rust side, since the graph structures will differ.
 - Report where Rust loses as plainly as where it wins.
 - [x] Gate G6 (Dev): approved (`results/phase7/G6_DECISIONS.md`, Option A Frontier + C2-nkp, stock SSE2 parity, MT search scaling).
+- [x] **M5 (`T5.1`–`T5.7`) complete.** Implemented `phase7` Rust runner (`388e601`), FAISS harness (`scripts/benchmark_faiss.py`) and `scripts/plot_phase7.py` (`75faa5e`), `100k`/`1M` Rust vs FAISS `IndexHNSWFlat` single-thread & multi-thread comparisons (`results/phase7/matched_recall_summary.json`), and `results/phase7/` charts (stock SSE2 parity; optional AVX2 addendum arm remains open future work).
 
 ---
 
@@ -235,6 +240,6 @@ Protocol decisions Dev must confirm before any run:
 ## 7. Open questions for Dev
 
 1. Do `CLAUDE.md`, `CONTEXT_AND_MEMORY.md` and `continuation.md` stay in the public repo, or move to a private branch or `docs/dev/`? They currently state the agents-code, Dev-designs workflow openly.
-2. Is a parallel (multi-threaded) build in scope? It would help Phase 4 and 7 wall-clock but breaks bit-exact reproducibility unless designed carefully. Default in this plan: out of scope.
-3. 1M builds for Phase 4: how many hours are you willing to leave the laptop running?
-4. Should the repo move out of OneDrive before benchmarking? Sync activity adds noise.
+2. Future optimization / addendum scope (post-M5): should a parallel (multi-threaded) HNSW build, `T1.8` (compile-time `Metric` specialization / bounds-check-free L2 kernel, skipped in Phase 3.5), or the optional Phase 7 AVX2 addendum arm (`-C target-cpu=native` vs an AVX2 FAISS build) be pursued next? Default in M0–M5: out of scope / open future work.
+3. Should the repo (or benchmark staging) stay outside OneDrive for any future timed runs (`T1.8`, AVX2 addendum)? Sync activity adds noise.
+4. CI & push confirmation: confirm `.github/workflows/ci.yml` is green on a fresh clone after pushing the M4/M5 commits and result artifacts.

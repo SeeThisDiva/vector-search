@@ -1,0 +1,1176 @@
+{
+  "schema_version": 1,
+  "phase": 7,
+  "phase_name": "Phase 7 FAISS IndexHNSWFlat Benchmark",
+  "engine": "faiss",
+  "compare_mode": "single",
+  "config_id": "C1",
+  "generated_at": "2026-11-17T13:29:59Z",
+  "git_commit": "9f79165",
+  "git_dirty": false,
+  "isolated_process": true,
+  "environment": {
+    "os": "windows",
+    "arch": "x86_64",
+    "cpu_model": "12th Gen Intel(R) Core(TM) i7-12650H",
+    "logical_cores": 16,
+    "total_ram_gb": 15.78,
+    "power_mode": "balanced",
+    "power_scheme_raw": "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)",
+    "processor_affinity_mask": "0x0400",
+    "affinity_pinned": true,
+    "threads": 1,
+    "python_version": "3.13.5"
+  },
+  "hardware": {
+    "summary": "12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)",
+    "cpu_model": "12th Gen Intel(R) Core(TM) i7-12650H",
+    "logical_cores": 16,
+    "total_ram_gb": 15.78,
+    "os": "windows",
+    "arch": "x86_64"
+  },
+  "faiss": {
+    "version": "1.15.1",
+    "index_class": "IndexHNSWFlat",
+    "metric_type": "METRIC_L2",
+    "simd_level_name": "NONE",
+    "simd_level": 0,
+    "has_dynamic_dispatch": false,
+    "compiled_simd_levels": 1,
+    "avx2_available": false,
+    "compile_options": "",
+    "supported_instruction_sets": [
+      "AVX",
+      "AVX2",
+      "BMI",
+      "BMI2",
+      "CX16",
+      "F16C",
+      "FMA3",
+      "GFNI",
+      "LAHF",
+      "LZCNT",
+      "MMX",
+      "MOVBE",
+      "POPCNT",
+      "SSE",
+      "SSE2",
+      "SSE3",
+      "SSE41",
+      "SSE42",
+      "SSSE3",
+      "VAES",
+      "VPCLMULQDQ",
+      "X86_V2",
+      "X86_V3"
+    ],
+    "omp_threads_requested": 1,
+    "omp_max_threads": 1
+  },
+  "dataset": {
+    "preset": "sift1m",
+    "source_kind": "authentic_sift1m",
+    "source_description": "Texmex sift1m (C:\\Users\\Dev Gupta\\OneDrive\\Documents\\Project\\vector search\\data\\sift1m\\sift_base.fvecs)",
+    "is_authentic_sift": true,
+    "scale_vectors": 1000000,
+    "num_base": 1000000,
+    "num_query": 10000,
+    "dim": 128,
+    "k": 10,
+    "seed": 42,
+    "metric": "l2"
+  },
+  "ground_truth_source": "custom_ivecs (data/sift1m/sift_groundtruth.ivecs)",
+  "ground_truth_path": "data/sift1m/sift_groundtruth.ivecs",
+  "hnsw_config": {
+    "m": 8,
+    "m_max": 8,
+    "m_max0": 16,
+    "ef_construction": 100,
+    "keep_pruned": false,
+    "keep_pruned_shrink": false,
+    "prune_headroom": 0.20000000298023224,
+    "search_bounded_queue": true,
+    "check_relative_distance": true,
+    "seed": 42
+  },
+  "threads": 1,
+  "warmup_performed": true,
+  "build_reps": 1,
+  "query_reps": 5,
+  "scale_vectors": 1000000,
+  "index_build": {
+    "num_vectors": 1000000,
+    "build_time_s": 277.694973,
+    "build_time_min_s": 277.694973,
+    "build_time_max_s": 277.694973,
+    "build_time_spread_s": 0.0,
+    "build_times_s": [
+      277.694973
+    ],
+    "build_qps": 3601.07,
+    "max_layer": 6,
+    "entry_point": 966036
+  },
+  "memory_profile": {
+    "peak_rss_mb": 1118.32,
+    "peak_rss_scope": "isolated_child_process_high_water_mark",
+    "graph_only_bytes_per_vector": 80.57,
+    "graph_only_memory_bytes": 80570760,
+    "graph_only_memory_mb": 76.8383,
+    "levels_bytes": 4000000,
+    "offsets_bytes": 8000008,
+    "neighbors_bytes": 68570752,
+    "raw_vector_bytes_per_vector": 512.0,
+    "total_with_vectors_bytes_per_vector": 592.57
+  },
+  "graph_only_bytes_per_vector": 80.57,
+  "monotonic_recall": true,
+  "ef_search_sweep": [
+    {
+      "ef_search": 10,
+      "recall_at_k": 0.57026,
+      "recall_at_k_mode2": 0.57026,
+      "mode1_batch": {
+        "num_queries": 10000,
+        "total_s": 0.447877,
+        "qps": 22327.55,
+        "mean_ms": 0.0448,
+        "mean_ms_min": 0.0442,
+        "mean_ms_max": 0.0453,
+        "mean_ms_spread": 0.0011,
+        "qps_min": 22061.97,
+        "qps_max": 22623.07,
+        "qps_spread": 561.09,
+        "run_total_s": [
+          0.447877,
+          0.442027,
+          0.447989,
+          0.453269,
+          0.444947
+        ],
+        "run_mean_ms": [
+          0.0448,
+          0.0442,
+          0.0448,
+          0.0453,
+          0.0445
+        ],
+        "run_qps": [
+          22327.55,
+          22623.07,
+          22321.98,
+          22061.97,
+          22474.6
+        ]
+      },
+      "mode2_per_query": {
+        "num_queries": 10000,
+        "total_s": 0.480868,
+        "qps": 20795.73,
+        "min_ms": 0.0178,
+        "mean_ms": 0.0476,
+        "p50_ms": 0.0433,
+        "p95_ms": 0.0685,
+        "p99_ms": 0.1025,
+        "max_ms": 1.6158,
+        "mean_ms_min": 0.0471,
+        "mean_ms_max": 0.0482,
+        "mean_ms_spread": 0.0011,
+        "p99_ms_min": 0.1022,
+        "p99_ms_max": 0.1071,
+        "p99_ms_spread": 0.0049,
+        "run_total_s": [
+          0.48106,
+          0.480309,
+          0.475315,
+          0.486359,
+          0.480868
+        ],
+        "run_mean_ms": [
+          0.0476,
+          0.0476,
+          0.0471,
+          0.0482,
+          0.0476
+        ],
+        "run_p99_ms": [
+          0.1035,
+          0.1022,
+          0.1025,
+          0.1071,
+          0.1023
+        ]
+      },
+      "ffi_delta_us": 3.2991,
+      "dist_evals_mean": 236.6315,
+      "nhops_mean": 26.7489,
+      "n1_mean": 1.0,
+      "mode1_qps": 22327.55,
+      "mode1_mean_ms": 0.0448,
+      "qps": 22327.55,
+      "mean_ms": 0.0476,
+      "p50_ms": 0.0433,
+      "p95_ms": 0.0685,
+      "p99_ms": 0.1025
+    },
+    {
+      "ef_search": 20,
+      "recall_at_k": 0.71333,
+      "recall_at_k_mode2": 0.71333,
+      "mode1_batch": {
+        "num_queries": 10000,
+        "total_s": 0.709731,
+        "qps": 14089.85,
+        "mean_ms": 0.071,
+        "mean_ms_min": 0.0701,
+        "mean_ms_max": 0.0728,
+        "mean_ms_spread": 0.0027,
+        "qps_min": 13728.99,
+        "qps_max": 14257.46,
+        "qps_spread": 528.47,
+        "run_total_s": [
+          0.71422,
+          0.709731,
+          0.70845,
+          0.728386,
+          0.701387
+        ],
+        "run_mean_ms": [
+          0.0714,
+          0.071,
+          0.0708,
+          0.0728,
+          0.0701
+        ],
+        "run_qps": [
+          14001.29,
+          14089.85,
+          14115.32,
+          13728.99,
+          14257.46
+        ]
+      },
+      "mode2_per_query": {
+        "num_queries": 10000,
+        "total_s": 0.739829,
+        "qps": 13516.64,
+        "min_ms": 0.0273,
+        "mean_ms": 0.0735,
+        "p50_ms": 0.0673,
+        "p95_ms": 0.1032,
+        "p99_ms": 0.1462,
+        "max_ms": 2.0136,
+        "mean_ms_min": 0.0729,
+        "mean_ms_max": 0.0753,
+        "mean_ms_spread": 0.0024,
+        "p99_ms_min": 0.1381,
+        "p99_ms_max": 0.1785,
+        "p99_ms_spread": 0.0404,
+        "run_total_s": [
+          0.739829,
+          0.7592,
+          0.73501,
+          0.733993,
+          0.742598
+        ],
+        "run_mean_ms": [
+          0.0735,
+          0.0753,
+          0.073,
+          0.0729,
+          0.0737
+        ],
+        "run_p99_ms": [
+          0.1462,
+          0.1785,
+          0.1422,
+          0.1487,
+          0.1381
+        ]
+      },
+      "ffi_delta_us": 3.0098,
+      "dist_evals_mean": 342.85,
+      "nhops_mean": 36.9347,
+      "n1_mean": 1.0,
+      "mode1_qps": 14089.85,
+      "mode1_mean_ms": 0.071,
+      "qps": 14089.85,
+      "mean_ms": 0.0735,
+      "p50_ms": 0.0673,
+      "p95_ms": 0.1032,
+      "p99_ms": 0.1462
+    },
+    {
+      "ef_search": 30,
+      "recall_at_k": 0.78377,
+      "recall_at_k_mode2": 0.78377,
+      "mode1_batch": {
+        "num_queries": 10000,
+        "total_s": 0.938635,
+        "qps": 10653.77,
+        "mean_ms": 0.0939,
+        "mean_ms_min": 0.0917,
+        "mean_ms_max": 0.0941,
+        "mean_ms_spread": 0.0025,
+        "qps_min": 10625.14,
+        "qps_max": 10909.86,
+        "qps_spread": 284.72,
+        "run_total_s": [
+          0.93979,
+          0.938635,
+          0.923584,
+          0.916602,
+          0.941164
+        ],
+        "run_mean_ms": [
+          0.094,
+          0.0939,
+          0.0924,
+          0.0917,
+          0.0941
+        ],
+        "run_qps": [
+          10640.68,
+          10653.77,
+          10827.39,
+          10909.86,
+          10625.14
+        ]
+      },
+      "mode2_per_query": {
+        "num_queries": 10000,
+        "total_s": 0.964019,
+        "qps": 10373.24,
+        "min_ms": 0.0389,
+        "mean_ms": 0.0958,
+        "p50_ms": 0.0897,
+        "p95_ms": 0.1303,
+        "p99_ms": 0.1663,
+        "max_ms": 1.7866,
+        "mean_ms_min": 0.0938,
+        "mean_ms_max": 0.0973,
+        "mean_ms_spread": 0.0035,
+        "p99_ms_min": 0.1643,
+        "p99_ms_max": 0.19,
+        "p99_ms_spread": 0.0257,
+        "run_total_s": [
+          0.943739,
+          0.964019,
+          0.968328,
+          0.97891,
+          0.950774
+        ],
+        "run_mean_ms": [
+          0.0938,
+          0.0958,
+          0.0962,
+          0.0973,
+          0.0945
+        ],
+        "run_p99_ms": [
+          0.1646,
+          0.1663,
+          0.1833,
+          0.19,
+          0.1643
+        ]
+      },
+      "ffi_delta_us": 2.5384,
+      "dist_evals_mean": 439.0402,
+      "nhops_mean": 46.614,
+      "n1_mean": 1.0,
+      "mode1_qps": 10653.77,
+      "mode1_mean_ms": 0.0939,
+      "qps": 10653.77,
+      "mean_ms": 0.0958,
+      "p50_ms": 0.0897,
+      "p95_ms": 0.1303,
+      "p99_ms": 0.1663
+    },
+    {
+      "ef_search": 40,
+      "recall_at_k": 0.82733,
+      "recall_at_k_mode2": 0.82733,
+      "mode1_batch": {
+        "num_queries": 10000,
+        "total_s": 1.164722,
+        "qps": 8585.74,
+        "mean_ms": 0.1165,
+        "mean_ms_min": 0.1143,
+        "mean_ms_max": 0.1261,
+        "mean_ms_spread": 0.0117,
+        "qps_min": 7932.47,
+        "qps_max": 8745.51,
+        "qps_spread": 813.03,
+        "run_total_s": [
+          1.143444,
+          1.164722,
+          1.260641,
+          1.199059,
+          1.148416
+        ],
+        "run_mean_ms": [
+          0.1143,
+          0.1165,
+          0.1261,
+          0.1199,
+          0.1148
+        ],
+        "run_qps": [
+          8745.51,
+          8585.74,
+          7932.47,
+          8339.87,
+          8707.65
+        ]
+      },
+      "mode2_per_query": {
+        "num_queries": 10000,
+        "total_s": 1.208475,
+        "qps": 8274.89,
+        "min_ms": 0.0481,
+        "mean_ms": 0.1202,
+        "p50_ms": 0.1139,
+        "p95_ms": 0.1589,
+        "p99_ms": 0.2168,
+        "max_ms": 2.1584,
+        "mean_ms_min": 0.1193,
+        "mean_ms_max": 0.1613,
+        "mean_ms_spread": 0.042,
+        "p99_ms_min": 0.2164,
+        "p99_ms_max": 1.0855,
+        "p99_ms_spread": 0.8691,
+        "run_total_s": [
+          1.201693,
+          1.208475,
+          1.202626,
+          1.321781,
+          1.624062
+        ],
+        "run_mean_ms": [
+          0.1193,
+          0.1202,
+          0.1196,
+          0.1314,
+          0.1613
+        ],
+        "run_p99_ms": [
+          0.2168,
+          0.2165,
+          0.2164,
+          0.3724,
+          1.0855
+        ]
+      },
+      "ffi_delta_us": 4.3753,
+      "dist_evals_mean": 530.864,
+      "nhops_mean": 56.1601,
+      "n1_mean": 1.0,
+      "mode1_qps": 8585.74,
+      "mode1_mean_ms": 0.1165,
+      "qps": 8585.74,
+      "mean_ms": 0.1202,
+      "p50_ms": 0.1139,
+      "p95_ms": 0.1589,
+      "p99_ms": 0.2168
+    },
+    {
+      "ef_search": 50,
+      "recall_at_k": 0.85752,
+      "recall_at_k_mode2": 0.85752,
+      "mode1_batch": {
+        "num_queries": 10000,
+        "total_s": 1.678203,
+        "qps": 5958.75,
+        "mean_ms": 0.1678,
+        "mean_ms_min": 0.1431,
+        "mean_ms_max": 0.1723,
+        "mean_ms_spread": 0.0292,
+        "qps_min": 5804.78,
+        "qps_max": 6988.63,
+        "qps_spread": 1183.85,
+        "run_total_s": [
+          1.430896,
+          1.678203,
+          1.675981,
+          1.722719,
+          1.701769
+        ],
+        "run_mean_ms": [
+          0.1431,
+          0.1678,
+          0.1676,
+          0.1723,
+          0.1702
+        ],
+        "run_qps": [
+          6988.63,
+          5958.75,
+          5966.65,
+          5804.78,
+          5876.24
+        ]
+      },
+      "mode2_per_query": {
+        "num_queries": 10000,
+        "total_s": 1.755665,
+        "qps": 5695.85,
+        "min_ms": 0.0599,
+        "mean_ms": 0.1744,
+        "p50_ms": 0.1525,
+        "p95_ms": 0.2564,
+        "p99_ms": 0.6345,
+        "max_ms": 3.0757,
+        "mean_ms_min": 0.1465,
+        "mean_ms_max": 0.1837,
+        "mean_ms_spread": 0.0372,
+        "p99_ms_min": 0.3558,
+        "p99_ms_max": 0.8214,
+        "p99_ms_spread": 0.4656,
+        "run_total_s": [
+          1.850979,
+          1.755665,
+          1.808955,
+          1.642003,
+          1.473229
+        ],
+        "run_mean_ms": [
+          0.1837,
+          0.1744,
+          0.1795,
+          0.1632,
+          0.1465
+        ],
+        "run_p99_ms": [
+          0.8214,
+          0.6345,
+          0.813,
+          0.5553,
+          0.3558
+        ]
+      },
+      "ffi_delta_us": 7.7462,
+      "dist_evals_mean": 620.7471,
+      "nhops_mean": 65.7889,
+      "n1_mean": 1.0,
+      "mode1_qps": 5958.75,
+      "mode1_mean_ms": 0.1678,
+      "qps": 5958.75,
+      "mean_ms": 0.1744,
+      "p50_ms": 0.1525,
+      "p95_ms": 0.2564,
+      "p99_ms": 0.6345
+    },
+    {
+      "ef_search": 70,
+      "recall_at_k": 0.89491,
+      "recall_at_k_mode2": 0.89491,
+      "mode1_batch": {
+        "num_queries": 10000,
+        "total_s": 1.88712,
+        "qps": 5299.08,
+        "mean_ms": 0.1887,
+        "mean_ms_min": 0.1869,
+        "mean_ms_max": 0.1933,
+        "mean_ms_spread": 0.0065,
+        "qps_min": 5172.22,
+        "qps_max": 5351.52,
+        "qps_spread": 179.3,
+        "run_total_s": [
+          1.933404,
+          1.88712,
+          1.876649,
+          1.868628,
+          1.89192
+        ],
+        "run_mean_ms": [
+          0.1933,
+          0.1887,
+          0.1877,
+          0.1869,
+          0.1892
+        ],
+        "run_qps": [
+          5172.22,
+          5299.08,
+          5328.65,
+          5351.52,
+          5285.63
+        ]
+      },
+      "mode2_per_query": {
+        "num_queries": 10000,
+        "total_s": 1.972517,
+        "qps": 5069.67,
+        "min_ms": 0.0767,
+        "mean_ms": 0.1962,
+        "p50_ms": 0.1856,
+        "p95_ms": 0.2486,
+        "p99_ms": 0.4408,
+        "max_ms": 2.0476,
+        "mean_ms_min": 0.1846,
+        "mean_ms_max": 0.1995,
+        "mean_ms_spread": 0.0149,
+        "p99_ms_min": 0.2986,
+        "p99_ms_max": 0.4432,
+        "p99_ms_spread": 0.1446,
+        "run_total_s": [
+          2.005417,
+          1.972517,
+          1.974283,
+          1.911638,
+          1.855811
+        ],
+        "run_mean_ms": [
+          0.1995,
+          0.1962,
+          0.1964,
+          0.1902,
+          0.1846
+        ],
+        "run_p99_ms": [
+          0.4432,
+          0.4408,
+          0.4419,
+          0.3792,
+          0.2986
+        ]
+      },
+      "ffi_delta_us": 8.5397,
+      "dist_evals_mean": 795.1187,
+      "nhops_mean": 85.0864,
+      "n1_mean": 1.0,
+      "mode1_qps": 5299.08,
+      "mode1_mean_ms": 0.1887,
+      "qps": 5299.08,
+      "mean_ms": 0.1962,
+      "p50_ms": 0.1856,
+      "p95_ms": 0.2486,
+      "p99_ms": 0.4408
+    },
+    {
+      "ef_search": 100,
+      "recall_at_k": 0.92608,
+      "recall_at_k_mode2": 0.92608,
+      "mode1_batch": {
+        "num_queries": 10000,
+        "total_s": 2.759723,
+        "qps": 3623.55,
+        "mean_ms": 0.276,
+        "mean_ms_min": 0.261,
+        "mean_ms_max": 0.3153,
+        "mean_ms_spread": 0.0542,
+        "qps_min": 3172.04,
+        "qps_max": 3830.79,
+        "qps_spread": 658.75,
+        "run_total_s": [
+          2.610429,
+          3.152545,
+          2.815709,
+          2.759723,
+          2.683397
+        ],
+        "run_mean_ms": [
+          0.261,
+          0.3153,
+          0.2816,
+          0.276,
+          0.2683
+        ],
+        "run_qps": [
+          3830.79,
+          3172.04,
+          3551.5,
+          3623.55,
+          3726.62
+        ]
+      },
+      "mode2_per_query": {
+        "num_queries": 10000,
+        "total_s": 2.714765,
+        "qps": 3683.56,
+        "min_ms": 0.1131,
+        "mean_ms": 0.2701,
+        "p50_ms": 0.2659,
+        "p95_ms": 0.3272,
+        "p99_ms": 0.4263,
+        "max_ms": 4.534,
+        "mean_ms_min": 0.2687,
+        "mean_ms_max": 0.2856,
+        "mean_ms_spread": 0.0169,
+        "p99_ms_min": 0.3902,
+        "p99_ms_max": 0.6702,
+        "p99_ms_spread": 0.28,
+        "run_total_s": [
+          2.870504,
+          2.714765,
+          2.754282,
+          2.700755,
+          2.706782
+        ],
+        "run_mean_ms": [
+          0.2856,
+          0.2701,
+          0.2741,
+          0.2687,
+          0.2693
+        ],
+        "run_p99_ms": [
+          0.6702,
+          0.4207,
+          0.4376,
+          0.3902,
+          0.4263
+        ]
+      },
+      "ffi_delta_us": -4.4958,
+      "dist_evals_mean": 1049.1607,
+      "nhops_mean": 114.4253,
+      "n1_mean": 1.0,
+      "mode1_qps": 3623.55,
+      "mode1_mean_ms": 0.276,
+      "qps": 3623.55,
+      "mean_ms": 0.2701,
+      "p50_ms": 0.2659,
+      "p95_ms": 0.3272,
+      "p99_ms": 0.4263
+    },
+    {
+      "ef_search": 150,
+      "recall_at_k": 0.95213,
+      "recall_at_k_mode2": 0.95213,
+      "mode1_batch": {
+        "num_queries": 10000,
+        "total_s": 3.877451,
+        "qps": 2579.01,
+        "mean_ms": 0.3877,
+        "mean_ms_min": 0.3857,
+        "mean_ms_max": 0.3905,
+        "mean_ms_spread": 0.0048,
+        "qps_min": 2560.63,
+        "qps_max": 2592.61,
+        "qps_spread": 31.98,
+        "run_total_s": [
+          3.877451,
+          3.895607,
+          3.905291,
+          3.859058,
+          3.857119
+        ],
+        "run_mean_ms": [
+          0.3877,
+          0.3896,
+          0.3905,
+          0.3859,
+          0.3857
+        ],
+        "run_qps": [
+          2579.01,
+          2566.99,
+          2560.63,
+          2591.31,
+          2592.61
+        ]
+      },
+      "mode2_per_query": {
+        "num_queries": 10000,
+        "total_s": 3.992823,
+        "qps": 2504.49,
+        "min_ms": 0.1785,
+        "mean_ms": 0.3977,
+        "p50_ms": 0.3955,
+        "p95_ms": 0.471,
+        "p99_ms": 0.6133,
+        "max_ms": 2.8155,
+        "mean_ms_min": 0.3955,
+        "mean_ms_max": 0.4127,
+        "mean_ms_spread": 0.0172,
+        "p99_ms_min": 0.5832,
+        "p99_ms_max": 0.6816,
+        "p99_ms_spread": 0.0984,
+        "run_total_s": [
+          3.992823,
+          3.99011,
+          4.051865,
+          4.144629,
+          3.971912
+        ],
+        "run_mean_ms": [
+          0.3977,
+          0.3973,
+          0.4033,
+          0.4127,
+          0.3955
+        ],
+        "run_p99_ms": [
+          0.6133,
+          0.5833,
+          0.6478,
+          0.6816,
+          0.5832
+        ]
+      },
+      "ffi_delta_us": 11.5372,
+      "dist_evals_mean": 1455.167,
+      "nhops_mean": 163.8509,
+      "n1_mean": 1.0,
+      "mode1_qps": 2579.01,
+      "mode1_mean_ms": 0.3877,
+      "qps": 2579.01,
+      "mean_ms": 0.3977,
+      "p50_ms": 0.3955,
+      "p95_ms": 0.471,
+      "p99_ms": 0.6133
+    },
+    {
+      "ef_search": 200,
+      "recall_at_k": 0.96527,
+      "recall_at_k_mode2": 0.96527,
+      "mode1_batch": {
+        "num_queries": 10000,
+        "total_s": 5.297215,
+        "qps": 1887.78,
+        "mean_ms": 0.5297,
+        "mean_ms_min": 0.5253,
+        "mean_ms_max": 0.5408,
+        "mean_ms_spread": 0.0155,
+        "qps_min": 1848.99,
+        "qps_max": 1903.65,
+        "qps_spread": 54.66,
+        "run_total_s": [
+          5.301731,
+          5.408355,
+          5.253072,
+          5.287889,
+          5.297215
+        ],
+        "run_mean_ms": [
+          0.5302,
+          0.5408,
+          0.5253,
+          0.5288,
+          0.5297
+        ],
+        "run_qps": [
+          1886.18,
+          1848.99,
+          1903.65,
+          1891.11,
+          1887.78
+        ]
+      },
+      "mode2_per_query": {
+        "num_queries": 10000,
+        "total_s": 5.406314,
+        "qps": 1849.69,
+        "min_ms": 0.2566,
+        "mean_ms": 0.5387,
+        "p50_ms": 0.5359,
+        "p95_ms": 0.6302,
+        "p99_ms": 0.8715,
+        "max_ms": 4.0252,
+        "mean_ms_min": 0.5371,
+        "mean_ms_max": 0.5424,
+        "mean_ms_spread": 0.0053,
+        "p99_ms_min": 0.8039,
+        "p99_ms_max": 0.9439,
+        "p99_ms_spread": 0.14,
+        "run_total_s": [
+          5.390009,
+          5.443745,
+          5.393815,
+          5.442242,
+          5.406314
+        ],
+        "run_mean_ms": [
+          0.5371,
+          0.5424,
+          0.5374,
+          0.5422,
+          0.5387
+        ],
+        "run_p99_ms": [
+          0.8086,
+          0.9102,
+          0.8039,
+          0.9439,
+          0.8715
+        ]
+      },
+      "ffi_delta_us": 10.9099,
+      "dist_evals_mean": 1842.2044,
+      "nhops_mean": 213.5041,
+      "n1_mean": 1.0,
+      "mode1_qps": 1887.78,
+      "mode1_mean_ms": 0.5297,
+      "qps": 1887.78,
+      "mean_ms": 0.5387,
+      "p50_ms": 0.5359,
+      "p95_ms": 0.6302,
+      "p99_ms": 0.8715
+    },
+    {
+      "ef_search": 300,
+      "recall_at_k": 0.97824,
+      "recall_at_k_mode2": 0.97824,
+      "mode1_batch": {
+        "num_queries": 10000,
+        "total_s": 8.342158,
+        "qps": 1198.73,
+        "mean_ms": 0.8342,
+        "mean_ms_min": 0.8337,
+        "mean_ms_max": 0.8354,
+        "mean_ms_spread": 0.0017,
+        "qps_min": 1197.07,
+        "qps_max": 1199.52,
+        "qps_spread": 2.45,
+        "run_total_s": [
+          8.343644,
+          8.33845,
+          8.336657,
+          8.353721,
+          8.342158
+        ],
+        "run_mean_ms": [
+          0.8344,
+          0.8338,
+          0.8337,
+          0.8354,
+          0.8342
+        ],
+        "run_qps": [
+          1198.52,
+          1199.26,
+          1199.52,
+          1197.07,
+          1198.73
+        ]
+      },
+      "mode2_per_query": {
+        "num_queries": 10000,
+        "total_s": 8.4776,
+        "qps": 1179.58,
+        "min_ms": 0.4496,
+        "mean_ms": 0.8453,
+        "p50_ms": 0.8455,
+        "p95_ms": 0.9782,
+        "p99_ms": 1.3486,
+        "max_ms": 4.7321,
+        "mean_ms_min": 0.844,
+        "mean_ms_max": 0.8533,
+        "mean_ms_spread": 0.0093,
+        "p99_ms_min": 1.2813,
+        "p99_ms_max": 1.4453,
+        "p99_ms_spread": 0.164,
+        "run_total_s": [
+          8.557143,
+          8.508467,
+          8.4776,
+          8.462385,
+          8.463281
+        ],
+        "run_mean_ms": [
+          0.8533,
+          0.8484,
+          0.8453,
+          0.844,
+          0.8441
+        ],
+        "run_p99_ms": [
+          1.4453,
+          1.3486,
+          1.3489,
+          1.3157,
+          1.2813
+        ]
+      },
+      "ffi_delta_us": 13.5442,
+      "dist_evals_mean": 2576.9422,
+      "nhops_mean": 313.1339,
+      "n1_mean": 1.0,
+      "mode1_qps": 1198.73,
+      "mode1_mean_ms": 0.8342,
+      "qps": 1198.73,
+      "mean_ms": 0.8453,
+      "p50_ms": 0.8455,
+      "p95_ms": 0.9782,
+      "p99_ms": 1.3486
+    },
+    {
+      "ef_search": 400,
+      "recall_at_k": 0.98404,
+      "recall_at_k_mode2": 0.98404,
+      "mode1_batch": {
+        "num_queries": 10000,
+        "total_s": 11.709805,
+        "qps": 853.99,
+        "mean_ms": 1.171,
+        "mean_ms_min": 1.1679,
+        "mean_ms_max": 1.1931,
+        "mean_ms_spread": 0.0252,
+        "qps_min": 838.16,
+        "qps_max": 856.26,
+        "qps_spread": 18.1,
+        "run_total_s": [
+          11.694315,
+          11.678664,
+          11.930898,
+          11.825674,
+          11.709805
+        ],
+        "run_mean_ms": [
+          1.1694,
+          1.1679,
+          1.1931,
+          1.1826,
+          1.171
+        ],
+        "run_qps": [
+          855.12,
+          856.26,
+          838.16,
+          845.62,
+          853.99
+        ]
+      },
+      "mode2_per_query": {
+        "num_queries": 10000,
+        "total_s": 11.870893,
+        "qps": 842.4,
+        "min_ms": 0.6693,
+        "mean_ms": 1.1843,
+        "p50_ms": 1.1839,
+        "p95_ms": 1.3678,
+        "p99_ms": 1.8598,
+        "max_ms": 4.6999,
+        "mean_ms_min": 1.1788,
+        "mean_ms_max": 1.1945,
+        "mean_ms_spread": 0.0157,
+        "p99_ms_min": 1.7774,
+        "p99_ms_max": 1.9987,
+        "p99_ms_spread": 0.2213,
+        "run_total_s": [
+          11.814943,
+          11.972682,
+          11.872756,
+          11.863985,
+          11.870893
+        ],
+        "run_mean_ms": [
+          1.1788,
+          1.1945,
+          1.1845,
+          1.1833,
+          1.1843
+        ],
+        "run_p99_ms": [
+          1.7774,
+          1.9885,
+          1.8415,
+          1.8598,
+          1.9987
+        ]
+      },
+      "ffi_delta_us": 16.1088,
+      "dist_evals_mean": 3271.5161,
+      "nhops_mean": 412.9668,
+      "n1_mean": 1.0,
+      "mode1_qps": 853.99,
+      "mode1_mean_ms": 1.171,
+      "qps": 853.99,
+      "mean_ms": 1.1843,
+      "p50_ms": 1.1839,
+      "p95_ms": 1.3678,
+      "p99_ms": 1.8598
+    },
+    {
+      "ef_search": 600,
+      "recall_at_k": 0.98955,
+      "recall_at_k_mode2": 0.98955,
+      "mode1_batch": {
+        "num_queries": 10000,
+        "total_s": 19.59484,
+        "qps": 510.34,
+        "mean_ms": 1.9595,
+        "mean_ms_min": 1.954,
+        "mean_ms_max": 1.9623,
+        "mean_ms_spread": 0.0083,
+        "qps_min": 509.59,
+        "qps_max": 511.77,
+        "qps_spread": 2.18,
+        "run_total_s": [
+          19.566092,
+          19.611433,
+          19.540031,
+          19.59484,
+          19.62347
+        ],
+        "run_mean_ms": [
+          1.9566,
+          1.9611,
+          1.954,
+          1.9595,
+          1.9623
+        ],
+        "run_qps": [
+          511.09,
+          509.91,
+          511.77,
+          510.34,
+          509.59
+        ]
+      },
+      "mode2_per_query": {
+        "num_queries": 10000,
+        "total_s": 20.282967,
+        "qps": 493.02,
+        "min_ms": 1.2408,
+        "mean_ms": 2.0235,
+        "p50_ms": 2.003,
+        "p95_ms": 2.3986,
+        "p99_ms": 3.053,
+        "max_ms": 15.4625,
+        "mean_ms_min": 1.9766,
+        "mean_ms_max": 2.0406,
+        "mean_ms_spread": 0.064,
+        "p99_ms_min": 2.8313,
+        "p99_ms_max": 3.3502,
+        "p99_ms_spread": 0.519,
+        "run_total_s": [
+          19.808825,
+          20.282967,
+          20.457561,
+          20.31609,
+          20.184617
+        ],
+        "run_mean_ms": [
+          1.9766,
+          2.0235,
+          2.0406,
+          2.0267,
+          2.0131
+        ],
+        "run_p99_ms": [
+          2.8313,
+          3.0566,
+          3.3502,
+          3.0394,
+          3.053
+        ]
+      },
+      "ffi_delta_us": 68.8127,
+      "dist_evals_mean": 4573.8859,
+      "nhops_mean": 612.7172,
+      "n1_mean": 1.0,
+      "mode1_qps": 510.34,
+      "mode1_mean_ms": 1.9595,
+      "qps": 510.34,
+      "mean_ms": 2.0235,
+      "p50_ms": 2.003,
+      "p95_ms": 2.3986,
+      "p99_ms": 3.053
+    }
+  ]
+}

@@ -39,8 +39,12 @@ Layer L_0   :   [Node A] -> [D] -> [C] -> [E] -> [Node B] -> ...   (All N vector
   - `phase3` CLI: SIFT1M build, official-ground-truth recall vs efSearch, per-component memory breakdown, peak RSS, bit-exact reproducibility check (see results below)
 - [x] **Phase 4: Parameter Sweep (`M`, `efConstruction`, `efSearch`), Plot `Recall@10` vs `p99` Latency**
 - [x] **Phase 5: Filtered Search with Metadata Predicates (Including High-Selectivity Filters)**
-- [ ] **Phase 6: Scalar or Product Quantization & Recall Cost Measurement**
-- [ ] **Phase 7: Head-to-Head Benchmark vs FAISS on Identical Data & Hardware**
+- [x] **Phase 6: Scalar (`SQ8`) & Product Quantization (`PQ16`/`PQ32`) & Recall Cost Measurement**
+  - Isolated [`src/quantized/`](src/quantized/mod.rs) (`CompactHnswGraph`, `HnswSq8Index`, `HnswPqIndex`, `#![forbid(unsafe_code)]`, `std`-only) keeping `f32` `HnswIndex` bit-identical (`0x80af03bd7aebaade` at `100k`, `0x44044886c62bca5e` at `1M`); Way A `sq8_query_shifted` selected over Way B (`4.6115e-5` vs `63.9910` adversarial cancellation error)
+  - `100k` (`11` arms) and `1M` (`9` Tier 1+2 arms) `SIFT1M` evaluations ([`results/phase6/FINDINGS.md`](results/phase6/FINDINGS.md)): streaming `sq8_only_qbuild` cuts `1M` build RSS to `277.29 MiB` (`-56.9%` vs `f32_m16`), `SQ8+Rerank` (`R=20`) restores `100%` of `f32` recall, and `PQ16+Rerank` (`1M`) delivers `+27.0%` QPS / `-40.2%` `p99` at `>= 0.99` recall
+- [x] **Phase 7: Head-to-Head Benchmark vs FAISS `IndexHNSWFlat` on Identical Data & Hardware**
+  - Head-to-head Rust `HnswIndex` vs `faiss-cpu 1.15.1` (`IndexHNSWFlat`, `SIMDLevel_NONE` baseline SSE2 parity) across `C1`/`C2`/`C3`/`C2-nkp` at `100k` and `1M` `SIFT1M` ([`results/phase7/FINDINGS.md`](results/phase7/FINDINGS.md))
+  - Matched-recall Mode 1 pure-batch + Mode 2 `p99` (`ffi_delta_us` isolated), `~524–526 MiB` `1M` isolated Peak RSS advantage (`1.68x–1.88x`), `keep_pruned_shrink=false` (`C2-nkp`) root-cause isolation (`1.0371x` QPS / `1.5661x` lower `p99` at `1M R*=0.995`), OpenMP build asymmetry (`8.96x`/`8.19x` FAISS win), and `T in {1, 6, 16}` batch search scaling
 
 ---
 
@@ -120,7 +124,7 @@ cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/p
 ## Repository Structure
 
 ```text
-├── Cargo.toml                 # Rust crate manifest (vector_search lib + phase1..5, generate_metadata, filtered_exact_knn)
+├── Cargo.toml                 # Rust crate manifest (vector_search lib + phase1..7, generate_metadata, filtered_exact_knn)
 ├── docs/
 │   └── HNSW_ALGORITHM.md      # HNSW mathematical derivations, layer theory & pseudocode
 ├── src/
@@ -131,6 +135,8 @@ cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/p
 │   ├── bin/phase3.rs          # Rust Phase 3 CLI runner (`phase3`, SIFT1M)
 │   ├── bin/phase4.rs          # Rust Phase 4 CLI runner (`phase4`, parameter sweep)
 │   ├── bin/phase5.rs          # Rust Phase 5 CLI runner (`phase5`, filtered matrix & sensitivity)
+│   ├── bin/phase6.rs          # Rust Phase 6 CLI runner (`phase6`, SQ8 & PQ matrix, microbench & parity)
+│   ├── bin/phase7.rs          # Rust Phase 7 CLI runner (`phase7`, head-to-head vs FAISS)
 │   ├── bin/generate_metadata.rs # Deterministic Mode A/B bitset & metadata generator CLI
 │   ├── bin/filtered_exact_knn.rs # Multi-threaded filtered exact k-NN ground-truth CLI
 │   ├── matrix.rs              # Contiguous row-major RowMatrix<T> storage
@@ -144,11 +150,20 @@ cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/p
 │   ├── benchmark.rs           # End-to-end Phase 1-3 benchmark pipeline & JSON reporter
 │   ├── phase4.rs              # Phase 4 resumable parameter sweep runner & prefix GT caching
 │   ├── phase5.rs              # Phase 5 Option C matrix, versioned GT/bitset cache & sensitivity
+│   ├── phase6.rs              # Phase 6 SQ8/PQ matrix, kernel microbench, isolated RSS & parity runner
+│   ├── quantized/             # Isolated lifetime-free quantized HNSW module (`SQ8` & `PQ`)
+│   │   ├── mod.rs             # Public traits, distance formatters & binary snapshot helpers
+│   │   ├── graph.rs           # `CompactHnswGraph` (flat `u32` arenas), `QuantizedDistanceSource` & scratch
+│   │   ├── sq8.rs             # `Sq8Quantizer`, Way A/B kernels, streaming `.fvecs` builder & `HnswSq8Index`
+│   │   └── pq.rs              # Seeded `Xoshiro256**` PQ trainer, ADC/SDC kernels & `HnswPqIndex`
 │   └── hnsw_phase1/           # Python reference implementation & FAISS comparison helpers
 ├── scripts/
+│   ├── benchmark_faiss.py     # Phase 7 FAISS `IndexHNSWFlat` benchmark harness & matched-recall helper
 │   ├── plot_phase4.py         # Phase 4 Pareto & scaling chart generator
-│   └── plot_phase5.py         # Phase 5 filtered recall, latency & crossover chart generator
-├── tests/
+│   ├── plot_phase5.py         # Phase 5 filtered recall, latency & crossover chart generator
+│   ├── plot_phase6.py         # Phase 6 quantization recall/latency, memory Pareto & rerank chart generator
+│   └── plot_phase7.py         # Phase 7 Rust vs FAISS parity, matched-recall & scaling chart generator
+├── tests/                     # 188 Rust integration tests (+ 35 unit tests in src/ = 223 default) + 56 Python tests
 │   ├── rust_phase1_tests.rs   # Rust integration & edge-case test suite (16 tests)
 │   ├── rust_phase2_tests.rs   # HNSW correctness, topology & recall tests (23 tests)
 │   ├── adversarial_hnsw_tests.rs # HNSW stress / boundary / reproducibility tests (12 tests)
@@ -163,10 +178,21 @@ cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/p
 │   ├── rust_filtered_strategy3_tests.rs # S3 pre-filter bitset scan tests (14 tests)
 │   ├── rust_filtered_counters_tests.rs # Instrumented filtered distance & bridge-hop counter tests (3 tests)
 │   ├── rust_phase5_tests.rs   # Phase 5 cache verification, crossover & CLI matrix tests (4 tests)
+│   ├── rust_phase6_tests.rs   # CompactHnswGraph, SQ8 Way A/B, streaming & rerank tests (16 tests)
+│   ├── rust_phase6_pq_tests.rs # PQ training determinism, ADC/SDC parity & HnswPqIndex tests (12 tests)
+│   ├── rust_phase6_cli_tests.rs # Phase 6 CLI microbench, matrix/resume, parity & isolated RSS tests (7 tests)
+│   ├── rust_phase7_tests.rs   # Phase 7 CLI single/multithread, C2-nkp & prefix GT tests (4 tests)
 │   ├── test_phase1.py         # Python reference unit tests (23 tests)
 │   ├── test_rust_parity.py    # Cross-language Rust <-> Python <-> FAISS parity tests (4 tests)
 │   ├── test_filtered_parity.py # Filtered strategy & FAISS parity verification tests (5 tests)
-│   └── test_phase5_pipeline.py # End-to-end Phase 5 CLI + resume + plotting pipeline tests (1 test)
+│   ├── test_phase5_pipeline.py # End-to-end Phase 5 CLI + resume + plotting pipeline tests (1 test)
+│   ├── test_phase6_parity.py  # Rust <-> NumPy SQ8/PQ parity, plot_phase6 & matrix pipeline tests (16 tests)
+│   └── test_phase7_harness.py # Phase 7 affinity, OMP, FAISS parity, matched-recall & plot_phase7 tests (7 tests)
+├── results/
+│   ├── CLAIMS.md              # Claim ledger tracing documented metrics to source JSON reports
+│   ├── phase3/ .. phase5/     # Phases 3–5 JSON reports, proposals, findings & charts
+│   ├── phase6/                # Phase 6 DESIGN/PROPOSAL/FINDINGS, 23 JSONs & 100k/1M charts
+│   └── phase7/                # Phase 7 DESIGN/FINDINGS, matched_recall_summary.json, 22 run JSONs & charts
 └── run_phase1.py              # Python reference runner
 ```
 
@@ -192,21 +218,42 @@ cargo run --release --bin phase1 -- --base-fvecs path/to/base.fvecs --query-fvec
 
 ### 2. Run Rust Tests & Lints
 
-Requires Rust >= 1.88. Tests that need the real `siftsmall` corpus skip themselves when `data/siftsmall/*.fvecs` is missing (run the Phase 1 command above once to download it).
+Requires Rust >= 1.88 (`223` default tests: `35` lib unit + `188` across `tests/*.rs`; plus `11` `--features instrument` tests). Tests that need the real `siftsmall` corpus skip themselves when `data/siftsmall/*.fvecs` is missing (run the Phase 1 command above once to download it).
 
 ```bash
 cargo test --release
+cargo test --release --features instrument --test challenge_m1_p35_tests --test rust_filtered_counters_tests
 cargo clippy --all-targets -- -D warnings
-cargo fmt --check
+cargo clippy --all-targets --features instrument -- -D warnings
+cargo fmt --all -- --check
 ```
 
 ### 3. Run Cross-Language Python & FAISS Parity Verification
 
+Runs `56` Python unit, parity, harness, and plotting tests (`0 skipped` enforced in [`.github/workflows/ci.yml`](.github/workflows/ci.yml); CI checks `mypy src tests`, and `scripts/` is verified identically locally):
+
 ```bash
 pip install -r requirements.txt
-python -m pytest tests/ -v --cov=src
+python -m pytest tests/ -v -rs --cov=src
 ruff check .
-mypy src tests
+mypy src tests scripts
+```
+
+### 4. Run Phase 6 & Phase 7 Benchmarks and Chart Generators
+
+```bash
+# Phase 6: kernel microbenchmark (Way A vs Way B vs PQ16/PQ32), 100k/1M matrix & offline smoke
+cargo run --release --bin phase6 -- --microbench --output-dir results/phase6/pilot
+cargo run --release --bin phase6 -- --matrix --dataset sift1m --scale 100000 --reps 3 --affinity 0x0004 --output-dir results/phase6
+cargo run --release --bin phase6 -- --pilot --synthetic --scale 2000 --queries 100 --reps 1 --output-dir data/phase6_smoke
+python scripts/plot_phase6.py --results-dir results/phase6 --scale 100000 --output-dir results/phase6/charts_100k --phase4-dir results/phase4
+python scripts/plot_phase6.py --results-dir results/phase6 --scale 1000000 --output-dir results/phase6/charts_1m --phase4-dir results/phase4
+
+# Phase 7: Rust vs FAISS IndexHNSWFlat head-to-head (example C2 = M=16, efC=100 at 100k) & charts
+cargo run --release --bin phase7 -- --dataset sift1m --scale 100000 --m 16 --ef-construction 100 --compare-mode single --threads 1 --affinity 0x0004 --profile-rss-isolated --json-out results/phase7/rust_n100000_C2.json
+python scripts/benchmark_faiss.py --dataset sift1m --scale 100000 --m 16 --ef-construction 100 --compare-mode single --threads 1 --affinity 0x0400 --profile-rss-isolated --json-out results/phase7/faiss_n100000_C2.json
+python scripts/plot_phase7.py --results-dir results/phase7 --scales 100000 --output-dir results/phase7/charts_100k
+python scripts/plot_phase7.py --results-dir results/phase7 --scales 1000000 --output-dir results/phase7/charts_1m
 ```
 
 ---
@@ -282,5 +329,101 @@ Phase 5 evaluates three filtered k-NN strategies (`S1_post_filter` capped at $K'
 
 - `FilteredSearchParams::default().eval_limit` remains `None`; `DEFAULT_OPAQUE_EVAL_LIMIT = 16_384` (accessible via `FilteredSearchParams::with_opaque_eval_limit()`) caps runaway opaque closure evaluations (`predicate.bitset().is_none()`) without truncating typical workloads. On `1M` `independent` $\sigma = 0.10$ (`S2_ef100`), `16_384` preserves `Recall@10 = 0.998500` (`1.0%` hit rate vs `69.0%` at `10_000`); on pathological `1M` `correlated` $\sigma = 0.01$, it bounds worst-case `eval_count_max` from `196,017` (`p99 = 53.729 ms`) down to `16,384` (`p99 = 4.797 ms`, an **`11.20x` tail-latency cap**).
 - Charts in [`results/phase5/charts_1m/`](results/phase5/charts_1m/) (`charts_100k/` for `100k`, and root [`results/phase5/`](results/phase5/)): `chart1_recall_vs_selectivity`, `chart2_latency_vs_selectivity`, `chart3_failure_rate_vs_selectivity`, `chart4_matched_recall_crossover`, and `chart5_distance_evals_and_sensitivity` (PNG + SVG).
+
+---
+
+## Phase 6 — Vector Quantization (`SQ8` & `PQ`, `100k` & `1M`)
+
+Phase 6 introduces an isolated `#![forbid(unsafe_code)]`, `std`-only quantization module ([`src/quantized/`](src/quantized/mod.rs): `CompactHnswGraph`, `HnswSq8Index`, `HnswPqIndex`) while leaving [`src/hnsw.rs`](src/hnsw.rs) (`f32`) untouched and bit-exact (`0x80af03bd7aebaade` at `100k`, `0x44044886c62bca5e` at `1M`). Evaluated on authentic INRIA Texmex `SIFT1M` (`D=128`, `L2Squared`, `k=10`, `Q=10,000`, `seed=42`) across **`11` arms at `100k`** (`reps=3`, solo P-core `0x0004`) and **`9` Tier 1+2 arms at `1M`** (`reps=5`, 2-P-core sharded `0x0004`/`0x0400`). See [`results/phase6/PROPOSAL.md`](results/phase6/PROPOSAL.md), [`results/phase6/FINDINGS.md`](results/phase6/FINDINGS.md), and [`results/CLAIMS.md`](results/CLAIMS.md) (§12).
+
+### Kernel Safety Audit (`T4.2` — Way A vs Way B & PQ ADC)
+
+Measured in [`results/phase6/pilot/microbench_kernels.json`](results/phase6/pilot/microbench_kernels.json) (`4,096` L2/L3-hot 128-d vectors, `200,000` evals $\times 5$ reps, `0x0004`):
+
+| Kernel | Bytes/Vec | Median (`ns/eval`) | Speedup vs `f32` | Std Max Rel Error | Adversarial Cancellation Max Abs Error | Default? |
+| :--- | ---: | ---: | ---: | ---: | ---: | :---: |
+| `f32_l2_squared` *(8-way unrolled)* | `512` | `39.6600` | `1.00x` | exact ref | exact ref | `f32` ref |
+| `sq8_query_shifted` **(Way A)** | `128` | `47.1285` | `0.84x` | **`1.7156e-7`** | **`4.6115e-5`** | **Default** |
+| `sq8_norm_expanded` *(Way B)* | `132` | `36.9335` | `1.07x` (`1.2760x` vs A) | `3.9406e-6` | **`63.9910`** | Rejected |
+| `pq16_adc` *(16 subspaces $\times$ 256)* | `16` | **`9.8310`** | **`4.03x`** | — | — | Default `PQ16` |
+| `pq32_adc` *(32 subspaces $\times$ 256)* | `32` | **`20.1700`** | **`1.97x`** | — | — | Default `PQ32` |
+
+- **Why Way A Is Mandatory:** Norm-expanded Way B ($\|\tilde{\mathbf{q}}\|^2 - 2\langle \hat{\mathbf{q}}, \mathbf{c}_i\rangle + \|\mathbf{s}\odot\mathbf{c}_i\|^2$) suffers catastrophic `f32` cancellation whenever $\|\mathbf{q}-\mathbf{v}_i\| \ll \|\mathbf{q}-\mathbf{min}\|$, yielding `63.9910` absolute error (`1.39e6x` worse than Way A's `4.6115e-5`) and requiring `+4 B/vec` auxiliary norms (`3.81 MiB` at `1M`). In HNSW traversal, DRAM cache-line traffic dominates `f32` (`512 B/vec`), letting `128 B/vec` Way A outperform `f32_m16` end-to-end anyway.
+
+### `1M` Tier 1+2 Headline Results (`SIFT1M`, `reps=5`) & `100k` Highlights
+
+| Arm (`M=16, efC=100` unless noted) | Build (s) | Payload (`B/vec`) | Build RSS (`MiB`) | Query RSS (`MiB`) | Ceiling (`ef=600`) | `ef=100` R@10 / QPS / `p99` | Matched-Recall Highlight (`1M`) |
+| :--- | ---: | ---: | ---: | ---: | ---: | :---: | :--- |
+| `f32_m16` *(Phase 6, sharded)* | `574.78` | `660.91` | `642.71` | `642.71` | `0.99804` | `0.98061` / `1,676.2` / `1.1951 ms` | Phase 4 solo ref: `450.30 s`, `2,383.9 QPS`, `0.5515 ms` |
+| `sq8_only_f32graph` | `490.48` | **`272.54`** (`-58.8%`) | `778.37` | **`276.02`** (`-57.1%`) | `0.98764` | `0.97196` / `2,256.4` / `0.6402 ms` | `R>=0.98`: `1,619.8 QPS` / `0.8758 ms` (`ef=150`) |
+| `sq8_only_qbuild` *(streaming)* | `546.54` | **`272.54`** (`-58.8%`) | **`277.29`** (`-64.4%`) | **`276.18`** (`-57.0%`) | `0.98767` | `0.97220` / `2,145.2` / `0.6740 ms` | `< 300 MiB` build & serving RSS; matches `f32graph` (`+0.00024` @100) |
+| `sq8_rerank_f32graph` (`R=100`/`20`) | `572.29` | `784.54` (`+18.7%`) | `778.41` | `778.41` | **`0.99804`** | `0.98060` / `2,172.2` / `0.6256 ms` | `R=20` restores `100%` of `f32` & `FullBeam` recall |
+| `sq8_only_m32` (`M=32, efC=200`) | `1,459.99` | `400.28` (`-39.4%`) | `1,022.15` | `398.04` (`-38.1%`) | `0.98898` | `0.98567` / `939.7` / `6.3654 ms`\* | `ef=50`: `0.97409` / `2,424.2 QPS`; hits `0.99060` at `100k` |
+| `pq16_only_f32graph` | `582.66` | **`160.67`** (`-75.7%`) | `779.20` | **`169.55`** (`-73.6%`) | `0.54520` *(pk)* | `0.54429` / `4,181.3` / `0.3587 ms` | Extreme RAM compression (`89.9%` graph, `16 B/vec` codes) |
+| `pq32_only_f32graph` | `643.22` | `176.67` (`-73.3%`) | `768.55` | `184.67` (`-71.3%`) | `0.72305` | `0.71898` / `2,207.7` / `1.2880 ms` | Unreranked PQ hits recall saturation (`0.76461` at `100k`) |
+| `pq16_rerank_f32graph` | `558.82` | `672.67` (`+1.8%`) | `778.37` | `778.37` | `0.99675` (`FB`) | `0.95032` / `3,978.2` / `0.3356 ms` | `R>=0.99` (`ef=300, FB`): **`1,553.9 QPS` (`+27.0%`) / `0.8536 ms` (`-40.2%`)** |
+| `pq32_rerank_f32graph` | `643.16` | `688.67` (`+4.2%`) | `778.41` | `778.41` | **`0.99762`** (`FB`) | `0.97643` / `2,338.8` / `0.5911 ms` | `R>=0.995` (`ef=300, FB`): **`994.0 QPS` (`+49.8%` vs Ph6 `f32_m16`)** |
+
+- **`100k` Highlights (`11` arms):** Streaming builds (`sq8_only_qbuild`, `pq16_only_qbuild`) cut `build_peak_rss_mb` by `-44.2%` (`87.70 -> 48.90 MiB`); isolated query RSS drops to `38.61 MiB` (`SQ8-Only`, `-48.5%`) and `28.13 MiB` (`PQ16-Only`, `-62.5%`). `sq8_only_m32` breaks `0.99` (`0.99060` ceiling), `SQ8+Rerank` (`R=20`) matches `100%` of `f32` recall across `ef in [20..600]`, and `pq16_rerank_f32graph` beats `f32_m16` at `>= 0.99` by `+40.9%` QPS (`5,269.0` vs `3,738.9 QPS`) / `-30.7%` `p99`.
+- **Honest Caveats:**
+  - *Windows `balanced` power plan & 2-core sharding:* Both `100k` (`0x0004`) and `1M` (`0x0004` / `0x0400`, `244.06` core-min inside `PROPOSAL.md`'s `252.89 min` conservative budget) ran under `power_mode = "balanced"`. Concurrent `1M` sharding caused shared L3/DRAM contention on `f32_m16` (slower than solo Phase 4 `f32_m16`) and isolated `p99` spikes (`*` `sq8_only_m32` `ef=100` hit `6.3654 ms` while overlapping `pq32_rerank_f32graph`).
+  - *Isolated vs Lifetime RSS:* `Only` arms profile serving RSS in an isolated child process (`query_rss_profiled_isolated: true`); `f32_m16` and `rerank` arms genuinely retain raw `512 B/vec` vectors (`488.28 MiB` at `1M`) during query serving (`query_serving_peak_rss_mb == build_peak_rss_mb`).
+  - *PQ Saturation Dips:* On unreranked PQ (and `pq16_rerank R=30`), deeper `efSearch` past saturation slightly drops recall (`0.54520 -> 0.54478` at `1M`) due to ADC ranking inversions; `R >= 50`/`FullBeam` and all `SQ8` arms are strictly monotonic.
+- **Charts ([`scripts/plot_phase6.py`](scripts/plot_phase6.py)):** [`results/phase6/`](results/phase6/) (`1M` headline copy), [`results/phase6/charts_100k/`](results/phase6/charts_100k/), and [`results/phase6/charts_1m/`](results/phase6/charts_1m/):
+  1. [`chart1_recall_vs_p99.png`](results/phase6/chart1_recall_vs_p99.png) ([SVG](results/phase6/chart1_recall_vs_p99.svg)) — `Recall@10` vs `p99` latency (log y-axis, `1 ms` SLA line)
+  2. [`chart2_recall_vs_qps.png`](results/phase6/chart2_recall_vs_qps.png) ([SVG](results/phase6/chart2_recall_vs_qps.svg)) — `Recall@10` vs single-thread QPS (log y-axis)
+  3. [`chart3_memory_vs_recall.png`](results/phase6/chart3_memory_vs_recall.png) ([SVG](results/phase6/chart3_memory_vs_recall.svg)) — Payload (`B/vec`) & query-serving Peak RSS (`MiB`) vs Recall (`p99 <= 1 ms`) + Pareto frontier
+  4. [`chart4_rerank_ablation.png`](results/phase6/chart4_rerank_ablation.png) ([SVG](results/phase6/chart4_rerank_ablation.svg)) — Top-$R$ rerank recovery & latency overhead vs $R$ (`efSearch = 100`)
+
+---
+
+## Phase 7 — Head-to-Head vs FAISS `IndexHNSWFlat` (`100k` & `1M`)
+
+Phase 7 compares `#![forbid(unsafe_code)]`, `std`-only Rust `HnswIndex` head-to-head against Meta C++ `faiss-cpu 1.15.1` `IndexHNSWFlat(128, M, METRIC_L2)` across `C1` (`M=8, efC=100`), `C2` (`M=16, efC=100`), `C3` (`M=32, efC=200`), and `C2-nkp` (`M=16, efC=100, keep_pruned_shrink=false`) at `100k` (`3` builds, `5` query reps, cached exact GT `data/gt_100000_k100.ivecs`) and `1M` (`1` build, `5` query reps, official `sift_groundtruth.ivecs`) across `22` run JSONs and [`results/phase7/matched_recall_summary.json`](results/phase7/matched_recall_summary.json). See [`results/phase7/FINDINGS.md`](results/phase7/FINDINGS.md) and [`results/CLAIMS.md`](results/CLAIMS.md) (§13).
+
+> **Mandatory `SIMDLevel_NONE` Baseline Parity Disclosure:** Stock PyPI `faiss-cpu 1.15.1` on Windows ships compiled statically in **`SIMDLevel_NONE`** (`avx2_available == false`, no `swigfaiss_avx2`), matching default-target Rust (`x86_64-pc-windows-msvc` baseline SSE2 + LLVM auto-vectorization over 8-way unrolled `as_chunks::<8>()`). Results measure **baseline SSE2 parity**; explicit AVX2 (`-C target-cpu=native` vs source/conda-forge AVX2 FAISS) remains an unmeasured addendum.
+
+### Build Time, OpenMP Asymmetry, Graph Memory & Isolated Peak RSS
+
+| Scale | Config (`T=1` unless noted) | Rust Build (s) | FAISS Build (s) | Graph-Only (Rust vs FAISS `B/vec`) | Isolated Peak RSS (Rust vs FAISS `MiB`) |
+|---:|---|---:|---:|---|---|
+| `100k` | `C1` (`8, 100`) | `18.163` | `18.040` | `81.90` vs `80.55` (`+1.68%`) | **`75.96`** vs `167.89` (`2.21x` lower) |
+| `100k` | `C2` (`16, 100`) | `29.926` | `20.368` | `145.57` vs `144.25` (`+0.92%`) | **`82.11`** vs `174.00` (`2.12x` lower) |
+| `100k` | `C2-nkp` (`16, 100, nkp`) | `22.876` (`-23.56%`) | *(vs `C2`: `20.368`)* | `145.57` vs `144.25` | **`81.99`** vs `174.00` |
+| `100k` | `C2` (`T=16` `0xffff`) | `26.977` *(1T build)* | **`3.339`** *(OMP `8.96x` vs `0x0004`)* | `145.57` vs `144.25` | **`95.23`** vs `174.34` |
+| `100k` | `C3` (`32, 200`) | `79.651` | `41.807` | `273.41` vs `272.09` (`+0.49%`) | **`93.68`** vs `186.09` (`1.99x` lower) |
+| `1M` | `C1` (`8, 100`) | `313.285` | `277.695` | `85.44` vs `80.57` (`+6.04%`) | **`594.31`** vs `1,118.32` (`1.88x` lower) |
+| `1M` | `C2` (`16, 100`) | `625.665` *(Ph4 solo `450.301`)* | `404.120` | `148.91` vs `144.26` (`+3.22%`) | **`654.53`** vs `1,180.04` (`1.80x` lower) |
+| `1M` | `C2-nkp` (`16, 100, nkp`) | `428.827` (`-31.46%`) | *(vs `C2`: `404.120`)* | `148.91` vs `144.26` | **`654.32`** vs `1,180.04` |
+| `1M` | `C2` (`T=16` `0xffff`) | `520.115` *(1T build)* | **`76.360`** *(OMP `8.19x` vs `0x0004`)* | `148.91` vs `144.26` | **`719.87`** vs `1,196.62` |
+| `1M` | `C3` (`32, 200`) | `1,562.147` | `782.080` | `272.33` vs `272.11` (`+0.08%`) | **`776.42`** vs `1,301.15` (`1.68x` lower) |
+
+- **Where Rust Saves RAM vs Where FAISS Wins Builds:** Rust `HnswIndex` borrows `&RowMatrix<f32>` rather than copying a second `488.28 MiB` base matrix alongside Python/FAISS DLLs, cutting isolated Peak RSS by `~92 MiB` (`100k`) and **`~524–526 MiB` (`1M`)**. Conversely, Rust's builder is strictly single-threaded, whereas FAISS OpenMP `add()` (`T=16`) builds **`8.96x` faster at `100k`** and **`8.19x` faster at `1M`** (`6.81x` vs `0xffff` Rust `520.115 s`).
+
+### Single-Thread Matched-Recall (`Mode 1` Pure Batch QPS & `Mode 2` `p99`, Zero Extrapolation)
+
+| Scale | Comparison | `R* = 0.90` QPS (`p99`) | `R* = 0.95` QPS (`p99`) | `R* = 0.98` QPS (`p99`) | `R* = 0.99` QPS (`p99`) | `R* = 0.995` QPS (`p99`) |
+|---:|---|---:|---:|---:|---:|---:|
+| `100k` | `C1` vs FAISS `C1` | `0.8655x` (`0.9050x`) | `0.9058x` (`0.9173x`) | **`1.0392x`** (`0.9467x`) | **`1.1562x`** (**`1.1213x`**) | **`1.2582x`** (**`1.1671x`**) |
+| `100k` | `C2` vs FAISS `C2` | `0.7159x` (`0.7685x`) | `0.7552x` (`0.8189x`) | `0.7987x` (`0.8599x`) | `0.7955x` (`0.8138x`) | `0.7039x` (`0.6970x`) |
+| `100k` | `C2-nkp` vs FAISS `C2` | `0.7568x` (`0.8082x`) | `0.8016x` (`0.8434x`) | `0.8552x` (`0.9436x`) | `0.9208x` (`0.9447x`) | `0.9772x` (`0.9908x`) |
+| `100k` | `C3` vs FAISS `C3` | *out of range* (`>0.9097`) | `0.7045x` (`0.7299x`) | `0.7368x` (`0.7674x`) | `0.7850x` (`0.8308x`) | `0.8255x` (`0.8766x`) |
+| `1M` | `C1` vs FAISS `C1` | `0.8121x` (**`1.1956x`**) | `0.9224x` (`0.9984x`) | **`1.2546x`** (**`1.3793x`**) | *FAISS caps `0.98955`* | *FAISS caps `0.98955`* |
+| `1M` | `C2` vs FAISS `C2` | `0.6539x` (`0.9421x`) | `0.6334x` (`0.6727x`) | `0.6241x` (`0.4827x`) | `0.6618x` (`0.3470x`) | `0.6781x` (**`1.2278x`**) |
+| `1M` | `C2-nkp` vs FAISS `C2` | `0.7648x` (**`1.1524x`**) | `0.7845x` (**`1.6258x`**) | `0.8539x` (`0.9408x`) | `0.9279x` (**`1.4113x`**) | **`1.0371x`** (**`1.5661x`**) |
+| `1M` | `C3` vs FAISS `C3` | `0.5023x` (`0.1978x`) | `0.5870x` (`0.4595x`) | `0.7058x` (`0.8189x`) | `0.6921x` (`0.7897x`) | `0.7223x` (`0.8178x`) |
+
+- **Wins & Losses Summarized:**
+  - **`C1` (`M=8`) Crossover:** Rust trails at `R* <= 0.95`, then overtakes FAISS at **`R* >= 0.98`** (`1,356.90` vs `1,081.52 QPS` / `1.0779` vs `1.4868 ms` `p99` at `1M R*=0.98`, reaching `0.994700` recall while FAISS caps at `0.989550`).
+  - **Root Cause of Default `C2`/`C3` Gap (`C2-nkp`):** Default `HnswConfig` sets `keep_pruned_shrink -> true` (backfilling reverse-edge shrink), which saturates Layer-0 with short-range edges on `M >= 16`. Disabling it (`C2-nkp`) boosts `1M C2` QPS by `+17.0%..+53.0%`, lifts `ef=600` recall to `0.999140` (`> FAISS 0.998720`), and overtakes FAISS at **`1M R*=0.995` (`1.0371x` QPS, `1.5661x` lower `p99`)**. Default `C2` and `C3` still trail FAISS across all matched recall points (`0.5023x–0.8255x` QPS).
+  - **Multi-Thread Search (`C2`, `T in {1, 6, 16}`):** On solo `1M` batch runs, Rust `search_batch_parallel` scales `4.83x–6.78x` (`T=6`, `0x0555`) and `6.10x–8.41x` (`T=16`, `0xffff`), achieving **`87.3%–93.9%` (`T=6`) and `83.5%–90.5%` (`T=16`)** of FAISS OpenMP matched-recall Mode 1 QPS (`18,608.51` at `R*=0.95`, `11,026.70` at `R*=0.98` for `T=16`).
+- **Honest Caveats:**
+  - *Windows `balanced` power plan & concurrent `0x0004`/`0x0400` runs:* All `22` reports ran under Windows `balanced` power mode; single-thread `100k` (`C2`/`C3`) and `1M` (`C1`/`C2`/`C3`) paired Rust (`0x0004`) and FAISS (`0x0400`) concurrently on distinct P-cores sharing L3/DRAM (raising `1M C2` build from `450.301 s` Phase 4 solo to `625.665 s` and widening `Mode 2` `p99` variance), while `C2-nkp` and `T=6`/`T=16` ran solo.
+  - *FFI & Instrumentation:* Headline throughput ratios use Mode 1 pure batch (zero per-query FFI/timer overhead); FAISS Mode 2 `search_c` adds median `ffi_delta_us` of `6.3050 us/q` (`100k`) / `7.9195 us/q` (`1M`; `7.0058 us/q` combined), `12x–100x` smaller than claimed Rust `p99` margins (`95.6–766.2 us`). Rust `dist_evals_mean` is `null` (built without `--features instrument`), while FAISS `ndis`/`nhops`/`ns_per_ndis` are detailed in [`results/phase7/FINDINGS.md`](results/phase7/FINDINGS.md).
+- **Charts ([`scripts/plot_phase7.py`](scripts/plot_phase7.py)):** [`results/phase7/`](results/phase7/) (combined `100k`+`1M` Charts 1–3 + `1M` Chart 4), [`results/phase7/charts_100k/`](results/phase7/charts_100k/), and [`results/phase7/charts_1m/`](results/phase7/charts_1m/):
+  1. [`chart1_recall_vs_p99.png`](results/phase7/chart1_recall_vs_p99.png) ([SVG](results/phase7/chart1_recall_vs_p99.svg)) — Mode 2 `Recall@10` vs `p99` latency (log y-axis; FAISS `search_c` includes `7.23 us/q` combined median FFI delta)
+  2. [`chart2_recall_vs_qps.png`](results/phase7/chart2_recall_vs_qps.png) ([SVG](results/phase7/chart2_recall_vs_qps.svg)) — Mode 1 pure-batch `Recall@10` vs single-thread QPS (zero per-query FFI/timer overhead)
+  3. [`chart3_matched_recall_ratios.png`](results/phase7/chart3_matched_recall_ratios.png) ([SVG](results/phase7/chart3_matched_recall_ratios.svg)) — Matched-recall Mode 1 QPS & Mode 2 `p99` speedup ratios ($R^* \in \{0.90, 0.95, 0.98, 0.99, 0.995\}$)
+  4. [`chart4_multithread_and_build.png`](results/phase7/chart4_multithread_and_build.png) ([SVG](results/phase7/chart4_multithread_and_build.svg)) — `1M C2` multi-thread batch QPS (`T in {1, 6, 16}`), build time (`Asymmetry note`), graph memory & Peak RSS
 
 

@@ -3,7 +3,7 @@
 Read this first, then `CLAUDE.md` and `CONTEXT_AND_MEMORY.md`. This file is the most recent state; if they disagree, this wins.
 
 ## Project in one line
-From-scratch HNSW ANN search in Rust (`#![forbid(unsafe_code)]`, std only), benchmarked against brute force and FAISS. Milestones M0–M3 (Phases 1–5) are complete (`T0.1`–`T3.11`). **Paused at Gates G5 & G6 awaiting Dev's sign-off on [`results/phase6/DESIGN.md`](results/phase6/DESIGN.md) (Phase 6 Quantization) and [`results/phase7/DESIGN.md`](results/phase7/DESIGN.md) (Phase 7 vs FAISS) before any M4/M5 implementation code begins.**
+From-scratch HNSW ANN search in Rust (`#![forbid(unsafe_code)]`, std only), benchmarked against brute force and FAISS. **Milestones M0–M5 (Phases 1–7) are complete (`T0.1`–`T5.7`, except optional `T1.8` intentionally skipped):** Phase 6 quantization (`SQ8` & `PQ` in [`results/phase6/FINDINGS.md`](results/phase6/FINDINGS.md) & [`results/phase6/PROPOSAL.md`](results/phase6/PROPOSAL.md)) and Phase 7 head-to-head vs FAISS `IndexHNSWFlat` ([`results/phase7/FINDINGS.md`](results/phase7/FINDINGS.md) & [`results/phase7/matched_recall_summary.json`](results/phase7/matched_recall_summary.json)) are implemented, benchmarked at `100k`/`1M` on commit `9f79165`, plotted, and reconciled.
 
 ## Working agreement
 - Dev designs, agents code. Do not start a later phase until the current one is reviewed.
@@ -13,10 +13,10 @@ From-scratch HNSW ANN search in Rust (`#![forbid(unsafe_code)]`, std only), benc
 - A check that did not run must never be reported as passed. (This rule exists because of review finding 1 below.)
 
 ## Current verified state
-- `cargo test --release`: **184 pass** (`35` lib unit + `16` `phase1` + `23` `phase2` + `12` `adversarial_hnsw` + `10` `adversarial_graph_fingerprint` + `8` `challenge_m1_p35` + `11` `phase3` + `4` `phase4` + `10` `rust_metadata` + `7` `rust_filtered_knn` + `14` `rust_filtered_strategy1` + `13` `rust_filtered_strategy2` + `14` `rust_filtered_strategy3` + `3` `rust_filtered_counters` + `4` `rust_phase5`).
+- `cargo test --release`: **223 pass** (`35` lib unit + `188` across `18` `tests/*.rs`: `16` `rust_phase1` + `23` `rust_phase2` + `12` `adversarial_hnsw` + `10` `adversarial_graph_fingerprint` + `8` `challenge_m1_p35` + `11` `rust_phase3` + `4` `rust_phase4` + `10` `rust_metadata` + `7` `rust_filtered_knn` + `14` `rust_filtered_strategy1` + `13` `rust_filtered_strategy2` + `14` `rust_filtered_strategy3` + `3` `rust_filtered_counters` + `4` `rust_phase5` + `16` `rust_phase6` + `12` `rust_phase6_pq` + `7` `rust_phase6_cli` + `4` `rust_phase7`).
 - `cargo test --release --features instrument --test challenge_m1_p35_tests --test rust_filtered_counters_tests`: **11 pass** (`8 + 3`).
 - `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` (both default and `--features instrument`) clean.
-- `pytest`: **33 pass** (`23` `test_phase1` + `4` `test_rust_parity` + `5` `test_filtered_parity` + `1` `test_phase5_pipeline`, 0 skipped); `ruff check .` and `mypy src tests scripts` clean.
+- `pytest`: **56 pass** (`23` `test_phase1` + `4` `test_rust_parity` + `5` `test_filtered_parity` + `1` `test_phase5_pipeline` + `16` `test_phase6_parity` + `7` `test_phase7_harness`, 0 skipped); `ruff check .` and `mypy src tests scripts` clean.
 - Needs Rust >= 1.88 (`rust-version` in `Cargo.toml`; `as_chunks` and lockfile v4).
 - Git: Phase 1 to 3, the Phase 3 review fixes (`review_fixes.patch`, commit `d4b6fed` + `9e3c1a2`), the Phase 3 follow-up fixes, and **Phase 3.5 (Milestone M1)** are implemented and verified:
   - `T1.1` / `T1.4`: Zero-cost `--features instrument` phase timing and distance evaluation counters (`search_layer` 78.83%, `shrink` 14.19%, `heuristic` 4.80% on 1M).
@@ -85,6 +85,14 @@ Phase 3 (after Phase 3.5 `T1.7` `u32` flat adjacency), SIFT1M, M=16, efC=100, k=
 
 Build 493.8 s (2,025.2 vectors/s; 415.1 s / 2,409.2 vectors/s with `--no-keep-pruned-shrink`; 100k 3-run median dropped from 30.299 s to 27.157 s default / 21.351 s with `--no-keep-pruned-shrink`). Isolated Peak RSS after build: **11.94 MiB** at 10k, **69.21 MiB** at 100k, **646.05 MiB** at 1M (down 199.7 MiB from 845.75 MiB). 664.91 B/vector total: 512.00 B raw + 152.91 B graph total / **148.91 B graph-only** (layer-0 flat `u32` edges 132.00 B, `HnswNodeMeta` structs 8.00 B, upper-layer arena 8.91 B, outer headers 0.00 B, visited tags 4.00 B). Recall at fixed efSearch=50 falls with scale (99.75% at 10k, 98.14% at 100k, 94.70% at 1M), so efSearch must grow with N.
 
+Phase 6 (`100k` 11 arms solo `0x0004`; `1M` 9 Tier 1+2 arms 2-P-core sharded `0x0004,0x0400`, `9f79165`, `power_mode = "balanced"`):
+- Kernel microbench (`pilot/microbench_kernels.json`): Way A `sq8_query_shifted` (`47.1285 ns`, `4.6115e-5` adversarial abs error) adopted as default over Way B `sq8_norm_expanded` (`36.9335 ns`, `63.9910` adversarial abs error); `pq16_adc` `9.8310 ns` (`4.03x` vs `f32` `39.6600 ns`), `pq32_adc` `20.1700 ns` (`1.97x`).
+- Streaming `sq8_only_qbuild` (`QuantizedDirect`) cuts `build_peak_rss_mb` to `48.90 MiB` (`100k`, `-44.2%`) and `277.29 MiB` (`1M`, `-64.4%` vs `778.37 MiB`), matching `sq8_only_f32graph` recall within `-0.00012` (`100k` `ef=100`) / `+0.00024` (`1M` `ef=100`). Isolated query-serving `PeakWorkingSet64` drops from `642.71 MiB` (`1M f32_m16`) to `276.02 MiB` (`sq8_only_f32graph`), `184.67 MiB` (`pq32_only_f32graph`), and `169.55 MiB` (`pq16_only_f32graph`). `SQ8+Rerank R=20` recovers 100% of `FullBeam`/`f32` recall (`1M` `0.98060` @ `ef=100`, `0.99804` @ `ef=600`); `pq16_rerank_f32graph` beats `f32_m16` at `>=0.99` recall (`+40.9%` QPS at `100k`, `+27.0%` QPS / `-40.2%` `p99` at `1M`), and `1M pq32_rerank_f32graph` (`ef=300, FB`) hits `0.99561` at `994.0 QPS` (`+49.8%` vs Phase 6 `f32_m16`, `+9.1%` vs solo Phase 4 `f32_m16`).
+
+Phase 7 (`100k` & `1M` Rust vs `faiss-cpu 1.15.1` `IndexHNSWFlat`, `22` reports on `9f79165`, `SIMDLevel_NONE` baseline SSE2 parity, `power_mode = "balanced"`):
+- Single-thread matched recall (`results/phase7/matched_recall_summary.json`): Rust `C1` (`M=8, efC=100`) overtakes FAISS at `R*=0.98+` (`1.0392x..1.2582x` Mode 1 QPS at `100k`; `1.2546x` QPS / `1.3793x` lower `p99` at `1M R*=0.98`). Default `C2` (`0.6241x–0.7987x`) and `C3` (`0.5023x–0.8255x`) trail FAISS due to reverse-shrink backfill; `C2-nkp` (`keep_pruned_shrink=false`) cuts `100k`/`1M` build by `23.56%`/`31.46%` (`22.876 s` / `428.827 s`), reaches `0.999890`/`0.999140` recall, closes `100k` to `0.9772x` (`R*=0.995`), and overtakes FAISS `C2` at `1M R*=0.995` (`1.0371x` Mode 1 QPS, `1.5661x` lower Mode 2 `p99`).
+- Asymmetry & scaling: FAISS OpenMP `add()` builds `8.96x` (`100k T=16`: `3.339 s`) and `8.19x` (`1M T=16`: `76.360 s` vs concurrent `0x0004` `625.665 s`) faster; Rust saves `~92 MiB` (`100k`) / `~524–526 MiB` (`1M`) isolated Peak RSS (`1.68x–2.21x`); multi-thread `C2` (`T=6, 16`) reaches `87.3%–93.9%` (`T=6`) and `83.5%–90.5%` (`T=16`) of FAISS `1M` Mode 1 QPS.
+
 ## Design decisions already made (do not undo)
 - `HnswConfig.m_max`, `m_max0`, `m_l` are `Option` overrides, derived from `m` when `None` (`effective_m_max()`, `effective_m_max0()`, `effective_m_l()`). `HnswConfig.keep_pruned_shrink` is an `Option<bool>` override defaulting to `None` (which delegates to `keep_pruned` via `effective_keep_pruned_shrink()`). No sentinel-value guessing.
 - `insert(id)` requires ids in order `0..n` and `matrix.rows() <= u32::MAX as usize`; anything else returns `InvalidArgument`.
@@ -93,12 +101,20 @@ Build 493.8 s (2,025.2 vectors/s; 415.1 s / 2,409.2 vectors/s with `--no-keep-pr
 - Sweep points with `ef < k` collapse to `ef == k` (the index clamps them).
 - Distance ties break on `(distance, id)` everywhere. Keep it, since parity tests depend on it.
 - Report flags: `reproducibility_checked`, `reproducibility_verified`, `measured_this_run` and the computed `phase3_completed` are part of the JSON contract now. Do not turn them back into constants.
+- `CompactHnswGraph` (`src/quantized/graph.rs`) reproduces the `T1.7` flat `u32` adjacency layout in a lifetime-free owned struct: `from_hnsw_index` clones topology via read-only public accessors to keep `src/hnsw.rs` `PRESERVING`-untouched (`graph_fingerprint()` bit-exact), while `build_with_source` constructs graphs directly over any `QuantizedDistanceSource`.
+- Way A `Sq8KernelKind::QueryShifted` (`128 B/vec`, `0` aux bytes) is the default SQ8 kernel over Way B `NormExpanded` (`+4 B/vec`) to avoid `f32` catastrophic cancellation (`4.6115e-5` vs `63.9910` adversarial max abs error).
+- PQ training defaults (`PqConfig`): `K = 256` (`PQ_K_CENTROIDS`), `PQ_DEFAULT_MAX_TRAIN_VECTORS = 65_536` cap (`N_train = min(N, 65_536)`), `max_lloyd_iters = 25`, deterministic `Xoshiro256**` `seed = 42`, `M_pq in {16, 32}`; temporary `PqWithSdc` lookup tables are dropped via `into_pq_vectors()` right after `QuantizedDirect` graph construction so steady-state `PQ16`/`PQ32` never retain them.
+- Quantized top-$R$ rerank enforces `effective_ef = ef_search.max(R).max(k)` (`CompactHnswGraph::effective_ef_search`) so low-`efSearch` rerank curves never collapse below `R` or `k`.
+- Phase 7 Windows process affinity pinning (`scripts/benchmark_faiss.py`) uses explicit 64-bit `ctypes.wintypes` `SetProcessAffinityMask` / `GetProcessAffinityMask` signatures with post-set verification (`masked == requested`), and isolates Mode 1 pure batch (`idx.search` / `search_batch_parallel`) from Mode 2 per-query (`idx.search_c` / `search_batch_timed_with_tracker`) with explicit `ffi_delta_us` (`instant_overhead_us` on Rust).
 
 ## Known limitations
 - Inner-product mode is only parity-tested. The diversity heuristic assumes distance-like (non-negative) values, which negative dot products violate. Do not report IP recall as validated.
 - `siftsmall` saturates at 100% recall by ef=50, so it says little about graph quality. SIFT1M is the real test.
 - `HnswIndex` borrows the matrix (`&'a RowMatrix<f32>`); there is no deletion or update.
-- Graph storage uses flat `u32` adjacency (`layer0` stride `m_max0 + 1 = 33` slots, `upper_arena` stride `m_max + 1 = 17` slots, 8-byte `HnswNodeMeta`), costing 148.91 B/vector graph-only (152.91 B/vector incl. visited tags) on SIFT1M.
+- Graph storage uses flat `u32` adjacency (`layer0` stride `m_max0 + 1 = 33` slots, `upper_arena` stride `m_max + 1 = 17` slots, 8-byte `HnswNodeMeta`), costing 148.91 B/vector graph-only (152.91 B/vector incl. visited tags) on `HnswIndex` SIFT1M (`144.53 B/vec` on `CompactHnswGraph` without upper slack).
+- Rust `HnswIndex::build` is strictly single-threaded (`1`-thread deterministic) vs FAISS OpenMP `add()` (`8.96x` faster at `100k T=16`, `8.19x` faster at `1M T=16` vs `0x0004`).
+- Phase 7 benchmarks compare stock PyPI `faiss-cpu 1.15.1` (`SIMDLevel_NONE`, `avx2_available == false`) against default-target Rust SSE2 (`opt-level = 3, lto = "thin"`, no `.cargo/config.toml`); an explicit AVX2 addendum (`-C target-cpu=native` vs AVX2 FAISS) remains unmeasured optional work.
+- All Phase 6 and Phase 7 runs (`9f79165`) ran under Windows `power_mode = "balanced"` (not `Best Performance`), and `1M` Phase 6 (`0x0004` + `0x0400` 2-P-core sharding) and single-thread Phase 7 `100k C2/C3` + `1M C1/C2/C3` (`0x0004` Rust + `0x0400` FAISS concurrently) shared L3/DRAM bandwidth, causing higher `1M C2` concurrent build time (`625.665 s` vs `450.301 s` Phase 4 solo) and occasional `p99` tail spikes (e.g., `sq8_only_m32` `1M ef >= 70`).
 
 ## How to move forward
 Order matters. Do not skip ahead, and stop for Dev's review after each numbered step.
@@ -114,22 +130,35 @@ Order matters. Do not skip ahead, and stop for Dev's review after each numbered 
    - Tested `T1.5` (`seen_tags` in `HeuristicScratch`) and `T1.6` (`search_layer` heap scratch reuse) at 100k — both showed no improvement beyond baseline noise and were reverted (`"no gain"` logged);
    - Implemented and kept `T1.7` (`u32` ids and flat fixed-capacity adjacency in `layer0` + `upper_arena`), cutting graph-only memory by 56.0% (`338.67 -> 148.91 B/vector`), 1M Peak RSS by 199.7 MiB (`845.75 -> 646.05 MiB`), and 100k 3-run median build time by 10.37% (`30.299 s -> 27.157 s`);
    - Implemented and evaluated `T1.9` (`keep_pruned_shrink = Some(false)` behind config flag) at 100k (`21.351 s`, `-29.53%`) and 1M (`415.076 s`, `-18.81%`), recording the full `efSearch` sweep and matched-latency comparison in `results/phase3_5/LOG.md` for Dev's **Gate G1** decision.
-4. **Every optimization keeps `--repro-check` passing and all tests green.** *(Verified: 84 Rust tests + 27 Python tests pass; golden 10k/100k fixtures and 1M `--repro-check` match bit-for-bit.)*
+4. **Every optimization keeps `--repro-check` passing and all tests green.** *(Verified at M1 gate: 84 Rust + 27 Python tests; currently 223 default Rust + 11 instrument + 56 Python tests pass, golden 10k/100k fixtures and 1M `--repro-check` match bit-for-bit.)*
 5. **Phase 4:** T2.1–T2.6 complete (100k 23-config grid + 1M 4-point confirmations, charts, CLAIMS.md §10; see `results/phase4/G3_CHECKLIST.md`).
 6. **Phase 5 (Milestone M3, `T3.1`–`T3.11`):** Complete (`b9fc648`).
    - Added `DenseBitset`, Mode A/B deterministic metadata generators, filtered `ExactKnn`, `S1`/`S2`/`S3` filtered HNSW strategies, `DEFAULT_OPAQUE_EVAL_LIMIT = 16_384` + `with_opaque_eval_limit()` (keeping `FilteredSearchParams::default().eval_limit == None`), zero-overhead `FilteredSearchCounters`, versioned `.bin`/`.ivecs`/`.fvecs` caches (`data/phase5/`), Option C benchmark suite (`100k` solo `0x0004` + `1M` sharded across P-cores `0x0004/0x0010/0x0040/0x0100`, `48` cells + `100k`/`1M` sensitivity), charts (`scripts/plot_phase5.py`), [`results/phase5/FINDINGS.md`](results/phase5/FINDINGS.md), and [`results/CLAIMS.md`](results/CLAIMS.md#L292) §11.
    - Observed `0.95` recall crossovers $\sigma^*$: `100k` Mode A `0.079149` -> `1M` `0.023799` ($3.33\times$ shift); `100k` Mode B `0.252372` -> `1M` `0.120868` ($2.09\times$ shift).
-7. **Next — Gates G5 & G6 (Before M4 & M5):** Authored [`results/phase6/DESIGN.md`](results/phase6/DESIGN.md) (`SQ8`/`PQ` quantization) and [`results/phase7/DESIGN.md`](results/phase7/DESIGN.md) (`FAISS IndexHNSWFlat` head-to-head protocol). **Stopped for Dev's sign-off at Gates G5 & G6 before writing M4/M5 implementation code.**
+7. **Phase 6 (Milestone M4, `T4.1`–`T4.9`):** Complete (`416c8f9`, `1074e1d`, `9f79165`).
+   - Added `src/quantized/` (`CompactHnswGraph`, `Sq8Quantizer`/`HnswSq8Index`, `PqTrainer`/`HnswPqIndex`), `src/phase6.rs`, `src/bin/phase6.rs`, and `scripts/plot_phase6.py` while keeping `src/hnsw.rs` `f32` paths untouched.
+   - Executed `pilot/microbench_kernels.json`, `11` `100k` arms (solo `0x0004`), and `9` Tier 1+2 `1M` arms (sharded `0x0004,0x0400`, `244.06 min` core-minutes within `252.89 min` conservative bound in [`results/phase6/PROPOSAL.md`](results/phase6/PROPOSAL.md)), authoring [`results/phase6/FINDINGS.md`](results/phase6/FINDINGS.md) and [`results/CLAIMS.md`](results/CLAIMS.md) §12.
+8. **Phase 7 (Milestone M5, `T5.1`–`T5.7`):** Complete (`388e601`, `75faa5e`, `9f79165`).
+   - Added `src/bin/phase7.rs`, [`scripts/benchmark_faiss.py`](scripts/benchmark_faiss.py), and [`scripts/plot_phase7.py`](scripts/plot_phase7.py); executed `22` isolated-process reports (`11` at `100k`, `11` at `1M`) under stock `SIMDLevel_NONE` baseline SSE2 parity, generated [`results/phase7/matched_recall_summary.json`](results/phase7/matched_recall_summary.json), authored [`results/phase7/FINDINGS.md`](results/phase7/FINDINGS.md), and logged [`results/CLAIMS.md`](results/CLAIMS.md) §13.
+9. **Next — Final CI Push & Optional Future Work:** Push M4/M5 commits + reconciled docs/claims and confirm `.github/workflows/ci.yml` is green on a fresh clone; Dev decides open questions in [`AGENT_PLAN.md`](AGENT_PLAN.md) §7 (optional Phase 7 AVX2 addendum `-C target-cpu=native` vs AVX2 FAISS, `T1.8`, parallel build, handoff docs visibility).
 
 ## Commands
 ```bash
 cargo test --release
 cargo test --release --features instrument --test challenge_m1_p35_tests --test rust_filtered_counters_tests
 cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --features instrument -- -D warnings
 cargo fmt --all -- --check
-cargo run --release --bin phase2 -- --dataset siftsmall --json-out data/phase2_report.json
-cargo run --release --bin phase3 -- --dataset sift1m --json-out data/phase3_report.json
+cargo run --release --bin phase2 -- --dataset siftsmall --json-out results/phase3/phase2_report.json
+cargo run --release --bin phase3 -- --dataset sift1m --json-out results/phase3/phase3_report.json
 cargo run --release --bin phase5 -- --matrix --scale 100000 --reps 5 --include-sensitivity --output-dir results/phase5
+cargo run --release --bin phase6 -- --microbench --output-dir results/phase6/pilot
+cargo run --release --bin phase6 -- --matrix --scale 100000 --reps 3 --affinity 0x0004 --output-dir results/phase6
+cargo run --release --bin phase6 -- --matrix --scale 1000000 --reps 5 --rerank-list 20,100,full_beam --affinity 0x0004 --output-dir results/phase6
+python scripts/plot_phase6.py --results-dir results/phase6 --scale 1000000 --phase4-dir results/phase4 --output-dir results/phase6/charts_1m
+cargo run --release --bin phase7 -- --dataset sift1m --scale 100000 --m 16 --ef-construction 100 --affinity 0x0004 --profile-rss-isolated --json-out results/phase7/rust_n100000_C2.json
+python scripts/benchmark_faiss.py --dataset sift1m --scale 100000 --m 16 --ef-construction 100 --gt-path data/gt_100000_k100.ivecs --affinity 0x0400 --profile-rss-isolated --json-out results/phase7/faiss_n100000_C2.json
+python scripts/plot_phase7.py --results-dir results/phase7 --output-dir results/phase7/charts_1m --scales 1000000
 python -m pytest tests -q -rs && ruff check . && mypy src tests scripts
 ```
 Tip for quick iteration: release builds use `lto = "thin"` and `codegen-units = 1`, which is slow to compile. For test runs only, `CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 cargo test --release` compiles in about 10 s. Never use those overrides for numbers you report.
@@ -144,5 +173,9 @@ Tip for quick iteration: release builds use `lto = "thin"` and `codegen-units = 
 - [x] Dev approves Phase 5 design & Option C matrix (`Gate G4` + `Gate G4.5`).
 - [x] Dev approves Phase 6 Quantization design (`Gate G5`, [`results/phase6/G5_DECISIONS.md`](results/phase6/G5_DECISIONS.md)).
 - [x] Dev approves Phase 7 FAISS protocol (`Gate G6`, [`results/phase7/G6_DECISIONS.md`](results/phase7/G6_DECISIONS.md)).
+- [x] Complete Phase 6 Quantization (`M4 T4.1`–`T4.9`: `SQ8`/`PQ` kernels, `100k`/`1M` matrices, [`results/phase6/PROPOSAL.md`](results/phase6/PROPOSAL.md), [`results/phase6/FINDINGS.md`](results/phase6/FINDINGS.md), `plot_phase6.py` charts).
+- [x] Complete Phase 7 vs FAISS (`M5 T5.1`–`T5.7`: `phase7` + `benchmark_faiss.py` `100k`/`1M` runs, [`results/phase7/matched_recall_summary.json`](results/phase7/matched_recall_summary.json), [`results/phase7/FINDINGS.md`](results/phase7/FINDINGS.md), `plot_phase7.py` charts).
+- [x] Reconcile documentation (`README.md`, `CLAUDE.md`, `AGENT_PLAN.md`, `CONTEXT_AND_MEMORY.md`, `continuation.md`) and [`results/CLAIMS.md`](results/CLAIMS.md) (§12–§13).
 - [ ] CI: confirm green on a fresh clone after pushing.
+- [ ] Optional AVX2 addendum (Phase 7: `-C target-cpu=native` vs AVX2 FAISS build).
 - [x] Update `CLAUDE.md`, `CONTEXT_AND_MEMORY.md` and README test counts whenever tests are added.
