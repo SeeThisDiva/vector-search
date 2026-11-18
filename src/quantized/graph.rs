@@ -25,8 +25,8 @@ use crate::rng::DeterministicRng;
 
 use super::{
     compute_exact_sort_key, format_metric_output_distance, metric_from_u8, metric_to_u8, read_f64,
-    read_u32, read_u32_vec, read_u64, read_u8, write_f64, write_u32, write_u32_slice, write_u64,
-    write_u8,
+    read_magic, read_u32, read_u32_vec, read_u64, read_u8, read_usize_u64, write_f64, write_u32,
+    write_u32_slice, write_u64, write_u8,
 };
 
 const GRAPH_SNAPSHOT_MAGIC: &[u8; 8] = b"CHNSWG01";
@@ -1043,41 +1043,13 @@ impl CompactHnswGraph {
 
     /// Reads and structurally validates a [`CompactHnswGraph`] from a binary stream.
     pub fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
-        let mut magic = [0_u8; 8];
-        reader.read_exact(&mut magic)?;
-        if &magic != GRAPH_SNAPSHOT_MAGIC {
-            return Err(VectorSearchError::CorruptData(
-                "Invalid CompactHnswGraph snapshot magic header".to_string(),
-            ));
-        }
+        read_magic(reader, GRAPH_SNAPSHOT_MAGIC, "CompactHnswGraph")?;
 
         let metric = metric_from_u8(read_u8(reader)?)?;
-        let m = usize::try_from(read_u64(reader)?).map_err(|_| {
-            VectorSearchError::CorruptData("CompactHnswGraph m overflows usize".to_string())
-        })?;
-        let m_max_raw = read_u64(reader)?;
-        let m_max = if m_max_raw == u64::MAX {
-            None
-        } else {
-            Some(usize::try_from(m_max_raw).map_err(|_| {
-                VectorSearchError::CorruptData("CompactHnswGraph m_max overflows usize".to_string())
-            })?)
-        };
-        let m_max0_raw = read_u64(reader)?;
-        let m_max0 = if m_max0_raw == u64::MAX {
-            None
-        } else {
-            Some(usize::try_from(m_max0_raw).map_err(|_| {
-                VectorSearchError::CorruptData(
-                    "CompactHnswGraph m_max0 overflows usize".to_string(),
-                )
-            })?)
-        };
-        let ef_construction = usize::try_from(read_u64(reader)?).map_err(|_| {
-            VectorSearchError::CorruptData(
-                "CompactHnswGraph ef_construction overflows usize".to_string(),
-            )
-        })?;
+        let m = read_usize_u64(reader, "CompactHnswGraph m")?;
+        let m_max = read_opt_usize_u64(reader, "CompactHnswGraph m_max")?;
+        let m_max0 = read_opt_usize_u64(reader, "CompactHnswGraph m_max0")?;
+        let ef_construction = read_usize_u64(reader, "CompactHnswGraph ef_construction")?;
         let has_m_l = read_u8(reader)?;
         let m_l_val = read_f64(reader)?;
         let m_l = match has_m_l {
@@ -1089,24 +1061,8 @@ impl CompactHnswGraph {
                 )));
             }
         };
-        let extend_candidates = match read_u8(reader)? {
-            0 => false,
-            1 => true,
-            other => {
-                return Err(VectorSearchError::CorruptData(format!(
-                    "Invalid extend_candidates byte: {other}"
-                )));
-            }
-        };
-        let keep_pruned = match read_u8(reader)? {
-            0 => false,
-            1 => true,
-            other => {
-                return Err(VectorSearchError::CorruptData(format!(
-                    "Invalid keep_pruned byte: {other}"
-                )));
-            }
-        };
+        let extend_candidates = read_bool_u8(reader, "extend_candidates")?;
+        let keep_pruned = read_bool_u8(reader, "keep_pruned")?;
         let keep_pruned_shrink = match read_u8(reader)? {
             0 => None,
             1 => Some(false),
@@ -1132,32 +1088,21 @@ impl CompactHnswGraph {
         };
         config.validate()?;
 
-        let num_vectors = usize::try_from(read_u64(reader)?).map_err(|_| {
-            VectorSearchError::CorruptData(
-                "CompactHnswGraph num_vectors overflows usize".to_string(),
-            )
-        })?;
+        let num_vectors = read_usize_u64(reader, "CompactHnswGraph num_vectors")?;
         if num_vectors > u32::MAX as usize {
             return Err(VectorSearchError::CorruptData(format!(
                 "CompactHnswGraph num_vectors {num_vectors} exceeds u32::MAX"
             )));
         }
 
-        let ep_raw = read_u64(reader)?;
-        let enter_point = if ep_raw == u64::MAX {
-            None
-        } else {
-            let ep = usize::try_from(ep_raw).map_err(|_| {
-                VectorSearchError::CorruptData(
-                    "CompactHnswGraph entry_point overflows usize".to_string(),
-                )
-            })?;
-            if ep >= num_vectors {
+        let enter_point = match read_opt_usize_u64(reader, "CompactHnswGraph entry_point")? {
+            None => None,
+            Some(ep) if ep < num_vectors => Some(ep),
+            Some(ep) => {
                 return Err(VectorSearchError::CorruptData(format!(
                     "CompactHnswGraph entry_point {ep} out of range for {num_vectors} nodes"
                 )));
             }
-            Some(ep)
         };
         if num_vectors == 0 && enter_point.is_some() {
             return Err(VectorSearchError::CorruptData(
@@ -1165,17 +1110,9 @@ impl CompactHnswGraph {
             ));
         }
 
-        let top_layer = usize::try_from(read_u64(reader)?).map_err(|_| {
-            VectorSearchError::CorruptData("CompactHnswGraph top_layer overflows usize".to_string())
-        })?;
-        let l0_stride = usize::try_from(read_u64(reader)?).map_err(|_| {
-            VectorSearchError::CorruptData("CompactHnswGraph l0_stride overflows usize".to_string())
-        })?;
-        let upper_stride = usize::try_from(read_u64(reader)?).map_err(|_| {
-            VectorSearchError::CorruptData(
-                "CompactHnswGraph upper_stride overflows usize".to_string(),
-            )
-        })?;
+        let top_layer = read_usize_u64(reader, "CompactHnswGraph top_layer")?;
+        let l0_stride = read_usize_u64(reader, "CompactHnswGraph l0_stride")?;
+        let upper_stride = read_usize_u64(reader, "CompactHnswGraph upper_stride")?;
 
         let expected_m_max0 = config.effective_m_max0();
         let expected_m_max = config.effective_m_max();
@@ -1695,4 +1632,27 @@ fn drain_heap_sorted_asc(heap: &mut BinaryHeap<Candidate>, out: &mut Vec<Candida
         out.push(cand);
     }
     out.reverse();
+}
+
+#[inline]
+fn read_opt_usize_u64<R: Read>(reader: &mut R, label: &str) -> Result<Option<usize>> {
+    let raw = read_u64(reader)?;
+    if raw == u64::MAX {
+        Ok(None)
+    } else {
+        usize::try_from(raw)
+            .map(Some)
+            .map_err(|_| VectorSearchError::CorruptData(format!("{label} overflows usize")))
+    }
+}
+
+#[inline]
+fn read_bool_u8<R: Read>(reader: &mut R, label: &str) -> Result<bool> {
+    match read_u8(reader)? {
+        0 => Ok(false),
+        1 => Ok(true),
+        other => Err(VectorSearchError::CorruptData(format!(
+            "Invalid {label} byte: {other}"
+        ))),
+    }
 }

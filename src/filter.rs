@@ -35,71 +35,35 @@ pub trait FilterPredicate: Send + Sync {
     }
 }
 
-impl<P: FilterPredicate + ?Sized> FilterPredicate for &P {
-    #[inline]
-    fn matches(&self, id: u32) -> bool {
-        (**self).matches(id)
-    }
+macro_rules! impl_forwarding_filter_predicate {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl<P: FilterPredicate + ?Sized> FilterPredicate for $ty {
+                #[inline]
+                fn matches(&self, id: u32) -> bool {
+                    (**self).matches(id)
+                }
 
-    #[inline]
-    fn bitset(&self) -> Option<&DenseBitset> {
-        (**self).bitset()
-    }
+                #[inline]
+                fn bitset(&self) -> Option<&DenseBitset> {
+                    (**self).bitset()
+                }
 
-    #[inline]
-    fn count_matching(&self, total: usize) -> Option<usize> {
-        (**self).count_matching(total)
-    }
+                #[inline]
+                fn count_matching(&self, total: usize) -> Option<usize> {
+                    (**self).count_matching(total)
+                }
 
-    #[inline]
-    fn estimated_selectivity(&self) -> Option<f64> {
-        (**self).estimated_selectivity()
-    }
+                #[inline]
+                fn estimated_selectivity(&self) -> Option<f64> {
+                    (**self).estimated_selectivity()
+                }
+            }
+        )+
+    };
 }
 
-impl<P: FilterPredicate + ?Sized> FilterPredicate for Box<P> {
-    #[inline]
-    fn matches(&self, id: u32) -> bool {
-        (**self).matches(id)
-    }
-
-    #[inline]
-    fn bitset(&self) -> Option<&DenseBitset> {
-        (**self).bitset()
-    }
-
-    #[inline]
-    fn count_matching(&self, total: usize) -> Option<usize> {
-        (**self).count_matching(total)
-    }
-
-    #[inline]
-    fn estimated_selectivity(&self) -> Option<f64> {
-        (**self).estimated_selectivity()
-    }
-}
-
-impl<P: FilterPredicate + ?Sized> FilterPredicate for std::sync::Arc<P> {
-    #[inline]
-    fn matches(&self, id: u32) -> bool {
-        (**self).matches(id)
-    }
-
-    #[inline]
-    fn bitset(&self) -> Option<&DenseBitset> {
-        (**self).bitset()
-    }
-
-    #[inline]
-    fn count_matching(&self, total: usize) -> Option<usize> {
-        (**self).count_matching(total)
-    }
-
-    #[inline]
-    fn estimated_selectivity(&self) -> Option<f64> {
-        (**self).estimated_selectivity()
-    }
-}
+impl_forwarding_filter_predicate!(&P, Box<P>, std::sync::Arc<P>);
 
 /// Cache-line aligned dense bitset storing 1 bit per vector ID in contiguous 64-bit words.
 #[derive(Debug, Clone, PartialEq, Eq)]

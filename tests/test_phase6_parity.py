@@ -18,8 +18,6 @@ and end-to-end `scripts/plot_phase6.py` integration verification with 0 skipped 
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -27,12 +25,13 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 from numpy.typing import NDArray
 
 from scripts.plot_phase6 import generate_all_phase6_charts
 from src.hnsw_phase1.dataset import write_fvecs
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from src.hnsw_phase1.recall import compute_recall_at_k
+from tests.helpers import REPO_ROOT, assert_charts_created, resolve_rust_binary
 
 EXPECTED_PHASE6_CHART_STEMS: tuple[str, ...] = (
     "chart1_recall_vs_p99",
@@ -504,22 +503,6 @@ def rerank_top_r_search(
     return cand_ids[rerank_order[:eff_k]].astype(np.int32)
 
 
-def compute_recall_at_k(
-    approx_ids: NDArray[np.int32],
-    gt_ids: NDArray[np.int32],
-    k: int,
-) -> float:
-    """Compute average set-overlap Recall@k across all queries."""
-    if approx_ids.shape[0] != gt_ids.shape[0] or approx_ids.shape[0] == 0:
-        raise ValueError("Mismatched or empty query counts in compute_recall_at_k")
-    total = 0.0
-    for q_idx in range(approx_ids.shape[0]):
-        gt_set = set(gt_ids[q_idx, :k].tolist())
-        ap_set = set(approx_ids[q_idx, :k].tolist())
-        total += float(len(gt_set & ap_set)) / float(len(gt_set))
-    return total / float(approx_ids.shape[0])
-
-
 # ============================================================================
 # SQ8 Parity & Mathematical Tests
 # ============================================================================
@@ -674,19 +657,13 @@ def test_sq8_symmetric_distance_axioms_and_validation() -> None:
             assert dab == dba
             assert np.isclose(dab, ref, rtol=1e-5, atol=1e-5)
 
-    try:
+    with pytest.raises(ValueError):
         bad_base = base.copy()
         bad_base[0, 0] = np.nan
         sq8_calibrate(bad_base)
-        raise AssertionError("Expected ValueError for NaN base vector")
-    except ValueError:
-        pass
 
-    try:
+    with pytest.raises(ValueError):
         sq8_asymmetric_l2_squared(np.zeros(15, dtype=np.float32), codes, cal)
-        raise AssertionError("Expected ValueError for query dimension mismatch")
-    except ValueError:
-        pass
 
 
 # ============================================================================
@@ -707,19 +684,13 @@ def test_pq_training_determinism_and_validation() -> None:
     assert np.array_equal(pq_encode(base, cb1), pq_encode(base, cb2))
     assert not np.array_equal(cb1.centroids, cb3.centroids)
 
-    try:
+    with pytest.raises(ValueError):
         pq_train(base, m_pq=6)
-        raise AssertionError("Expected ValueError when dim % m_pq != 0")
-    except ValueError:
-        pass
 
-    try:
+    with pytest.raises(ValueError):
         bad = base.copy()
         bad[3, 1] = np.inf
         pq_train(bad, m_pq=8)
-        raise AssertionError("Expected ValueError on non-finite input")
-    except ValueError:
-        pass
 
 
 def test_pq_adc_table_matches_direct_centroid_sum() -> None:
@@ -821,11 +792,8 @@ def test_rerank_r_equals_k_invariance_and_r_gt_k_lift() -> None:
 
     # Confirm invalid rerank_top_r == 0 is rejected
     q0_dists = pq_adc_distances(pq_compute_adc_table(queries[0], cb), codes)
-    try:
+    with pytest.raises(ValueError):
         rerank_top_r_search(queries[0], base, q0_dists, k=k, ef_search=ef_search, rerank_top_r=0)
-        raise AssertionError("Expected ValueError for rerank_top_r=0")
-    except ValueError:
-        pass
 
     results_by_r: dict[int | None, NDArray[np.int32]] = {}
     for r_val in (None, k, 50, 150, n_base):
@@ -952,19 +920,6 @@ def _make_synthetic_arm_json(
         "sweep": sweep,
     }
     return payload
-
-
-def _assert_valid_charts_created(output_dir: Path) -> None:
-    for stem in EXPECTED_PHASE6_CHART_STEMS:
-        png = output_dir / f"{stem}.png"
-        svg = output_dir / f"{stem}.svg"
-        assert png.is_file(), f"Missing PNG chart: {png}"
-        assert svg.is_file(), f"Missing SVG chart: {svg}"
-        assert png.stat().st_size > 1000, f"Empty/tiny PNG chart: {png}"
-        assert svg.stat().st_size > 1000, f"Empty/tiny SVG chart: {svg}"
-        assert png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n", f"Invalid PNG header in {png}"
-        svg_text = svg.read_text(encoding="utf-8")
-        assert "<svg" in svg_text and "</svg>" in svg_text, f"Invalid SVG content in {svg}"
 
 
 def test_plot_phase6_end_to_end_synthetic_full_matrix(tmp_path: Path) -> None:
@@ -1115,7 +1070,7 @@ def test_plot_phase6_end_to_end_synthetic_full_matrix(tmp_path: Path) -> None:
         check=False,
     )
     assert proc.returncode == 0, f"STDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
-    _assert_valid_charts_created(charts_dir)
+    assert_charts_created(charts_dir, EXPECTED_PHASE6_CHART_STEMS)
 
 
 def test_plot_phase6_partial_subset_and_phase4_baseline_merge(tmp_path: Path) -> None:
@@ -1201,7 +1156,7 @@ def test_plot_phase6_partial_subset_and_phase4_baseline_merge(tmp_path: Path) ->
         phase4_dir=phase4_dir,
     )
     assert len(created) == 8
-    _assert_valid_charts_created(charts_dir)
+    assert_charts_created(charts_dir, EXPECTED_PHASE6_CHART_STEMS)
 
 
 def test_plot_phase6_deterministic_svg_and_multiscale_error(tmp_path: Path) -> None:
@@ -1252,42 +1207,13 @@ def test_plot_phase6_deterministic_svg_and_multiscale_error(tmp_path: Path) -> N
     (results_dir / "phase6_n100000_sq8_only.json").write_text(
         json.dumps(arm_100k), encoding="utf-8"
     )
-    try:
+    with pytest.raises(ValueError):
         generate_all_phase6_charts(results_dir=results_dir, output_dir=out_a, scale=None)
-        raise AssertionError("Expected ValueError when multiple scales exist and scale=None")
-    except ValueError:
-        pass
 
 
 # ============================================================================
 # Live Rust `phase6` Binary Parity & End-to-End Plotter Integration Tests
 # ============================================================================
-
-
-def _resolve_rust_phase6_binary() -> Path:
-    """Locate (or build if absent) the compiled release `phase6` binary without skipping."""
-    exe_name = "phase6.exe" if os.name == "nt" else "phase6"
-    release_bin = REPO_ROOT / "target" / "release" / exe_name
-    if release_bin.is_file():
-        return release_bin
-
-    cargo = shutil.which("cargo")
-    if cargo is None:
-        raise FileNotFoundError(
-            f"Compiled binary missing at {release_bin} and `cargo` is not on PATH."
-        )
-    proc = subprocess.run(
-        [cargo, "build", "--release", "--bin", "phase6"],
-        cwd=str(REPO_ROOT),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if proc.returncode != 0 or not release_bin.is_file():
-        raise RuntimeError(
-            f"Failed to build release phase6 binary (rc={proc.returncode}):\n{proc.stderr}"
-        )
-    return release_bin
 
 
 def _make_parity_clustered_dataset(
@@ -1315,7 +1241,7 @@ def _make_parity_clustered_dataset(
 
 def test_live_rust_phase6_parity_check(tmp_path: Path) -> None:
     """Verify live `phase6 --parity-check` SQ8, PQ, and HNSW rerank parity against NumPy."""
-    phase6_bin = _resolve_rust_phase6_binary()
+    phase6_bin = resolve_rust_binary("phase6")
     base, queries = _make_parity_clustered_dataset(
         num_base=160,
         num_queries=8,
@@ -1440,7 +1366,7 @@ def test_live_rust_phase6_parity_check(tmp_path: Path) -> None:
 
 def test_live_rust_phase6_matrix_to_plot_phase6(tmp_path: Path) -> None:
     """Run live `phase6 --matrix --synthetic` subset and feed JSON output into `plot_phase6.py`."""
-    phase6_bin = _resolve_rust_phase6_binary()
+    phase6_bin = resolve_rust_binary("phase6")
     data_dir = tmp_path / "data"
     results_dir = tmp_path / "results"
     charts_py = tmp_path / "charts_py"
@@ -1491,7 +1417,7 @@ def test_live_rust_phase6_matrix_to_plot_phase6(tmp_path: Path) -> None:
 
     created = generate_all_phase6_charts(results_dir=results_dir, output_dir=charts_py, scale=100)
     assert len(created) == 8
-    _assert_valid_charts_created(charts_py)
+    assert_charts_created(charts_py, EXPECTED_PHASE6_CHART_STEMS)
 
     plot_proc = subprocess.run(
         [
@@ -1512,5 +1438,5 @@ def test_live_rust_phase6_matrix_to_plot_phase6(tmp_path: Path) -> None:
     assert plot_proc.returncode == 0, (
         f"plot_phase6.py CLI failed (rc={plot_proc.returncode}):\n{plot_proc.stderr}"
     )
-    _assert_valid_charts_created(charts_cli)
+    assert_charts_created(charts_cli, EXPECTED_PHASE6_CHART_STEMS)
 

@@ -2,10 +2,11 @@
 
 #![forbid(unsafe_code)]
 
-use std::fs;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+mod common;
 
+use std::fs;
+
+use common::TempTestDir;
 use vector_search::benchmark::RepeatedSweepSummary;
 use vector_search::dataset::S_CLUST_DEFAULT;
 use vector_search::dataset::{generate_synthetic_sift, read_ivecs, write_fvecs};
@@ -20,30 +21,6 @@ use vector_search::phase5::{
     Phase5MatrixConfig, DEFAULT_ATTR_SEED, DEFAULT_K,
 };
 use vector_search::recall::LatencyStats;
-
-struct TempTestDir(PathBuf);
-
-impl TempTestDir {
-    fn new(prefix: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "vs_phase5_{prefix}_{}_{}",
-            std::process::id(),
-            nanos
-        ));
-        fs::create_dir_all(&path).unwrap();
-        Self(path)
-    }
-}
-
-impl Drop for TempTestDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
 
 #[test]
 fn test_option_c_schedules_and_s1_uncapped_scope() {
@@ -95,8 +72,8 @@ fn test_option_c_schedules_and_s1_uncapped_scope() {
 
 #[test]
 fn test_versioned_cache_hit_and_corruption_invalidation() {
-    let tmp = TempTestDir::new("cache");
-    let cache_dir = tmp.0.join("phase5_cache");
+    let tmp = TempTestDir::new("phase5_cache");
+    let cache_dir = tmp.path().join("phase5_cache");
     let (base, queries) = generate_synthetic_sift(300, 8, 16, 16, 42).unwrap();
     let base_hash_hex = format!("0x{:016x}", compute_f32_matrix_hash(&base));
     let query_hash_hex = format!("0x{:016x}", compute_f32_matrix_hash(&queries));
@@ -387,10 +364,10 @@ fn test_crossover_loglog_interpolation_and_edge_outcomes() {
 
 #[test]
 fn test_resumable_synthetic_matrix_and_spotcheck_end_to_end() {
-    let tmp = TempTestDir::new("matrix");
+    let tmp = TempTestDir::new("phase5_matrix");
     let cfg = Phase5MatrixConfig {
-        data_dir: tmp.0.join("data"),
-        output_dir: tmp.0.join("out"),
+        data_dir: tmp.path().join("data"),
+        output_dir: tmp.path().join("out"),
         scale: 300,
         modes: vec![MetadataMode::Independent, MetadataMode::Correlated],
         sigmas: vec![0.01, 0.10],
@@ -466,8 +443,8 @@ fn test_resumable_synthetic_matrix_and_spotcheck_end_to_end() {
 
     // Spot check mode on small synthetic fixture
     let spot_cfg = Phase5MatrixConfig {
-        data_dir: tmp.0.join("data_spot"),
-        output_dir: tmp.0.join("out_spot"),
+        data_dir: tmp.path().join("data_spot"),
+        output_dir: tmp.path().join("out_spot"),
         scale: 250,
         synthetic: true,
         synthetic_dim: 8,

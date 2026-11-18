@@ -1,10 +1,11 @@
 //! Comprehensive integration & edge-case test suite for the Rust Phase 1 implementation.
 
-use std::fs;
-use std::path::PathBuf;
-use std::str::FromStr;
-use std::time::{SystemTime, UNIX_EPOCH};
+mod common;
 
+use std::fs;
+use std::str::FromStr;
+
+use common::TempTestDir;
 use vector_search::benchmark::{run_phase1_benchmark, Phase1Config, Phase1DatasetMode};
 use vector_search::dataset::{
     generate_synthetic_sift, load_custom_dataset, load_or_download_sift, read_fvecs, read_ivecs,
@@ -20,29 +21,6 @@ use vector_search::recall::{
     verify_self_recall,
 };
 use vector_search::rng::DeterministicRng;
-
-struct TempDirGuard {
-    path: PathBuf,
-}
-
-impl TempDirGuard {
-    fn new(prefix: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let pid = std::process::id();
-        let dir = std::env::temp_dir().join(format!("vs_rust_test_{prefix}_{pid}_{nanos}"));
-        fs::create_dir_all(&dir).expect("create temp test dir");
-        Self { path: dir }
-    }
-}
-
-impl Drop for TempDirGuard {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
 
 // ============================================================================
 // 1. Deterministic PRNG & Synthetic SIFT Dataset Tests
@@ -107,10 +85,10 @@ fn test_dataset_generation_invalid_args() {
 
 #[test]
 fn test_fvecs_and_ivecs_bit_exact_roundtrip() {
-    let tmp = TempDirGuard::new("roundtrip");
+    let tmp = TempTestDir::new("roundtrip");
     let (base, _) = generate_synthetic_sift(77, 5, 37, 4, 2026).unwrap();
 
-    let fvecs_path = tmp.path.join("nested").join("vectors.fvecs");
+    let fvecs_path = tmp.path().join("nested").join("vectors.fvecs");
     write_fvecs(&fvecs_path, &base).unwrap();
     let loaded_base = read_fvecs(&fvecs_path).unwrap();
     assert_eq!(loaded_base.shape(), (77, 37));
@@ -126,7 +104,7 @@ fn test_fvecs_and_ivecs_bit_exact_roundtrip() {
         }
     }
     let ivecs_mat = RowMatrix::new(50, 10, ids).unwrap();
-    let ivecs_path = tmp.path.join("neighbors.ivecs");
+    let ivecs_path = tmp.path().join("neighbors.ivecs");
     write_ivecs(&ivecs_path, &ivecs_mat).unwrap();
     let loaded_ids = read_ivecs(&ivecs_path).unwrap();
     assert_eq!(loaded_ids, ivecs_mat);
@@ -134,9 +112,9 @@ fn test_fvecs_and_ivecs_bit_exact_roundtrip() {
 
 #[test]
 fn test_fvecs_and_ivecs_empty_files() {
-    let tmp = TempDirGuard::new("empty_io");
-    let empty_f = tmp.path.join("empty.fvecs");
-    let empty_i = tmp.path.join("empty.ivecs");
+    let tmp = TempTestDir::new("empty_io");
+    let empty_f = tmp.path().join("empty.fvecs");
+    let empty_i = tmp.path().join("empty.ivecs");
 
     write_fvecs(&empty_f, &RowMatrix::<f32>::empty()).unwrap();
     write_ivecs(&empty_i, &RowMatrix::<i32>::empty()).unwrap();
@@ -152,20 +130,20 @@ fn test_fvecs_and_ivecs_empty_files() {
 
 #[test]
 fn test_io_missing_and_corrupt_files() {
-    let tmp = TempDirGuard::new("corrupt_io");
+    let tmp = TempTestDir::new("corrupt_io");
 
     // Missing file
     assert!(matches!(
-        read_fvecs(tmp.path.join("missing.fvecs")),
+        read_fvecs(tmp.path().join("missing.fvecs")),
         Err(VectorSearchError::Io(_))
     ));
     assert!(matches!(
-        read_ivecs(tmp.path.join("missing.ivecs")),
+        read_ivecs(tmp.path().join("missing.ivecs")),
         Err(VectorSearchError::Io(_))
     ));
 
     // < 4 bytes
-    let tiny = tmp.path.join("tiny.fvecs");
+    let tiny = tmp.path().join("tiny.fvecs");
     fs::write(&tiny, [1_u8, 2, 3]).unwrap();
     assert!(matches!(
         read_fvecs(&tiny),
@@ -173,7 +151,7 @@ fn test_io_missing_and_corrupt_files() {
     ));
 
     // Zero or negative dimension header
-    let neg_dim = tmp.path.join("neg.fvecs");
+    let neg_dim = tmp.path().join("neg.fvecs");
     fs::write(&neg_dim, (-4_i32).to_le_bytes()).unwrap();
     assert!(matches!(
         read_fvecs(&neg_dim),
@@ -181,7 +159,7 @@ fn test_io_missing_and_corrupt_files() {
     ));
 
     // Truncated record (dim=2 needs 12 bytes, write 8)
-    let trunc = tmp.path.join("trunc.fvecs");
+    let trunc = tmp.path().join("trunc.fvecs");
     let mut trunc_bytes = Vec::new();
     trunc_bytes.extend_from_slice(&2_i32.to_le_bytes());
     trunc_bytes.extend_from_slice(&1.0_f32.to_le_bytes());
@@ -192,7 +170,7 @@ fn test_io_missing_and_corrupt_files() {
     ));
 
     // Inconsistent dimension header on record 1 (file size IS a multiple of record 0's 12 bytes!)
-    let mismatch_hdr = tmp.path.join("mismatch_hdr.ivecs");
+    let mismatch_hdr = tmp.path().join("mismatch_hdr.ivecs");
     let mut bad_records = Vec::new();
     // Record 0: k=2 -> 12 bytes
     bad_records.extend_from_slice(&2_i32.to_le_bytes());
@@ -485,10 +463,10 @@ fn test_latency_percentiles() {
 
 #[test]
 fn test_sift_offline_fallback_and_cached_loading() {
-    let tmp = TempDirGuard::new("sift_fallback");
+    let tmp = TempTestDir::new("sift_fallback");
 
     // 1. Offline mode on empty cache -> deterministic SyntheticFallback (10,000 x 128, 100 x 128)
-    let fallback = load_or_download_sift(SiftPreset::SiftSmall, &tmp.path, false, 42).unwrap();
+    let fallback = load_or_download_sift(SiftPreset::SiftSmall, tmp.path(), false, 42).unwrap();
     assert_eq!(fallback.base.shape(), (10_000, 128));
     assert_eq!(fallback.query.shape(), (100, 128));
     assert!(fallback.official_ground_truth.is_none());
@@ -502,13 +480,13 @@ fn test_sift_offline_fallback_and_cached_loading() {
     ));
 
     // 2. Populate valid siftsmall cache layout and verify offline cache hit
-    let siftsmall_dir = tmp.path.join("siftsmall");
+    let siftsmall_dir = tmp.path().join("siftsmall");
     write_fvecs(siftsmall_dir.join("siftsmall_base.fvecs"), &fallback.base).unwrap();
     write_fvecs(siftsmall_dir.join("siftsmall_query.fvecs"), &fallback.query).unwrap();
     let dummy_gt = RowMatrix::new(100, 100, vec![0_i32; 10_000]).unwrap();
     write_ivecs(siftsmall_dir.join("siftsmall_groundtruth.ivecs"), &dummy_gt).unwrap();
 
-    let cached = load_or_download_sift(SiftPreset::SiftSmall, &tmp.path, false, 42).unwrap();
+    let cached = load_or_download_sift(SiftPreset::SiftSmall, tmp.path(), false, 42).unwrap();
     assert!(cached.source.is_authentic_sift());
     assert!(cached.official_ground_truth.is_some());
 }
@@ -520,7 +498,7 @@ fn test_benchmark_pipeline_and_hardware_detection() {
     assert!(hw.logical_cores >= 1);
     assert!(!hw.summary_line().is_empty());
 
-    let tmp = TempDirGuard::new("bench_e2e");
+    let tmp = TempTestDir::new("bench_e2e");
     let config = Phase1Config {
         dataset_mode: Phase1DatasetMode::Synthetic {
             num_base: 400,
@@ -528,8 +506,8 @@ fn test_benchmark_pipeline_and_hardware_detection() {
             dim: 32,
             num_clusters: 4,
         },
-        data_cache_dir: tmp.path.clone(),
-        output_dir: tmp.path.clone(),
+        data_cache_dir: tmp.path().to_path_buf(),
+        output_dir: tmp.path().to_path_buf(),
         k: 10,
         seed: 42,
         metric: Metric::L2Squared,

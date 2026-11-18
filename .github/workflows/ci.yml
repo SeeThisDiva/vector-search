@@ -28,7 +28,7 @@ jobs:
       - name: Run Rust test suite (release)
         run: |
           cargo test --release
-          cargo test --release --features instrument --test challenge_m1_p35_tests --test rust_filtered_counters_tests
+          cargo test --release --features instrument --test challenge_m1_p35_tests --test rust_phase3_tests --test rust_filtered_counters_tests
 
   test:
     runs-on: ubuntu-latest
@@ -42,8 +42,8 @@ jobs:
       - name: Install Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build Rust Phase 1 release binary
-        run: cargo build --release --bin phase1
+      - name: Build Rust release binaries
+        run: cargo build --release --bin phase1 --bin filtered_exact_knn --bin phase5 --bin phase6
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -67,7 +67,7 @@ jobs:
         run: |
           set -o pipefail
           python -m pytest tests/ -rs --cov=src --cov-report=term-missing | tee pytest_output.txt
-          if grep -Eq "SKIPPED|skipped" pytest_output.txt; then
+          if grep -Eq "[0-9]+ skipped|SKIPPED" pytest_output.txt; then
             echo "ERROR: Skipped test detected in pytest output (parity tests must never skip in CI)." >&2
             exit 1
           fi

@@ -11,12 +11,10 @@
 
 mod common;
 
-use std::fs;
 use std::io::Cursor;
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
+use common::{make_random_matrix, TempTestDir};
 use vector_search::dataset::{generate_synthetic_sift, read_fvecs_max_rows, write_fvecs};
 use vector_search::distance::Metric;
 use vector_search::error::VectorSearchError;
@@ -30,39 +28,6 @@ use vector_search::quantized::{
 };
 use vector_search::recall::compute_recall_at_k;
 use vector_search::rng::DeterministicRng;
-
-struct TempDirGuard {
-    path: PathBuf,
-}
-
-impl TempDirGuard {
-    fn new(prefix: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), nanos));
-        let _ = fs::remove_dir_all(&path);
-        fs::create_dir_all(&path).expect("create temp test dir");
-        Self { path }
-    }
-}
-
-impl Drop for TempDirGuard {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
-
-fn make_random_matrix(rows: usize, cols: usize, lo: f64, hi: f64, seed: u64) -> RowMatrix<f32> {
-    let mut rng = DeterministicRng::new(seed);
-    let mut data = Vec::with_capacity(rows * cols);
-    for _ in 0..rows * cols {
-        let u = rng.next_f64_open01();
-        data.push((lo + u * (hi - lo)) as f32);
-    }
-    RowMatrix::new(rows, cols, data).unwrap()
-}
 
 // ============================================================================
 // 1. T4.4: PqTrainer Determinism, Subsampling, Degenerate & Validation Guards
@@ -751,8 +716,8 @@ fn phase6_pq_zero_allocation_query_hot_path() {
 
 #[test]
 fn phase6_pq_quantized_direct_determinism_and_snapshot_roundtrip() {
-    let tmp = TempDirGuard::new("phase6_pq_snapshot");
-    let snap_path = tmp.path.join("pq16_index.bin");
+    let tmp = TempTestDir::new("phase6_pq_snapshot");
+    let snap_path = tmp.path().join("pq16_index.bin");
 
     let (base, queries) = generate_synthetic_sift(350, 15, 128, 12, 404).unwrap();
     let idx_a = HnswPqIndex::build(
@@ -863,10 +828,10 @@ fn phase6_pq_quantized_direct_determinism_and_snapshot_roundtrip() {
 
 #[test]
 fn phase6_pq_streaming_fvecs_bit_identical_parity() {
-    let tmp = TempDirGuard::new("phase6_pq_streaming");
+    let tmp = TempTestDir::new("phase6_pq_streaming");
     // 500 rows with max_train_vectors=128 exercises deterministic subsampling parity too
     let mat = make_random_matrix(500, 64, -15.0, 45.0, 808);
-    let fvecs_path = tmp.path.join("pq_stream.fvecs");
+    let fvecs_path = tmp.path().join("pq_stream.fvecs");
     write_fvecs(&fvecs_path, &mat).unwrap();
     let queries = make_random_matrix(10, 64, -15.0, 45.0, 809);
 

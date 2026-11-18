@@ -42,6 +42,63 @@ impl FromStr for Metric {
     }
 }
 
+/// Computes internal 8-way unrolled sum with pairwise tree reduction, preserving exact
+/// lane accumulator order `s0..s7` across SIMD lanes and remainder elements.
+macro_rules! unrolled_8way_sum {
+    ($a:expr, $b:expr, $acc_ty:ty, $zero:expr, $term:expr) => {{
+        let mut s0: $acc_ty = $zero;
+        let mut s1: $acc_ty = $zero;
+        let mut s2: $acc_ty = $zero;
+        let mut s3: $acc_ty = $zero;
+        let mut s4: $acc_ty = $zero;
+        let mut s5: $acc_ty = $zero;
+        let mut s6: $acc_ty = $zero;
+        let mut s7: $acc_ty = $zero;
+
+        let (chunks_a, rem_a) = $a.as_chunks::<8>();
+        let (chunks_b, rem_b) = $b.as_chunks::<8>();
+
+        for (ca, cb) in chunks_a.iter().zip(chunks_b.iter()) {
+            s0 += $term(ca[0], cb[0]);
+            s1 += $term(ca[1], cb[1]);
+            s2 += $term(ca[2], cb[2]);
+            s3 += $term(ca[3], cb[3]);
+            s4 += $term(ca[4], cb[4]);
+            s5 += $term(ca[5], cb[5]);
+            s6 += $term(ca[6], cb[6]);
+            s7 += $term(ca[7], cb[7]);
+        }
+
+        let mut sum = ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7));
+        for (&va, &vb) in rem_a.iter().zip(rem_b.iter()) {
+            sum += $term(va, vb);
+        }
+        sum
+    }};
+}
+
+#[inline(always)]
+fn sq_diff_f32(x: f32, y: f32) -> f32 {
+    let d = x - y;
+    d * d
+}
+
+#[inline(always)]
+fn sq_diff_f64(x: f32, y: f32) -> f64 {
+    let d = f64::from(x) - f64::from(y);
+    d * d
+}
+
+#[inline(always)]
+fn mul_f32(x: f32, y: f32) -> f32 {
+    x * y
+}
+
+#[inline(always)]
+fn mul_f64(x: f32, y: f32) -> f64 {
+    f64::from(x) * f64::from(y)
+}
+
 /// Computes exact squared Euclidean distance $\sum_{j=0}^{d-1} (a_j - b_j)^2$.
 ///
 /// Uses 8 independent accumulators with pairwise tree reduction so LLVM
@@ -61,44 +118,7 @@ pub fn l2_squared(a: &[f32], b: &[f32]) -> f32 {
         b.len()
     );
 
-    let mut s0 = 0.0_f32;
-    let mut s1 = 0.0_f32;
-    let mut s2 = 0.0_f32;
-    let mut s3 = 0.0_f32;
-    let mut s4 = 0.0_f32;
-    let mut s5 = 0.0_f32;
-    let mut s6 = 0.0_f32;
-    let mut s7 = 0.0_f32;
-
-    let (chunks_a, rem_a) = a.as_chunks::<8>();
-    let (chunks_b, rem_b) = b.as_chunks::<8>();
-
-    for (ca, cb) in chunks_a.iter().zip(chunks_b.iter()) {
-        let d0 = ca[0] - cb[0];
-        let d1 = ca[1] - cb[1];
-        let d2 = ca[2] - cb[2];
-        let d3 = ca[3] - cb[3];
-        let d4 = ca[4] - cb[4];
-        let d5 = ca[5] - cb[5];
-        let d6 = ca[6] - cb[6];
-        let d7 = ca[7] - cb[7];
-
-        s0 += d0 * d0;
-        s1 += d1 * d1;
-        s2 += d2 * d2;
-        s3 += d3 * d3;
-        s4 += d4 * d4;
-        s5 += d5 * d5;
-        s6 += d6 * d6;
-        s7 += d7 * d7;
-    }
-
-    let mut sum = ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7));
-    for (&va, &vb) in rem_a.iter().zip(rem_b.iter()) {
-        let d = va - vb;
-        sum += d * d;
-    }
-
+    let sum = unrolled_8way_sum!(a, b, f32, 0.0_f32, sq_diff_f32);
     if sum <= 0.0 {
         0.0
     } else {
@@ -125,44 +145,7 @@ pub fn l2_squared_f64(a: &[f32], b: &[f32]) -> f64 {
         b.len()
     );
 
-    let mut s0 = 0.0_f64;
-    let mut s1 = 0.0_f64;
-    let mut s2 = 0.0_f64;
-    let mut s3 = 0.0_f64;
-    let mut s4 = 0.0_f64;
-    let mut s5 = 0.0_f64;
-    let mut s6 = 0.0_f64;
-    let mut s7 = 0.0_f64;
-
-    let (chunks_a, rem_a) = a.as_chunks::<8>();
-    let (chunks_b, rem_b) = b.as_chunks::<8>();
-
-    for (ca, cb) in chunks_a.iter().zip(chunks_b.iter()) {
-        let d0 = f64::from(ca[0]) - f64::from(cb[0]);
-        let d1 = f64::from(ca[1]) - f64::from(cb[1]);
-        let d2 = f64::from(ca[2]) - f64::from(cb[2]);
-        let d3 = f64::from(ca[3]) - f64::from(cb[3]);
-        let d4 = f64::from(ca[4]) - f64::from(cb[4]);
-        let d5 = f64::from(ca[5]) - f64::from(cb[5]);
-        let d6 = f64::from(ca[6]) - f64::from(cb[6]);
-        let d7 = f64::from(ca[7]) - f64::from(cb[7]);
-
-        s0 += d0 * d0;
-        s1 += d1 * d1;
-        s2 += d2 * d2;
-        s3 += d3 * d3;
-        s4 += d4 * d4;
-        s5 += d5 * d5;
-        s6 += d6 * d6;
-        s7 += d7 * d7;
-    }
-
-    let mut sum = ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7));
-    for (&va, &vb) in rem_a.iter().zip(rem_b.iter()) {
-        let d = f64::from(va) - f64::from(vb);
-        sum += d * d;
-    }
-
+    let sum = unrolled_8way_sum!(a, b, f64, 0.0_f64, sq_diff_f64);
     if sum <= 0.0 {
         0.0
     } else {
@@ -201,34 +184,7 @@ pub fn inner_product(a: &[f32], b: &[f32]) -> f32 {
         b.len()
     );
 
-    let mut s0 = 0.0_f32;
-    let mut s1 = 0.0_f32;
-    let mut s2 = 0.0_f32;
-    let mut s3 = 0.0_f32;
-    let mut s4 = 0.0_f32;
-    let mut s5 = 0.0_f32;
-    let mut s6 = 0.0_f32;
-    let mut s7 = 0.0_f32;
-
-    let (chunks_a, rem_a) = a.as_chunks::<8>();
-    let (chunks_b, rem_b) = b.as_chunks::<8>();
-
-    for (ca, cb) in chunks_a.iter().zip(chunks_b.iter()) {
-        s0 += ca[0] * cb[0];
-        s1 += ca[1] * cb[1];
-        s2 += ca[2] * cb[2];
-        s3 += ca[3] * cb[3];
-        s4 += ca[4] * cb[4];
-        s5 += ca[5] * cb[5];
-        s6 += ca[6] * cb[6];
-        s7 += ca[7] * cb[7];
-    }
-
-    let mut sum = ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7));
-    for (&va, &vb) in rem_a.iter().zip(rem_b.iter()) {
-        sum += va * vb;
-    }
-
+    let sum = unrolled_8way_sum!(a, b, f32, 0.0_f32, mul_f32);
     if sum == 0.0 {
         0.0
     } else {
@@ -253,37 +209,56 @@ pub fn inner_product_f64(a: &[f32], b: &[f32]) -> f64 {
         b.len()
     );
 
-    let mut s0 = 0.0_f64;
-    let mut s1 = 0.0_f64;
-    let mut s2 = 0.0_f64;
-    let mut s3 = 0.0_f64;
-    let mut s4 = 0.0_f64;
-    let mut s5 = 0.0_f64;
-    let mut s6 = 0.0_f64;
-    let mut s7 = 0.0_f64;
-
-    let (chunks_a, rem_a) = a.as_chunks::<8>();
-    let (chunks_b, rem_b) = b.as_chunks::<8>();
-
-    for (ca, cb) in chunks_a.iter().zip(chunks_b.iter()) {
-        s0 += f64::from(ca[0]) * f64::from(cb[0]);
-        s1 += f64::from(ca[1]) * f64::from(cb[1]);
-        s2 += f64::from(ca[2]) * f64::from(cb[2]);
-        s3 += f64::from(ca[3]) * f64::from(cb[3]);
-        s4 += f64::from(ca[4]) * f64::from(cb[4]);
-        s5 += f64::from(ca[5]) * f64::from(cb[5]);
-        s6 += f64::from(ca[6]) * f64::from(cb[6]);
-        s7 += f64::from(ca[7]) * f64::from(cb[7]);
-    }
-
-    let mut sum = ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7));
-    for (&va, &vb) in rem_a.iter().zip(rem_b.iter()) {
-        sum += f64::from(va) * f64::from(vb);
-    }
-
+    let sum = unrolled_8way_sum!(a, b, f64, 0.0_f64, mul_f64);
     if sum == 0.0 {
         0.0
     } else {
         sum
+    }
+}
+
+/// Computes the canonical minimization sort key (`L2^2` or `-dot`) for `metric`.
+#[inline]
+pub(crate) fn compute_metric_sort_key(metric: Metric, a: &[f32], b: &[f32]) -> f32 {
+    match metric {
+        Metric::L2Squared | Metric::Euclidean => l2_squared(a, b),
+        Metric::InnerProduct => {
+            let neg_dot = -inner_product(a, b);
+            if neg_dot == 0.0 {
+                0.0
+            } else {
+                neg_dot
+            }
+        }
+    }
+}
+
+/// Converts an internal minimization sort key (`L2^2` or `-dot`) into the public `Metric` distance/score.
+#[inline]
+pub(crate) fn format_metric_output_distance(metric: Metric, sort_key: f32) -> f32 {
+    match metric {
+        Metric::L2Squared => {
+            if sort_key <= 0.0 {
+                0.0
+            } else {
+                sort_key
+            }
+        }
+        Metric::Euclidean => {
+            let d = sort_key.max(0.0).sqrt();
+            if d <= 0.0 {
+                0.0
+            } else {
+                d
+            }
+        }
+        Metric::InnerProduct => {
+            let score = -sort_key;
+            if score == 0.0 {
+                0.0
+            } else {
+                score
+            }
+        }
     }
 }

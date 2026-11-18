@@ -1,0 +1,26 @@
+# Results & Benchmark Artifacts Index
+
+All committed benchmark outputs, design specifications, gate sign-offs, and deterministic charts live under `results/` (whereas raw SIFT corpora and local caches stay gitignored under `data/`). Every published number traces to a clean-commit JSON artifact (`"git_dirty": false`).
+
+## Canonical Audit Ledger
+
+- **[`CLAIMS.md`](./CLAIMS.md)** — Authoritative claim-verification ledger mapping every documented metric across `README.md` and phase reports to its exact source JSON file, JSON key path, serialized value, generating Git commit, and host environment.
+
+## Directory Layout by Phase
+
+| Directory | Scope | Key Documents & Reports | Charts |
+|---|---|---|---|
+| **Phases 1–2** | Exact brute-force `ExactKnn` (`siftsmall` 10k) & initial HNSW verification | Stored in [`phase3/phase2_report.json`](./phase3/phase2_report.json) (`exact_knn_baseline` & `ef_search_sweep`; there are no separate `phase1/` or `phase2/` folders) | — |
+| [`phase3/`](./phase3/) | Full `1M` `SIFT1M` baseline & isolated multi-scale RSS | [`phase3_report.json`](./phase3/phase3_report.json), [`baseline_profile_report.json`](./phase3/baseline_profile_report.json), [`phase2_report.json`](./phase3/phase2_report.json) | — |
+| [`phase3_5/`](./phase3_5/) | Profiling (`--features instrument`), `T1.7` compact `u32` adjacency & `T1.9` shrink ablation | [`LOG.md`](./phase3_5/LOG.md), `baseline_*.json`, `golden_{10k,100k}.json`, `t1_7_flat_u32_*.json`, `exp_no_keep_pruned_shrink_*.json`, `final_1m_report.json` | — |
+| [`phase4/`](./phase4/) | `100k` `23`-config (`M x efC`) parameter sweep & `1M` `4`-point Pareto confirmation | [`PROPOSAL.md`](./phase4/PROPOSAL.md), [`G3_CHECKLIST.md`](./phase4/G3_CHECKLIST.md), `grid_{100k,1m}.grid`, `pilot/`, `scale_*.json` (23 `100k` + 4 `1M`), `summary.json`. *Note: Phase 4's narrative summary lives in [`README.md`](../README.md#phase-4-parameter-sweep-pareto-frontier--1m-finals), [`G3_CHECKLIST.md`](./phase4/G3_CHECKLIST.md), and [`CLAIMS.md`](./CLAIMS.md) §10 (no `FINDINGS.md`).* | Root `chart1`–`chart4.{png,svg}` (`100k` curves + `1M` overlays in `chart1`) |
+| [`phase5/`](./phase5/) | Filtered search (`S1`/`S2`/`S3`), Mode A/B selectivities & opaque `eval_limit` guardrail | [`DESIGN.md`](./phase5/DESIGN.md), [`DESIGN_CHANGELOG.md`](./phase5/DESIGN_CHANGELOG.md), [`G4_DECISIONS.md`](./phase5/G4_DECISIONS.md), [`G4_5_DECISIONS.md`](./phase5/G4_5_DECISIONS.md), [`PROPOSAL.md`](./phase5/PROPOSAL.md), [`FINDINGS.md`](./phase5/FINDINGS.md), `pilot/`, `smoke/`, `cell_*.json` (24 `100k` + 24 `1M`), `sensitivity_n*.json`, `summary_n*.json` | `charts_100k/`, `charts_1m/`, and root `chart1`–`chart5.{png,svg}` (`1M` copies of `charts_1m/`) |
+| [`phase6/`](./phase6/) | Scalar (`SQ8`) & Product (`PQ16`/`PQ32`) quantization, streaming build & top-$R$ rerank | [`DESIGN.md`](./phase6/DESIGN.md), [`G5_DECISIONS.md`](./phase6/G5_DECISIONS.md), [`PROPOSAL.md`](./phase6/PROPOSAL.md), [`FINDINGS.md`](./phase6/FINDINGS.md), `pilot/microbench_kernels.json`, `arm_*.json` (11 `100k` + 9 `1M`), `summary_n*.json` | `charts_100k/`, `charts_1m/`, and root `chart1`–`chart4.{png,svg}` (`1M` copies of `charts_1m/`) |
+| [`phase7/`](./phase7/) | Head-to-head Rust `HnswIndex` vs `faiss-cpu 1.15.1` `IndexHNSWFlat` (`100k` & `1M`, `T in {1,6,16}`) | [`DESIGN.md`](./phase7/DESIGN.md), [`G6_DECISIONS.md`](./phase7/G6_DECISIONS.md), [`FINDINGS.md`](./phase7/FINDINGS.md), [`matched_recall_summary.json`](./phase7/matched_recall_summary.json), `rust_*.json` (12), `faiss_*.json` (10) | `charts_100k/`, `charts_1m/`, and root overview charts (`chart1`–`chart3` combine `100k`+`1M` panels; `chart4` mirrors `charts_1m/`) |
+
+## Artifact Conventions
+
+- **Raw `.json` Reports (`scale_*`, `cell_*`, `arm_*`, `rust_*`, `faiss_*`, `summary*`)**: Structured outputs stamped with `git_commit`, `git_dirty`, `hardware`, `environment` (OS power plan, CPU affinity mask), `measured_this_run`, and full sweep distributions.
+- **Design & Gate Docs (`DESIGN.md`, `G*_DECISIONS.md`, `PROPOSAL.md`, `FINDINGS.md`)**: Pre-implementation specs (`DESIGN.md`), Dev gate approvals (`G*_DECISIONS.md`), pilot-anchored time/disk budgets (`PROPOSAL.md`), and post-run empirical analyses (`FINDINGS.md`).
+- **`pilot/` & `smoke/`**: Single-point or microbenchmark runs used to calibrate budgets (`pilot/`) and fast `10k` end-to-end verification runs (`smoke/`).
+- **Root Charts vs `charts_100k/` & `charts_1m/`**: Per-scale PNG (300 DPI) and SVG plots live under `charts_100k/` and `charts_1m/` in Phases 5–7. In `phase5/` and `phase6/`, root charts copy the `1M` headline set; in `phase7/`, root `chart1`–`chart3` present combined `100k` + `1M` side-by-side overview panels while root `chart4` mirrors `charts_1m/chart4_multithread_and_build`.

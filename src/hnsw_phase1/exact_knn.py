@@ -12,7 +12,7 @@ class ExactKNN:
     Serves as the benchmark ground truth reference for all ANN evaluation.
     """
 
-    def __init__(self, metric: str = "l2"):
+    def __init__(self, metric: str = "l2") -> None:
         """
         Parameters
         ----------

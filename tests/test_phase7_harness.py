@@ -28,8 +28,7 @@ from scripts.plot_phase7 import generate_all_phase7_charts
 from src.hnsw_phase1.dataset import generate_synthetic_sift, write_fvecs, write_ivecs
 from src.hnsw_phase1.exact_knn import ExactKNN
 from src.hnsw_phase1.recall import compute_recall_at_k
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from tests.helpers import REPO_ROOT, assert_charts_created
 
 EXPECTED_CHART_STEMS: tuple[str, ...] = (
     "chart1_recall_vs_p99",
@@ -348,8 +347,7 @@ def test_cli_synthetic_end_to_end_and_plot_phase7(tmp_path: Path) -> None:
         output_dir=faiss_only_charts,
     )
     assert len(partial_created) == 8
-    for p in partial_created:
-        assert p.is_file() and p.stat().st_size > 1000
+    assert_charts_created(faiss_only_charts, EXPECTED_CHART_STEMS)
 
     # Run multithread FAISS CLI arm
     mt_cmd = [
@@ -454,8 +452,4 @@ def test_cli_synthetic_end_to_end_and_plot_phase7(tmp_path: Path) -> None:
         check=True,
     )
 
-    for stem in EXPECTED_CHART_STEMS:
-        png = charts_dir / f"{stem}.png"
-        svg = charts_dir / f"{stem}.svg"
-        assert png.is_file() and png.stat().st_size > 1000
-        assert svg.is_file() and svg.stat().st_size > 1000
+    assert_charts_created(charts_dir, EXPECTED_CHART_STEMS)

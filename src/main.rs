@@ -3,17 +3,17 @@
 #![forbid(unsafe_code)]
 
 use std::env;
-use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::str::FromStr;
 
 use vector_search::benchmark::{
-    run_phase1_benchmark, Phase1Config, Phase1DatasetMode, Phase1Report,
+    resolve_cli_dataset_mode, run_phase1_benchmark, Phase1Config, Phase1Report,
 };
-use vector_search::dataset::SiftPreset;
+use vector_search::cli_util::{next_str, parse_next};
 use vector_search::distance::Metric;
 use vector_search::error::{Result, VectorSearchError};
+use vector_search::json_util::write_file_with_parents;
 
 struct CliOptions {
     config: Phase1Config,
@@ -55,12 +55,7 @@ fn try_main() -> Result<()> {
     print_report(&report);
 
     if let Some(json_path) = &opts.json_out {
-        if let Some(parent) = json_path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)?;
-            }
-        }
-        fs::write(json_path, report.to_json_string())?;
+        write_file_with_parents(json_path, report.to_json_string())?;
         println!("  - JSON Summary Report:   {}", json_path.display());
     }
 
@@ -95,53 +90,49 @@ fn parse_cli_args(args: &[String]) -> Result<CliOptions> {
                 i += 1;
             }
             "--dataset" => {
-                dataset_choice = next_arg(args, &mut i, "--dataset")?.to_ascii_lowercase();
+                dataset_choice = next_str(args, &mut i, "--dataset")?.to_ascii_lowercase();
             }
             "--num-base" => {
-                num_base = parse_num(next_arg(args, &mut i, "--num-base")?, "--num-base")?;
+                num_base = parse_next(args, &mut i, "--num-base")?;
             }
             "--num-query" => {
-                num_query = parse_num(next_arg(args, &mut i, "--num-query")?, "--num-query")?;
+                num_query = parse_next(args, &mut i, "--num-query")?;
             }
             "--max-queries" => {
-                max_queries = Some(parse_num(
-                    next_arg(args, &mut i, "--max-queries")?,
-                    "--max-queries",
-                )?);
+                max_queries = Some(parse_next(args, &mut i, "--max-queries")?);
             }
             "--dim" => {
-                dim = parse_num(next_arg(args, &mut i, "--dim")?, "--dim")?;
+                dim = parse_next(args, &mut i, "--dim")?;
             }
             "--num-clusters" => {
-                num_clusters =
-                    parse_num(next_arg(args, &mut i, "--num-clusters")?, "--num-clusters")?;
+                num_clusters = parse_next(args, &mut i, "--num-clusters")?;
             }
             "--k" => {
-                k = parse_num(next_arg(args, &mut i, "--k")?, "--k")?;
+                k = parse_next(args, &mut i, "--k")?;
             }
             "--seed" => {
-                seed = parse_num(next_arg(args, &mut i, "--seed")?, "--seed")?;
+                seed = parse_next(args, &mut i, "--seed")?;
             }
             "--metric" => {
-                metric = Metric::from_str(next_arg(args, &mut i, "--metric")?)?;
+                metric = Metric::from_str(next_str(args, &mut i, "--metric")?)?;
             }
             "--data-dir" => {
-                data_cache_dir = PathBuf::from(next_arg(args, &mut i, "--data-dir")?);
+                data_cache_dir = PathBuf::from(next_str(args, &mut i, "--data-dir")?);
             }
             "--output-dir" => {
-                output_dir = PathBuf::from(next_arg(args, &mut i, "--output-dir")?);
+                output_dir = PathBuf::from(next_str(args, &mut i, "--output-dir")?);
             }
             "--base-fvecs" => {
-                base_fvecs = Some(PathBuf::from(next_arg(args, &mut i, "--base-fvecs")?));
+                base_fvecs = Some(PathBuf::from(next_str(args, &mut i, "--base-fvecs")?));
             }
             "--query-fvecs" => {
-                query_fvecs = Some(PathBuf::from(next_arg(args, &mut i, "--query-fvecs")?));
+                query_fvecs = Some(PathBuf::from(next_str(args, &mut i, "--query-fvecs")?));
             }
             "--gt-ivecs" => {
-                gt_ivecs = Some(PathBuf::from(next_arg(args, &mut i, "--gt-ivecs")?));
+                gt_ivecs = Some(PathBuf::from(next_str(args, &mut i, "--gt-ivecs")?));
             }
             "--json-out" => {
-                json_out = Some(PathBuf::from(next_arg(args, &mut i, "--json-out")?));
+                json_out = Some(PathBuf::from(next_str(args, &mut i, "--json-out")?));
             }
             "--offline" => {
                 allow_download = false;
@@ -152,7 +143,7 @@ fn parse_cli_args(args: &[String]) -> Result<CliOptions> {
                 i += 1;
             }
             "--phase" => {
-                let _ = next_arg(args, &mut i, "--phase")?;
+                let _ = next_str(args, &mut i, "--phase")?;
             }
             unknown => {
                 return Err(VectorSearchError::InvalidArgument(format!(
@@ -162,38 +153,16 @@ fn parse_cli_args(args: &[String]) -> Result<CliOptions> {
         }
     }
 
-    let dataset_mode = if base_fvecs.is_some()
-        || query_fvecs.is_some()
-        || dataset_choice == "custom"
-    {
-        let (Some(b), Some(q)) = (base_fvecs, query_fvecs) else {
-            return Err(VectorSearchError::InvalidArgument(
-                "Custom dataset mode requires both --base-fvecs <path> and --query-fvecs <path>"
-                    .to_string(),
-            ));
-        };
-        Phase1DatasetMode::Custom {
-            base_fvecs: b,
-            query_fvecs: q,
-            gt_ivecs,
-        }
-    } else {
-        match dataset_choice.as_str() {
-            "siftsmall" => Phase1DatasetMode::Sift(SiftPreset::SiftSmall),
-            "sift1m" | "sift" => Phase1DatasetMode::Sift(SiftPreset::Sift1M),
-            "synthetic" => Phase1DatasetMode::Synthetic {
-                num_base,
-                num_query,
-                dim,
-                num_clusters,
-            },
-            other => {
-                return Err(VectorSearchError::InvalidArgument(format!(
-                    "Unsupported --dataset '{other}'. Expected 'siftsmall', 'sift1m', 'synthetic', or 'custom'."
-                )));
-            }
-        }
-    };
+    let dataset_mode = resolve_cli_dataset_mode(
+        &dataset_choice,
+        base_fvecs,
+        query_fvecs,
+        gt_ivecs,
+        num_base,
+        num_query,
+        dim,
+        num_clusters,
+    )?;
 
     Ok(CliOptions {
         config: Phase1Config {
@@ -209,23 +178,6 @@ fn parse_cli_args(args: &[String]) -> Result<CliOptions> {
         },
         json_out,
         show_help,
-    })
-}
-
-fn next_arg<'a>(args: &'a [String], idx: &mut usize, flag: &str) -> Result<&'a str> {
-    if *idx + 1 >= args.len() {
-        return Err(VectorSearchError::InvalidArgument(format!(
-            "Missing value after '{flag}'"
-        )));
-    }
-    let val = &args[*idx + 1];
-    *idx += 2;
-    Ok(val.as_str())
-}
-
-fn parse_num<T: FromStr>(raw: &str, flag: &str) -> Result<T> {
-    raw.parse::<T>().map_err(|_| {
-        VectorSearchError::InvalidArgument(format!("Invalid numeric value '{raw}' for {flag}"))
     })
 }
 
@@ -352,6 +304,4 @@ fn print_report(r: &Phase1Report) {
     }
 
     println!("\n{}", "=".repeat(80));
-    println!(" PHASE 1 COMPLETE (RUST) -- HALTED FOR USER REVIEW BEFORE PHASE 2 ");
-    println!("{}", "=".repeat(80));
 }

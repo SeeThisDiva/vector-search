@@ -9,9 +9,12 @@
 
 #![forbid(unsafe_code)]
 
+mod common;
+
 use std::fs;
 use std::path::PathBuf;
 
+use common::TempTestDir;
 use vector_search::benchmark::Phase1DatasetMode;
 use vector_search::dataset::{DatasetSource, LoadedDataset};
 use vector_search::distance::Metric;
@@ -131,18 +134,10 @@ seed = 99
 
 #[test]
 fn test_phase4_prefix_ground_truth_disk_caching() {
-    let mut tmp_dir: PathBuf = std::env::temp_dir();
-    tmp_dir.push(format!(
-        "vecsearch_p4_gt_cache_test_{}_{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    let data_dir = tmp_dir.join("data");
-    let out_dir1 = tmp_dir.join("out1");
-    let out_dir2 = tmp_dir.join("out2");
+    let tmp = TempTestDir::new("p4_gt_cache");
+    let data_dir = tmp.path().join("data");
+    let out_dir1 = tmp.path().join("out1");
+    let out_dir2 = tmp.path().join("out2");
     fs::create_dir_all(&data_dir).unwrap();
 
     let grid = Phase4GridSpec {
@@ -226,23 +221,13 @@ fn test_phase4_prefix_ground_truth_disk_caching() {
         authentic_gt.ground_truth_cache_path,
         Some(data_dir.join("gt_2_k100.ivecs"))
     );
-
-    let _ = fs::remove_dir_all(&tmp_dir);
 }
 
 #[test]
 fn test_phase4_resumable_sweep_skips_matching_commit_and_rebuilds_mismatched() {
-    let mut tmp_dir: PathBuf = std::env::temp_dir();
-    tmp_dir.push(format!(
-        "vecsearch_p4_resume_test_{}_{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    let data_dir = tmp_dir.join("data");
-    let out_dir = tmp_dir.join("out");
+    let tmp = TempTestDir::new("p4_resume");
+    let data_dir = tmp.path().join("data");
+    let out_dir = tmp.path().join("out");
     fs::create_dir_all(&data_dir).unwrap();
 
     let grid = Phase4GridSpec {
@@ -366,23 +351,13 @@ fn test_phase4_resumable_sweep_skips_matching_commit_and_rebuilds_mismatched() {
     assert_eq!(s3.resumed_skipped_count, 1);
     assert_eq!(s3.configs[0].status, "measured");
     assert_eq!(s3.configs[1].status, "resumed");
-
-    let _ = fs::remove_dir_all(&tmp_dir);
 }
 
 #[test]
 fn test_phase4_report_json_schema_and_provenance() {
-    let mut tmp_dir: PathBuf = std::env::temp_dir();
-    tmp_dir.push(format!(
-        "vecsearch_p4_schema_test_{}_{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    let data_dir = tmp_dir.join("data");
-    let out_dir = tmp_dir.join("out");
+    let tmp = TempTestDir::new("p4_schema");
+    let data_dir = tmp.path().join("data");
+    let out_dir = tmp.path().join("out");
     fs::create_dir_all(&data_dir).unwrap();
 
     let grid = Phase4GridSpec {
@@ -469,6 +444,4 @@ fn test_phase4_report_json_schema_and_provenance() {
             "Summary JSON must contain field {field}"
         );
     }
-
-    let _ = fs::remove_dir_all(&tmp_dir);
 }

@@ -9,7 +9,7 @@ use std::collections::BinaryHeap;
 use std::thread;
 use std::time::Instant;
 
-use crate::distance::{inner_product, l2_squared, Metric};
+use crate::distance::{compute_metric_sort_key, format_metric_output_distance, Metric};
 use crate::error::{Result, VectorSearchError};
 use crate::filter::FilterPredicate;
 use crate::matrix::RowMatrix;
@@ -108,47 +108,80 @@ fn validate_query_batch(base: &RowMatrix<f32>, queries: &RowMatrix<f32>, k: usiz
     Ok(())
 }
 
+fn validate_single_query(expected_dim: usize, query: &[f32]) -> Result<()> {
+    if query.len() != expected_dim {
+        return Err(VectorSearchError::DimensionMismatch {
+            expected: expected_dim,
+            actual: query.len(),
+        });
+    }
+    if query.iter().any(|v| !v.is_finite()) {
+        return Err(VectorSearchError::InvalidArgument(
+            "query vector contains non-finite value (NaN/Inf)".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn resolve_worker_count(requested_threads: usize, num_tasks: usize) -> usize {
+    let available = if requested_threads == 0 {
+        thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1)
+    } else {
+        requested_threads
+    };
+    available.min(num_tasks).max(1)
+}
+
 #[inline]
-fn compute_metric_sort_key(metric: Metric, query: &[f32], base_row: &[f32]) -> f32 {
-    match metric {
-        Metric::L2Squared | Metric::Euclidean => l2_squared(query, base_row),
-        Metric::InnerProduct => {
-            let neg_dot = -inner_product(query, base_row);
-            if neg_dot == 0.0 {
-                0.0
-            } else {
-                neg_dot
+fn scan_base_into_heap(
+    metric: Metric,
+    base: &RowMatrix<f32>,
+    query: &[f32],
+    effective_k: usize,
+    heap: &mut BinaryHeap<HeapCandidate>,
+) {
+    let num_base = base.rows();
+    let dim = base.cols();
+    let flat = base.as_slice();
+
+    for idx in 0..effective_k {
+        let row = &flat[idx * dim..(idx + 1) * dim];
+        let cand = HeapCandidate {
+            sort_key: compute_metric_sort_key(metric, query, row),
+            id: idx as i32,
+        };
+        heap.push(cand);
+    }
+
+    for idx in effective_k..num_base {
+        let row = &flat[idx * dim..(idx + 1) * dim];
+        let cand = HeapCandidate {
+            sort_key: compute_metric_sort_key(metric, query, row),
+            id: idx as i32,
+        };
+        if let Some(&worst) = heap.peek() {
+            if cand < worst {
+                heap.pop();
+                heap.push(cand);
             }
         }
     }
 }
 
 #[inline]
-fn format_metric_output_distance(metric: Metric, sort_key: f32) -> f32 {
-    match metric {
-        Metric::L2Squared => {
-            if sort_key <= 0.0 {
-                0.0
-            } else {
-                sort_key
-            }
-        }
-        Metric::Euclidean => {
-            let d = sort_key.max(0.0).sqrt();
-            if d <= 0.0 {
-                0.0
-            } else {
-                d
-            }
-        }
-        Metric::InnerProduct => {
-            let score = -sort_key;
-            if score == 0.0 {
-                0.0
-            } else {
-                score
-            }
-        }
+fn drain_heap_into_slices(
+    metric: Metric,
+    heap: &mut BinaryHeap<HeapCandidate>,
+    out_indices: &mut [i32],
+    out_distances: &mut [f32],
+) {
+    let len = heap.len();
+    for slot in (0..len).rev() {
+        let cand = heap.pop().expect("heap length checked");
+        out_indices[slot] = cand.id;
+        out_distances[slot] = format_metric_output_distance(metric, cand.sort_key);
     }
 }
 
@@ -224,32 +257,34 @@ impl ExactKnn {
                 "ExactKnn::fit() must be called with base_vectors before search",
             ))?;
 
-        if query.len() != base.cols() {
-            return Err(VectorSearchError::DimensionMismatch {
-                expected: base.cols(),
-                actual: query.len(),
-            });
-        }
+        validate_single_query(base.cols(), query)?;
         if k == 0 {
             return Err(VectorSearchError::InvalidArgument(
                 "k must be positive (> 0)".to_string(),
             ));
         }
-        if query.iter().any(|v| !v.is_finite()) {
-            return Err(VectorSearchError::InvalidArgument(
-                "query vector contains non-finite value (NaN/Inf)".to_string(),
-            ));
-        }
 
         let effective_k = k.min(base.rows());
         let mut heap = BinaryHeap::with_capacity(effective_k);
-        self.scan_into_heap(base, query, effective_k, &mut heap);
-        Ok(self.finalize_heap(heap))
+        scan_base_into_heap(self.metric, base, query, effective_k, &mut heap);
+        let mut indices = vec![0_i32; heap.len()];
+        let mut distances = vec![0.0_f32; heap.len()];
+        drain_heap_into_slices(self.metric, &mut heap, &mut indices, &mut distances);
+        Ok((indices, distances))
     }
 
     /// Searches exact top-`k` nearest neighbors sequentially across all rows in `queries`.
     pub fn search(&self, queries: &RowMatrix<f32>, k: usize) -> Result<KnnSearchResult> {
         let base = self.validate_batch_inputs(queries, k)?;
+        Self::search_sequential_validated(self.metric, base, queries, k)
+    }
+
+    fn search_sequential_validated(
+        metric: Metric,
+        base: &RowMatrix<f32>,
+        queries: &RowMatrix<f32>,
+        k: usize,
+    ) -> Result<KnnSearchResult> {
         let num_queries = queries.rows();
         if num_queries == 0 {
             return Ok(KnnSearchResult {
@@ -259,18 +294,21 @@ impl ExactKnn {
         }
 
         let effective_k = k.min(base.rows());
-        let mut all_indices = Vec::with_capacity(num_queries * effective_k);
-        let mut all_distances = Vec::with_capacity(num_queries * effective_k);
+        let mut all_indices = vec![0_i32; num_queries * effective_k];
+        let mut all_distances = vec![0.0_f32; num_queries * effective_k];
         let mut heap = BinaryHeap::with_capacity(effective_k);
 
-        for q_row in queries.iter_rows() {
+        for (q_idx, q_row) in queries.iter_rows().enumerate() {
             heap.clear();
-            self.scan_into_heap(base, q_row, effective_k, &mut heap);
-            let sorted = heap.clone().into_sorted_vec();
-            for cand in sorted {
-                all_indices.push(cand.id);
-                all_distances.push(self.format_output_distance(cand.sort_key));
-            }
+            scan_base_into_heap(metric, base, q_row, effective_k, &mut heap);
+            let out_start = q_idx * effective_k;
+            let out_end = out_start + effective_k;
+            drain_heap_into_slices(
+                metric,
+                &mut heap,
+                &mut all_indices[out_start..out_end],
+                &mut all_distances[out_start..out_end],
+            );
         }
 
         Ok(KnnSearchResult {
@@ -308,27 +346,28 @@ impl ExactKnn {
 
         if warmup {
             heap.clear();
-            self.scan_into_heap(base, queries.row(0), effective_k, &mut heap);
+            scan_base_into_heap(self.metric, base, queries.row(0), effective_k, &mut heap);
         }
 
-        let mut all_indices = Vec::with_capacity(num_queries * effective_k);
-        let mut all_distances = Vec::with_capacity(num_queries * effective_k);
+        let mut all_indices = vec![0_i32; num_queries * effective_k];
+        let mut all_distances = vec![0.0_f32; num_queries * effective_k];
         let mut latencies_ms = Vec::with_capacity(num_queries);
 
         let batch_start = Instant::now();
-        for q_row in queries.iter_rows() {
+        for (q_idx, q_row) in queries.iter_rows().enumerate() {
             let q_start = Instant::now();
             heap.clear();
-            self.scan_into_heap(base, q_row, effective_k, &mut heap);
-            let sorted = std::mem::replace(&mut heap, BinaryHeap::with_capacity(effective_k))
-                .into_sorted_vec();
+            scan_base_into_heap(self.metric, base, q_row, effective_k, &mut heap);
+            let out_start = q_idx * effective_k;
+            let out_end = out_start + effective_k;
+            drain_heap_into_slices(
+                self.metric,
+                &mut heap,
+                &mut all_indices[out_start..out_end],
+                &mut all_distances[out_start..out_end],
+            );
             let q_ms = q_start.elapsed().as_secs_f64() * 1000.0;
             latencies_ms.push(q_ms);
-
-            for cand in sorted {
-                all_indices.push(cand.id);
-                all_distances.push(self.format_output_distance(cand.sort_key));
-            }
         }
         let total_elapsed_s = batch_start.elapsed().as_secs_f64();
         let latency = compute_latency_stats(&latencies_ms, total_elapsed_s);
@@ -387,40 +426,12 @@ impl ExactKnn {
             });
         }
 
-        let engine = Self::new(metric);
-        let effective_k = k.min(base.rows());
-        let workers = if num_threads == 0 {
-            thread::available_parallelism()
-                .map(usize::from)
-                .unwrap_or(1)
-        } else {
-            num_threads
-        }
-        .min(num_queries)
-        .max(1);
-
+        let workers = resolve_worker_count(num_threads, num_queries);
         if workers == 1 {
-            let mut all_indices = Vec::with_capacity(num_queries * effective_k);
-            let mut all_distances = Vec::with_capacity(num_queries * effective_k);
-            let mut heap = BinaryHeap::with_capacity(effective_k);
-
-            for q_row in queries.iter_rows() {
-                heap.clear();
-                engine.scan_into_heap(base, q_row, effective_k, &mut heap);
-                let sorted = std::mem::replace(&mut heap, BinaryHeap::with_capacity(effective_k))
-                    .into_sorted_vec();
-                for cand in sorted {
-                    all_indices.push(cand.id);
-                    all_distances.push(engine.format_output_distance(cand.sort_key));
-                }
-            }
-
-            return Ok(KnnSearchResult {
-                indices: RowMatrix::new(num_queries, effective_k, all_indices)?,
-                distances: RowMatrix::new(num_queries, effective_k, all_distances)?,
-            });
+            return Self::search_sequential_validated(metric, base, queries, k);
         }
 
+        let effective_k = k.min(base.rows());
         let mut all_indices = vec![0_i32; num_queries * effective_k];
         let mut all_distances = vec![0.0_f32; num_queries * effective_k];
 
@@ -442,24 +453,20 @@ impl ExactKnn {
 
                 let start_q = q_offset;
                 q_offset += take_q;
-                let worker_engine = engine.clone();
 
                 s.spawn(move || {
                     let mut heap = BinaryHeap::with_capacity(effective_k);
                     for local_i in 0..take_q {
                         let q_row = queries.row(start_q + local_i);
                         heap.clear();
-                        worker_engine.scan_into_heap(base, q_row, effective_k, &mut heap);
-                        let sorted =
-                            std::mem::replace(&mut heap, BinaryHeap::with_capacity(effective_k))
-                                .into_sorted_vec();
-
+                        scan_base_into_heap(metric, base, q_row, effective_k, &mut heap);
                         let out_base = local_i * effective_k;
-                        for (j, cand) in sorted.into_iter().enumerate() {
-                            idx_slice[out_base + j] = cand.id;
-                            dist_slice[out_base + j] =
-                                worker_engine.format_output_distance(cand.sort_key);
-                        }
+                        drain_heap_into_slices(
+                            metric,
+                            &mut heap,
+                            &mut idx_slice[out_base..out_base + effective_k],
+                            &mut dist_slice[out_base..out_base + effective_k],
+                        );
                     }
                 });
             }
@@ -486,64 +493,6 @@ impl ExactKnn {
         validate_query_batch(base, queries, k)?;
 
         Ok(base)
-    }
-
-    #[inline]
-    fn compute_sort_key(&self, query: &[f32], base_row: &[f32]) -> f32 {
-        compute_metric_sort_key(self.metric, query, base_row)
-    }
-
-    #[inline]
-    fn format_output_distance(&self, sort_key: f32) -> f32 {
-        format_metric_output_distance(self.metric, sort_key)
-    }
-
-    #[inline]
-    fn scan_into_heap(
-        &self,
-        base: &RowMatrix<f32>,
-        query: &[f32],
-        effective_k: usize,
-        heap: &mut BinaryHeap<HeapCandidate>,
-    ) {
-        let num_base = base.rows();
-        let dim = base.cols();
-        let flat = base.as_slice();
-
-        for idx in 0..effective_k {
-            let row = &flat[idx * dim..(idx + 1) * dim];
-            let cand = HeapCandidate {
-                sort_key: self.compute_sort_key(query, row),
-                id: idx as i32,
-            };
-            heap.push(cand);
-        }
-
-        for idx in effective_k..num_base {
-            let row = &flat[idx * dim..(idx + 1) * dim];
-            let cand = HeapCandidate {
-                sort_key: self.compute_sort_key(query, row),
-                id: idx as i32,
-            };
-            if let Some(&worst) = heap.peek() {
-                if cand < worst {
-                    heap.pop();
-                    heap.push(cand);
-                }
-            }
-        }
-    }
-
-    #[inline]
-    fn finalize_heap(&self, heap: BinaryHeap<HeapCandidate>) -> (Vec<i32>, Vec<f32>) {
-        let sorted = heap.into_sorted_vec();
-        let mut indices = Vec::with_capacity(sorted.len());
-        let mut distances = Vec::with_capacity(sorted.len());
-        for cand in sorted {
-            indices.push(cand.id);
-            distances.push(self.format_output_distance(cand.sort_key));
-        }
-        (indices, distances)
     }
 }
 
@@ -619,28 +568,26 @@ impl FilteredExactKnn {
         k: usize,
         predicate: &P,
     ) -> Result<Vec<(f32, usize)>> {
-        if query.len() != self.base_vectors.cols() {
-            return Err(VectorSearchError::DimensionMismatch {
-                expected: self.base_vectors.cols(),
-                actual: query.len(),
-            });
-        }
-        if query.iter().any(|v| !v.is_finite()) {
-            return Err(VectorSearchError::InvalidArgument(
-                "query vector contains non-finite value (NaN/Inf)".to_string(),
-            ));
-        }
+        validate_single_query(self.base_vectors.cols(), query)?;
         if k == 0 || self.base_vectors.rows() == 0 {
             return Ok(Vec::new());
         }
+        Ok(self.search_filtered_validated(query, k, predicate))
+    }
 
+    fn search_filtered_validated<P: FilterPredicate>(
+        &self,
+        query: &[f32],
+        k: usize,
+        predicate: &P,
+    ) -> Vec<(f32, usize)> {
         let num_base = self.base_vectors.rows();
         let mut heap = BinaryHeap::<HeapCandidate>::with_capacity(k);
 
         let push_id = |id: usize, heap: &mut BinaryHeap<HeapCandidate>| {
             let row = self.base_vectors.row(id);
             let cand = HeapCandidate {
-                sort_key: self.compute_sort_key(query, row),
+                sort_key: compute_metric_sort_key(self.metric, query, row),
                 id: id as i32,
             };
             if heap.len() < k {
@@ -671,9 +618,24 @@ impl FilteredExactKnn {
         let sorted = heap.into_sorted_vec();
         let mut results = Vec::with_capacity(sorted.len());
         for cand in sorted {
-            results.push((self.format_output_distance(cand.sort_key), cand.id as usize));
+            results.push((
+                format_metric_output_distance(self.metric, cand.sort_key),
+                cand.id as usize,
+            ));
         }
-        Ok(results)
+        results
+    }
+
+    fn filtered_effective_k<P: FilterPredicate>(&self, k: usize, predicate: &P) -> usize {
+        let num_base = self.base_vectors.rows();
+        let matching_count = if let Some(count) = predicate.count_matching(num_base) {
+            count
+        } else {
+            (0..num_base)
+                .filter(|&id| predicate.matches(id as u32))
+                .count()
+        };
+        k.min(matching_count)
     }
 
     /// Searches exact filtered top-`k` nearest neighbors sequentially across all query rows in `queries`.
@@ -692,16 +654,7 @@ impl FilteredExactKnn {
             });
         }
 
-        let num_base = self.base_vectors.rows();
-        let matching_count = if let Some(count) = predicate.count_matching(num_base) {
-            count
-        } else {
-            (0..num_base)
-                .filter(|&id| predicate.matches(id as u32))
-                .count()
-        };
-
-        let effective_k = k.min(matching_count);
+        let effective_k = self.filtered_effective_k(k, predicate);
         if effective_k == 0 {
             return Ok(KnnSearchResult {
                 indices: RowMatrix::empty(),
@@ -713,7 +666,7 @@ impl FilteredExactKnn {
         let mut all_distances = Vec::with_capacity(num_queries * effective_k);
 
         for q_row in queries.iter_rows() {
-            let hits = self.search_filtered(q_row, effective_k, predicate)?;
+            let hits = self.search_filtered_validated(q_row, effective_k, predicate);
             for (dist, id) in hits {
                 all_indices.push(id as i32);
                 all_distances.push(dist);
@@ -745,16 +698,7 @@ impl FilteredExactKnn {
             });
         }
 
-        let num_base = self.base_vectors.rows();
-        let matching_count = if let Some(count) = predicate.count_matching(num_base) {
-            count
-        } else {
-            (0..num_base)
-                .filter(|&id| predicate.matches(id as u32))
-                .count()
-        };
-
-        let effective_k = k.min(matching_count);
+        let effective_k = self.filtered_effective_k(k, predicate);
         if effective_k == 0 {
             return Ok(KnnSearchResult {
                 indices: RowMatrix::empty(),
@@ -762,16 +706,7 @@ impl FilteredExactKnn {
             });
         }
 
-        let workers = if num_threads == 0 {
-            thread::available_parallelism()
-                .map(usize::from)
-                .unwrap_or(1)
-        } else {
-            num_threads
-        }
-        .min(num_queries)
-        .max(1);
-
+        let workers = resolve_worker_count(num_threads, num_queries);
         if workers == 1 {
             return self.search_batch(queries, k, predicate);
         }
@@ -801,9 +736,7 @@ impl FilteredExactKnn {
                 s.spawn(move || {
                     for local_i in 0..take_q {
                         let q_row = queries.row(start_q + local_i);
-                        let hits = self
-                            .search_filtered(q_row, effective_k, predicate)
-                            .expect("query valid");
+                        let hits = self.search_filtered_validated(q_row, effective_k, predicate);
                         let out_base = local_i * effective_k;
                         for (j, (dist, id)) in hits.into_iter().enumerate() {
                             idx_slice[out_base + j] = id as i32;
@@ -822,16 +755,6 @@ impl FilteredExactKnn {
 
     fn validate_batch_inputs(&self, queries: &RowMatrix<f32>, k: usize) -> Result<()> {
         validate_query_batch(&self.base_vectors, queries, k)
-    }
-
-    #[inline]
-    fn compute_sort_key(&self, query: &[f32], base_row: &[f32]) -> f32 {
-        compute_metric_sort_key(self.metric, query, base_row)
-    }
-
-    #[inline]
-    fn format_output_distance(&self, sort_key: f32) -> f32 {
-        format_metric_output_distance(self.metric, sort_key)
     }
 }
 

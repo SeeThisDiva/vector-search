@@ -12,7 +12,11 @@
 //!    - Sensitivity (and loophole bypass) to query results hash corruption
 //!    - Failure to validate detailed `results` array (distance bits / IDs)
 
+mod common;
+
 use std::fs;
+
+use common::TempTestDir;
 use vector_search::benchmark::{
     compute_query_results_hash, verify_index_against_golden_fixture, GoldenFixture,
 };
@@ -342,12 +346,11 @@ fn test_adv_golden_fixture_corruption_fingerprint_mismatch() {
         corrupt_fp
     );
 
-    let temp_dir = std::env::temp_dir();
-    let temp_golden = temp_dir.join("test_adv_corrupt_fp.json");
+    let tmp = TempTestDir::new("adv_corrupt_fp");
+    let temp_golden = tmp.path().join("test_adv_corrupt_fp.json");
     fs::write(&temp_golden, golden_json).unwrap();
 
     let res = verify_index_against_golden_fixture(&index, &queries, &temp_golden);
-    let _ = fs::remove_file(&temp_golden);
 
     assert!(
         res.is_err(),
@@ -390,12 +393,11 @@ fn test_adv_golden_fixture_corruption_query_hash_when_queries_match() {
         actual_fp, corrupt_qhash
     );
 
-    let temp_dir = std::env::temp_dir();
-    let temp_golden = temp_dir.join("test_adv_corrupt_qhash.json");
+    let tmp = TempTestDir::new("adv_corrupt_qhash");
+    let temp_golden = tmp.path().join("test_adv_corrupt_qhash.json");
     fs::write(&temp_golden, golden_json).unwrap();
 
     let res = verify_index_against_golden_fixture(&index, &queries, &temp_golden);
-    let _ = fs::remove_file(&temp_golden);
 
     assert!(
         res.is_err(),
@@ -443,13 +445,12 @@ fn test_adv_golden_fixture_loophole_query_hash_bypassed_when_queries_under_expec
         actual_fp, bogus_qhash
     );
 
-    let temp_dir = std::env::temp_dir();
-    let temp_golden = temp_dir.join("test_adv_bypass_qhash.json");
+    let tmp = TempTestDir::new("adv_bypass_qhash");
+    let temp_golden = tmp.path().join("test_adv_bypass_qhash.json");
     fs::write(&temp_golden, golden_json).unwrap();
 
     // Passes queries_100 (which only has 100 rows, < 1000)
     let res = verify_index_against_golden_fixture(&index, &queries_100, &temp_golden);
-    let _ = fs::remove_file(&temp_golden);
 
     // Fail closed: must return Err when queries.rows() < expected_nq
     assert!(
@@ -497,12 +498,11 @@ fn test_adv_golden_fixture_results_array_corruption_detected() {
         actual_fp
     );
 
-    let temp_dir = std::env::temp_dir();
-    let temp_golden = temp_dir.join("test_adv_corrupt_results_array.json");
+    let tmp = TempTestDir::new("adv_results_array");
+    let temp_golden = tmp.path().join("test_adv_corrupt_results_array.json");
     fs::write(&temp_golden, golden_json).unwrap();
 
     let res = verify_index_against_golden_fixture(&index, &queries, &temp_golden);
-    let _ = fs::remove_file(&temp_golden);
 
     assert!(
         res.is_err(),
@@ -540,10 +540,9 @@ fn test_adv_golden_fixture_results_array_corruption_detected() {
         timed.distances.row(0)[0].to_bits() ^ 0x01,
         timed.distances.row(0)[1].to_bits(),
     );
-    let temp_bits = temp_dir.join("test_adv_corrupt_bits.json");
+    let temp_bits = tmp.path().join("test_adv_corrupt_bits.json");
     fs::write(&temp_bits, corrupt_bits_json).unwrap();
     let res_bits = verify_index_against_golden_fixture(&index, &queries, &temp_bits);
-    let _ = fs::remove_file(&temp_bits);
     assert!(
         res_bits.is_err(),
         "verify_index_against_golden_fixture must detect corrupted distance bits"
@@ -568,10 +567,9 @@ fn test_adv_golden_fixture_results_array_corruption_detected() {
         timed.distances.row(0)[0].to_bits(),
         timed.distances.row(0)[1].to_bits(),
     );
-    let temp_valid = temp_dir.join("test_adv_valid_results_array.json");
+    let temp_valid = tmp.path().join("test_adv_valid_results_array.json");
     fs::write(&temp_valid, valid_json).unwrap();
     let res_valid = verify_index_against_golden_fixture(&index, &queries, &temp_valid);
-    let _ = fs::remove_file(&temp_valid);
     assert!(
         res_valid.is_ok(),
         "Valid results array must pass verification"

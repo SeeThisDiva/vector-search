@@ -14,10 +14,12 @@
 
 #![forbid(unsafe_code)]
 
+mod common;
+
 use std::fs;
-use std::path::Path;
 use std::process::Command;
 
+use common::TempTestDir;
 use vector_search::dataset::{generate_mode_a_bitset, read_fvecs, read_ivecs};
 use vector_search::distance::Metric;
 use vector_search::error::VectorSearchError;
@@ -28,15 +30,13 @@ use vector_search::recall::compute_recall_at_k;
 
 #[test]
 fn test_integration_sift_10k_four_tiers_self_parity() {
-    let sift_base_path = Path::new("data/siftsmall/siftsmall_base.fvecs");
-    let sift_query_path = Path::new("data/siftsmall/siftsmall_query.fvecs");
-
-    if !sift_base_path.exists() || !sift_query_path.exists() {
+    let Some(loaded) =
+        common::load_siftsmall_or_skip("test_integration_sift_10k_four_tiers_self_parity")
+    else {
         return;
-    }
-
-    let base = read_fvecs(sift_base_path).expect("Failed to read siftsmall_base.fvecs");
-    let query = read_fvecs(sift_query_path).expect("Failed to read siftsmall_query.fvecs");
+    };
+    let base = loaded.base;
+    let query = loaded.query;
     let n = base.rows();
     assert_eq!(n, 10_000);
 
@@ -237,27 +237,11 @@ fn test_integration_lambda_predicate_bitset_parity() {
 
 #[test]
 fn test_integration_cli_subprocess_execution() {
-    let temp_dir = std::env::temp_dir();
-    let run_dir = temp_dir.join("fek_cli_test_out");
+    let tmp = TempTestDir::new("fek_cli_test_out");
+    let run_dir = tmp.path();
     let json_file = run_dir.join("report.json");
 
-    let exe_name = if cfg!(windows) {
-        "filtered_exact_knn.exe"
-    } else {
-        "filtered_exact_knn"
-    };
-    let release_bin = Path::new("target/release").join(exe_name);
-    let debug_bin = Path::new("target/debug").join(exe_name);
-
-    let bin_path = if release_bin.exists() {
-        release_bin
-    } else if debug_bin.exists() {
-        debug_bin
-    } else {
-        return;
-    };
-
-    let status = Command::new(&bin_path)
+    let status = Command::new(env!("CARGO_BIN_EXE_filtered_exact_knn"))
         .args([
             "--num-base",
             "500",
@@ -296,6 +280,4 @@ fn test_integration_cli_subprocess_execution() {
     assert_eq!(gt_idx.cols(), 5);
     assert_eq!(gt_dist.rows(), 10);
     assert_eq!(gt_dist.cols(), 5);
-
-    let _ = fs::remove_dir_all(&run_dir);
 }

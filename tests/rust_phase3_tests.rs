@@ -1,8 +1,8 @@
 //! Phase 3 regression tests. They run on small synthetic data so they need no SIFT download.
 
-use std::fs;
-use std::path::PathBuf;
+mod common;
 
+use common::TempTestDir;
 use vector_search::benchmark::{
     detect_provenance, detect_provenance_with_commands, run_phase1_benchmark, run_phase2_benchmark,
     run_phase3_benchmark, summarize_repeated_latencies, BaselineMultiScaleReport, Phase1Config,
@@ -158,13 +158,8 @@ fn parallel_search_rejects_non_finite_query_instead_of_panicking() {
 
 #[test]
 fn phase3_official_ground_truth_check_detects_corrupted_gt_and_truncated_base() {
-    let mut tmp_dir: PathBuf = std::env::temp_dir();
-    tmp_dir.push(format!(
-        "vector_search_phase3_gt_test_{}",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&tmp_dir);
-    fs::create_dir_all(&tmp_dir).unwrap();
+    let tmp = TempTestDir::new("phase3_gt");
+    let tmp_dir = tmp.path();
 
     let (base, query) = generate_synthetic_sift(200, 20, 16, 4, 123).unwrap();
     let true_gt = ExactKnn::search_parallel_with_base(Metric::L2Squared, &base, &query, 10, 2)
@@ -306,8 +301,6 @@ fn phase3_official_ground_truth_check_detects_corrupted_gt_and_truncated_base() 
     assert_eq!(rep_trunc.num_base, 100);
     assert!(!rep_trunc.official_ground_truth_matched);
     assert_eq!(rep_trunc.official_gt_check_queries, 0);
-
-    let _ = fs::remove_dir_all(&tmp_dir);
 }
 
 #[test]
@@ -379,13 +372,8 @@ fn phase3_prefix_fvecs_loading_graph_only_bytes_and_config_validation() {
     assert!(good_cfg.validate().is_ok());
 
     // 2. Prefix .fvecs / .ivecs loading reads only max_rows while validating full file alignment
-    let mut tmp_dir: PathBuf = std::env::temp_dir();
-    tmp_dir.push(format!(
-        "vector_search_phase3_prefix_test_{}",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&tmp_dir);
-    fs::create_dir_all(&tmp_dir).unwrap();
+    let tmp = TempTestDir::new("phase3_prefix");
+    let tmp_dir = tmp.path();
 
     let (base, _) = generate_synthetic_sift(80, 5, 12, 4, 77).unwrap();
     let fvecs_path = tmp_dir.join("test.fvecs");
@@ -405,8 +393,6 @@ fn phase3_prefix_fvecs_loading_graph_only_bytes_and_config_validation() {
     assert_eq!(gt_prefix_10.rows(), 10);
     assert_eq!(gt_prefix_10.cols(), 5);
     assert_eq!(gt_prefix_10.as_slice(), gt.slice_first_rows(10).as_slice());
-
-    let _ = fs::remove_dir_all(&tmp_dir);
 
     // 3. Graph-only memory accounting and search_batch_timed_with_tracker(&self, ...)
     let index = HnswIndex::build(&base, Metric::L2Squared, good_cfg).unwrap();

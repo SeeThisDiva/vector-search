@@ -11,17 +11,18 @@
 
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use vector_search::benchmark::detect_provenance;
-
+use vector_search::cli_util::{next_str, parse_next};
 use vector_search::dataset::{
-    generate_mode_a_bitset, generate_mode_b_bitset_detailed, generate_synthetic_sift, read_fvecs,
-    write_bitset, write_bitset_as_ivecs, ModeBMetadata, S_CLUST_DEFAULT,
+    generate_mode_a_bitset, generate_mode_b_bitset_detailed, generate_synthetic_sift,
+    read_fvecs_max_rows, write_bitset, write_bitset_as_ivecs, ModeBMetadata, S_CLUST_DEFAULT,
 };
 use vector_search::error::{Result, VectorSearchError};
 use vector_search::filter::DenseBitset;
+use vector_search::json_util::{escape_json, write_file_with_parents};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GenerationMode {
@@ -50,7 +51,7 @@ struct CliConfig {
 }
 
 fn print_usage() {
-    eprintln!(
+    println!(
         r#"Deterministic Metadata Generator (Milestone M3 Task T3.2)
 
 USAGE:
@@ -75,8 +76,7 @@ OPTIONS:
     --format <raw|ivecs>
                         Bitset serialization format: 'raw' (.bin) or 'ivecs' (default: raw)
     --json-out <PATH>   Destination path for provenance JSON report
-    -h, --help          Print this help message
-"#
+    -h, --help          Print this help message"#
     );
 }
 
@@ -101,20 +101,12 @@ fn parse_cli_args() -> Result<Option<CliConfig>> {
 
     let mut i = 0;
     while i < args.len() {
-        let flag = &args[i];
-        let mut next_val = || -> Result<&str> {
-            i += 1;
-            if i >= args.len() {
-                return Err(VectorSearchError::InvalidArgument(format!(
-                    "Missing argument value for flag '{flag}'"
-                )));
-            }
-            Ok(&args[i])
-        };
-
-        match flag.as_str() {
+        let flag = args[i].as_str();
+        match flag {
             "--mode" => {
-                let m = next_val()?.trim().to_ascii_lowercase();
+                let m = next_str(&args, &mut i, "--mode")?
+                    .trim()
+                    .to_ascii_lowercase();
                 mode = match m.as_str() {
                     "independent" | "mode_a" | "a" | "uniform" => GenerationMode::Independent,
                     "correlated" | "mode_b" | "b" | "cluster" => GenerationMode::Correlated,
@@ -126,15 +118,10 @@ fn parse_cli_args() -> Result<Option<CliConfig>> {
                 };
             }
             "--num-base" | "-n" | "--num-vectors" => {
-                let val_str = next_val()?;
-                num_base = val_str.parse().map_err(|e| {
-                    VectorSearchError::InvalidArgument(format!(
-                        "Invalid --num-base '{val_str}': {e}"
-                    ))
-                })?;
+                num_base = parse_next(&args, &mut i, flag)?;
             }
             "--selectivity" | "-s" | "--sel" => {
-                let mut val_str = next_val()?.trim().to_string();
+                let mut val_str = next_str(&args, &mut i, flag)?.trim().to_string();
                 let is_pct = val_str.ends_with('%');
                 if is_pct {
                     val_str.pop();
@@ -155,15 +142,15 @@ fn parse_cli_args() -> Result<Option<CliConfig>> {
                 selectivity = s;
             }
             "--seed" => {
-                let val_str = next_val()?;
-                seed_attr = val_str.parse().map_err(|e| {
-                    VectorSearchError::InvalidArgument(format!("Invalid --seed '{val_str}': {e}"))
-                })?;
+                seed_attr = parse_next(&args, &mut i, "--seed")?;
             }
             "--seed-clust" => {
-                let val_str = next_val()?;
-                seed_clust = if val_str.starts_with("0x") || val_str.starts_with("0X") {
-                    u64::from_str_radix(&val_str[2..], 16)
+                let val_str = next_str(&args, &mut i, "--seed-clust")?;
+                seed_clust = if let Some(hex) = val_str
+                    .strip_prefix("0x")
+                    .or_else(|| val_str.strip_prefix("0X"))
+                {
+                    u64::from_str_radix(hex, 16)
                 } else {
                     val_str.parse()
                 }
@@ -174,31 +161,25 @@ fn parse_cli_args() -> Result<Option<CliConfig>> {
                 })?;
             }
             "--base-fvecs" => {
-                base_fvecs = Some(PathBuf::from(next_val()?));
+                base_fvecs = Some(PathBuf::from(next_str(&args, &mut i, "--base-fvecs")?));
             }
             "--dim" => {
-                let val_str = next_val()?;
-                dim = val_str.parse().map_err(|e| {
-                    VectorSearchError::InvalidArgument(format!("Invalid --dim '{val_str}': {e}"))
-                })?;
+                dim = parse_next(&args, &mut i, "--dim")?;
             }
             "--num-clusters" => {
-                let val_str = next_val()?;
-                num_clusters = val_str.parse().map_err(|e| {
-                    VectorSearchError::InvalidArgument(format!(
-                        "Invalid --num-clusters '{val_str}': {e}"
-                    ))
-                })?;
+                num_clusters = parse_next(&args, &mut i, "--num-clusters")?;
             }
             "--output" | "-o" | "--out" => {
-                let p = PathBuf::from(next_val()?);
+                let p = PathBuf::from(next_str(&args, &mut i, flag)?);
                 if p.extension().is_some_and(|ext| ext == "ivecs") {
                     format = OutputFormat::Ivecs;
                 }
                 output_path = Some(p);
             }
             "--format" => {
-                let fmt_str = next_val()?.trim().to_ascii_lowercase();
+                let fmt_str = next_str(&args, &mut i, "--format")?
+                    .trim()
+                    .to_ascii_lowercase();
                 format = match fmt_str.as_str() {
                     "raw" | "bin" | "binary" => OutputFormat::RawBinary,
                     "ivecs" | "texmex" => OutputFormat::Ivecs,
@@ -210,7 +191,7 @@ fn parse_cli_args() -> Result<Option<CliConfig>> {
                 };
             }
             "--json-out" => {
-                json_path = Some(PathBuf::from(next_val()?));
+                json_path = Some(PathBuf::from(next_str(&args, &mut i, "--json-out")?));
             }
             other => {
                 return Err(VectorSearchError::InvalidArgument(format!(
@@ -218,7 +199,6 @@ fn parse_cli_args() -> Result<Option<CliConfig>> {
                 )))
             }
         }
-        i += 1;
     }
 
     Ok(Some(CliConfig {
@@ -268,7 +248,7 @@ fn run() -> Result<()> {
             println!("Seed (Centroids): 0x{:016X}", config.seed_clust);
             let base_matrix = if let Some(ref path) = config.base_fvecs {
                 println!("Loading base vectors from {}...", path.display());
-                let loaded = read_fvecs(path)?;
+                let loaded = read_fvecs_max_rows(path, Some(config.num_base))?;
                 if loaded.rows() < config.num_base {
                     return Err(VectorSearchError::InvalidArgument(format!(
                         "File {} contains {} vectors, but --num-base is {}",
@@ -277,11 +257,7 @@ fn run() -> Result<()> {
                         config.num_base
                     )));
                 }
-                if loaded.rows() > config.num_base {
-                    loaded.slice_first_rows(config.num_base)
-                } else {
-                    loaded
-                }
+                loaded
             } else {
                 println!(
                     "Generating synthetic base vectors (N={}, dim={}, clusters={})...",
@@ -386,16 +362,12 @@ fn run() -> Result<()> {
   "shortfall_count": {shortfall_count_json}
 }}
 "#,
+            git_commit = escape_json(&git_commit),
             selectivity = config.selectivity,
             seed_attr = config.seed_attr,
         );
 
-        if let Some(parent) = Path::new(json_p).parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)?;
-            }
-        }
-        fs::write(json_p, json_text)?;
+        write_file_with_parents(json_p, json_text)?;
         println!("Provenance JSON written successfully.");
     }
 

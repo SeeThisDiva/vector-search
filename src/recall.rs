@@ -206,3 +206,162 @@ pub fn evaluate_recall_summary(
     }
     Ok(results)
 }
+
+/// Computes `(median, min, max)` over `values`, returning `(0.0, 0.0, 0.0)` when empty.
+#[must_use]
+pub fn median_min_max(values: &[f64]) -> (f64, f64, f64) {
+    if values.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    (
+        percentile_sorted(&sorted, 50.0),
+        sorted[0],
+        sorted[sorted.len() - 1],
+    )
+}
+
+/// Summary statistics across repeated `efSearch` sweep runs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepeatedSweepSummary {
+    pub num_runs: usize,
+    pub median_latency: LatencyStats,
+    pub mean_ms_min: f64,
+    pub mean_ms_max: f64,
+    pub mean_ms_spread: f64,
+    pub p99_ms_min: f64,
+    pub p99_ms_max: f64,
+    pub p99_ms_spread: f64,
+    pub run_mean_latencies_ms: Vec<f64>,
+    pub run_p99_latencies_ms: Vec<f64>,
+}
+
+/// Computes median `LatencyStats` and min/max/spread across `N` repeated batch search runs.
+#[must_use]
+pub fn summarize_repeated_latencies(runs: &[LatencyStats]) -> RepeatedSweepSummary {
+    if runs.is_empty() {
+        return RepeatedSweepSummary {
+            num_runs: 0,
+            median_latency: LatencyStats::default(),
+            mean_ms_min: 0.0,
+            mean_ms_max: 0.0,
+            mean_ms_spread: 0.0,
+            p99_ms_min: 0.0,
+            p99_ms_max: 0.0,
+            p99_ms_spread: 0.0,
+            run_mean_latencies_ms: Vec::new(),
+            run_p99_latencies_ms: Vec::new(),
+        };
+    }
+
+    let num_runs = runs.len();
+    let num_queries = runs[0].num_queries;
+    let run_mean_latencies_ms: Vec<f64> = runs.iter().map(|r| r.mean_ms).collect();
+    let run_p99_latencies_ms: Vec<f64> = runs.iter().map(|r| r.p99_ms).collect();
+
+    let extract_stat = |extract: fn(&LatencyStats) -> f64| -> (f64, f64, f64) {
+        let vals: Vec<f64> = runs.iter().map(extract).collect();
+        median_min_max(&vals)
+    };
+
+    let (total_s, _, _) = extract_stat(|r| r.total_s);
+    let (min_ms, _, _) = extract_stat(|r| r.min_ms);
+    let (mean_ms, mean_ms_min, mean_ms_max) = extract_stat(|r| r.mean_ms);
+    let (p50_ms, _, _) = extract_stat(|r| r.p50_ms);
+    let (p95_ms, _, _) = extract_stat(|r| r.p95_ms);
+    let (p99_ms, p99_ms_min, p99_ms_max) = extract_stat(|r| r.p99_ms);
+    let (max_ms, _, _) = extract_stat(|r| r.max_ms);
+    let qps = if total_s > 0.0 {
+        (num_queries as f64) / total_s
+    } else {
+        0.0
+    };
+
+    RepeatedSweepSummary {
+        num_runs,
+        median_latency: LatencyStats {
+            num_queries,
+            total_s,
+            qps,
+            min_ms,
+            mean_ms,
+            p50_ms,
+            p95_ms,
+            p99_ms,
+            max_ms,
+        },
+        mean_ms_min,
+        mean_ms_max,
+        mean_ms_spread: (mean_ms_max - mean_ms_min).max(0.0),
+        p99_ms_min,
+        p99_ms_max,
+        p99_ms_spread: (p99_ms_max - p99_ms_min).max(0.0),
+        run_mean_latencies_ms,
+        run_p99_latencies_ms,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_median_min_max_and_repeated_summary() {
+        assert_eq!(median_min_max(&[]), (0.0, 0.0, 0.0));
+        assert_eq!(
+            median_min_max(&[3.0, 1.0, 2.0, 10.0, 4.0]),
+            (3.0, 1.0, 10.0)
+        );
+
+        let empty_summary = summarize_repeated_latencies(&[]);
+        assert_eq!(empty_summary.num_runs, 0);
+        assert_eq!(empty_summary.median_latency, LatencyStats::default());
+
+        let runs = vec![
+            LatencyStats {
+                num_queries: 100,
+                total_s: 0.2,
+                qps: 500.0,
+                min_ms: 0.5,
+                mean_ms: 2.0,
+                p50_ms: 1.9,
+                p95_ms: 2.5,
+                p99_ms: 3.0,
+                max_ms: 4.0,
+            },
+            LatencyStats {
+                num_queries: 100,
+                total_s: 0.1,
+                qps: 1000.0,
+                min_ms: 0.3,
+                mean_ms: 1.0,
+                p50_ms: 0.9,
+                p95_ms: 1.4,
+                p99_ms: 2.0,
+                max_ms: 2.5,
+            },
+            LatencyStats {
+                num_queries: 100,
+                total_s: 0.4,
+                qps: 250.0,
+                min_ms: 0.8,
+                mean_ms: 4.0,
+                p50_ms: 3.9,
+                p95_ms: 5.0,
+                p99_ms: 6.0,
+                max_ms: 8.0,
+            },
+        ];
+        let summary = summarize_repeated_latencies(&runs);
+        assert_eq!(summary.num_runs, 3);
+        assert!((summary.median_latency.mean_ms - 2.0).abs() < 1e-12);
+        assert!((summary.median_latency.qps - 500.0).abs() < 1e-12);
+        assert!((summary.mean_ms_min - 1.0).abs() < 1e-12);
+        assert!((summary.mean_ms_max - 4.0).abs() < 1e-12);
+        assert!((summary.mean_ms_spread - 3.0).abs() < 1e-12);
+        assert!((summary.p99_ms_min - 2.0).abs() < 1e-12);
+        assert!((summary.p99_ms_max - 6.0).abs() < 1e-12);
+        assert!((summary.p99_ms_spread - 4.0).abs() < 1e-12);
+    }
+}

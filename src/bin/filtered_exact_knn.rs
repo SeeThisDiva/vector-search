@@ -8,16 +8,16 @@
 
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::str::FromStr;
 use std::time::Instant;
 
 use vector_search::benchmark::detect_provenance;
-
+use vector_search::cli_util::{next_str, parse_next};
 use vector_search::dataset::{
     generate_mode_a_bitset, generate_mode_b_bitset_detailed, generate_synthetic_sift, read_bitset,
-    read_fvecs, read_ivecs, write_bitset, write_bitset_as_ivecs, write_fvecs, write_ivecs,
+    read_fvecs_max_rows, read_ivecs, write_bitset, write_bitset_as_ivecs, write_fvecs, write_ivecs,
     S_CLUST_DEFAULT,
 };
 use vector_search::distance::Metric;
@@ -25,6 +25,7 @@ use vector_search::error::{Result, VectorSearchError};
 use vector_search::exact_knn::FilteredExactKnn;
 use vector_search::filter::DenseBitset;
 use vector_search::hardware::detect_hardware;
+use vector_search::json_util::{escape_json, write_file_with_parents};
 use vector_search::recall::compute_recall_at_k;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +60,7 @@ struct CliConfig {
 }
 
 fn print_usage() {
-    eprintln!(
+    println!(
         r#"Filtered Exact KNN Ground Truth Harness (Milestone M3 Task T3.3)
 
 USAGE:
@@ -98,8 +99,7 @@ OPTIONS:
     --json-out <PATH>   Path for structured JSON report
     --threads <T>, -t <T>
                         Number of parallel worker threads (default: 0 = all cores)
-    -h, --help          Print this help message
-"#
+    -h, --help          Print this help message"#
     );
 }
 
@@ -134,95 +134,38 @@ fn parse_cli_args() -> Result<Option<CliConfig>> {
 
     let mut i = 0;
     while i < args.len() {
-        match args[i].as_str() {
+        let flag = args[i].as_str();
+        match flag {
             "--num-base" | "-n" => {
-                i += 1;
-                let parsed: usize = args
-                    .get(i)
-                    .ok_or_else(|| {
-                        VectorSearchError::InvalidArgument("Missing value for --num-base".into())
-                    })?
-                    .parse()
-                    .map_err(|e| {
-                        VectorSearchError::InvalidArgument(format!("Invalid --num-base: {e}"))
-                    })?;
+                let parsed: usize = parse_next(&args, &mut i, flag)?;
                 num_base = parsed;
                 explicit_num_base = Some(parsed);
             }
             "--num-query" | "-q" => {
-                i += 1;
-                let parsed: usize = args
-                    .get(i)
-                    .ok_or_else(|| {
-                        VectorSearchError::InvalidArgument("Missing value for --num-query".into())
-                    })?
-                    .parse()
-                    .map_err(|e| {
-                        VectorSearchError::InvalidArgument(format!("Invalid --num-query: {e}"))
-                    })?;
+                let parsed: usize = parse_next(&args, &mut i, flag)?;
                 num_query = parsed;
                 explicit_num_query = Some(parsed);
             }
             "--dim" | "-d" => {
-                i += 1;
-                dim = args
-                    .get(i)
-                    .ok_or_else(|| {
-                        VectorSearchError::InvalidArgument("Missing value for --dim".into())
-                    })?
-                    .parse()
-                    .map_err(|e| {
-                        VectorSearchError::InvalidArgument(format!("Invalid --dim: {e}"))
-                    })?;
+                dim = parse_next(&args, &mut i, flag)?;
             }
             "--k" | "-k" => {
-                i += 1;
-                k = args
-                    .get(i)
-                    .ok_or_else(|| {
-                        VectorSearchError::InvalidArgument("Missing value for --k".into())
-                    })?
-                    .parse()
-                    .map_err(|e| VectorSearchError::InvalidArgument(format!("Invalid --k: {e}")))?;
+                k = parse_next(&args, &mut i, flag)?;
             }
             "--seed" => {
-                i += 1;
-                seed = args
-                    .get(i)
-                    .ok_or_else(|| {
-                        VectorSearchError::InvalidArgument("Missing value for --seed".into())
-                    })?
-                    .parse()
-                    .map_err(|e| {
-                        VectorSearchError::InvalidArgument(format!("Invalid --seed: {e}"))
-                    })?;
+                seed = parse_next(&args, &mut i, "--seed")?;
             }
             "--base-fvecs" => {
-                i += 1;
-                let val = args.get(i).ok_or_else(|| {
-                    VectorSearchError::InvalidArgument("Missing value for --base-fvecs".into())
-                })?;
-                base_fvecs = Some(PathBuf::from(val));
+                base_fvecs = Some(PathBuf::from(next_str(&args, &mut i, "--base-fvecs")?));
             }
             "--query-fvecs" => {
-                i += 1;
-                let val = args.get(i).ok_or_else(|| {
-                    VectorSearchError::InvalidArgument("Missing value for --query-fvecs".into())
-                })?;
-                query_fvecs = Some(PathBuf::from(val));
+                query_fvecs = Some(PathBuf::from(next_str(&args, &mut i, "--query-fvecs")?));
             }
             "--filter-bitset" => {
-                i += 1;
-                let val = args.get(i).ok_or_else(|| {
-                    VectorSearchError::InvalidArgument("Missing value for --filter-bitset".into())
-                })?;
-                filter_bitset = Some(PathBuf::from(val));
+                filter_bitset = Some(PathBuf::from(next_str(&args, &mut i, "--filter-bitset")?));
             }
             "--selectivity" | "-s" => {
-                i += 1;
-                let val_str = args.get(i).ok_or_else(|| {
-                    VectorSearchError::InvalidArgument("Missing value for --selectivity".into())
-                })?;
+                let val_str = next_str(&args, &mut i, flag)?;
                 let clean_str = val_str.trim_end_matches('%');
                 let mut parsed: f64 = clean_str.parse().map_err(|e| {
                     VectorSearchError::InvalidArgument(format!("Invalid --selectivity: {e}"))
@@ -238,10 +181,7 @@ fn parse_cli_args() -> Result<Option<CliConfig>> {
                 selectivity = parsed;
             }
             "--filter-mode" => {
-                i += 1;
-                let mode_str = args.get(i).ok_or_else(|| {
-                    VectorSearchError::InvalidArgument("Missing value for --filter-mode".into())
-                })?;
+                let mode_str = next_str(&args, &mut i, "--filter-mode")?;
                 match mode_str.to_lowercase().as_str() {
                     "independent" | "a" | "mode_a" => filter_mode = FilterMode::Independent,
                     "correlated" | "b" | "mode_b" => filter_mode = FilterMode::Correlated,
@@ -253,23 +193,14 @@ fn parse_cli_args() -> Result<Option<CliConfig>> {
                 }
             }
             "--filter-seed" => {
-                i += 1;
-                filter_seed = args
-                    .get(i)
-                    .ok_or_else(|| {
-                        VectorSearchError::InvalidArgument("Missing value for --filter-seed".into())
-                    })?
-                    .parse()
-                    .map_err(|e| {
-                        VectorSearchError::InvalidArgument(format!("Invalid --filter-seed: {e}"))
-                    })?;
+                filter_seed = parse_next(&args, &mut i, "--filter-seed")?;
             }
             "--seed-clust" => {
-                i += 1;
-                let val_str = args.get(i).ok_or_else(|| {
-                    VectorSearchError::InvalidArgument("Missing value for --seed-clust".into())
-                })?;
-                seed_clust = if let Some(hex) = val_str.strip_prefix("0x") {
+                let val_str = next_str(&args, &mut i, "--seed-clust")?;
+                seed_clust = if let Some(hex) = val_str
+                    .strip_prefix("0x")
+                    .or_else(|| val_str.strip_prefix("0X"))
+                {
                     u64::from_str_radix(hex, 16).map_err(|e| {
                         VectorSearchError::InvalidArgument(format!("Invalid hex --seed-clust: {e}"))
                     })?
@@ -280,58 +211,26 @@ fn parse_cli_args() -> Result<Option<CliConfig>> {
                 };
             }
             "--metric" => {
-                i += 1;
-                let val = args.get(i).ok_or_else(|| {
-                    VectorSearchError::InvalidArgument("Missing value for --metric".into())
-                })?;
+                let val = next_str(&args, &mut i, "--metric")?;
                 metric = Metric::from_str(val)?;
             }
             "--output-dir" | "-o" => {
-                i += 1;
-                let val = args.get(i).ok_or_else(|| {
-                    VectorSearchError::InvalidArgument("Missing value for --output-dir".into())
-                })?;
-                output_dir = Some(PathBuf::from(val));
+                output_dir = Some(PathBuf::from(next_str(&args, &mut i, flag)?));
             }
             "--output-ivecs" => {
-                i += 1;
-                let val = args.get(i).ok_or_else(|| {
-                    VectorSearchError::InvalidArgument("Missing value for --output-ivecs".into())
-                })?;
-                output_ivecs = Some(PathBuf::from(val));
+                output_ivecs = Some(PathBuf::from(next_str(&args, &mut i, "--output-ivecs")?));
             }
             "--output-fvecs" => {
-                i += 1;
-                let val = args.get(i).ok_or_else(|| {
-                    VectorSearchError::InvalidArgument("Missing value for --output-fvecs".into())
-                })?;
-                output_fvecs = Some(PathBuf::from(val));
+                output_fvecs = Some(PathBuf::from(next_str(&args, &mut i, "--output-fvecs")?));
             }
             "--output-bitset" => {
-                i += 1;
-                let val = args.get(i).ok_or_else(|| {
-                    VectorSearchError::InvalidArgument("Missing value for --output-bitset".into())
-                })?;
-                output_bitset = Some(PathBuf::from(val));
+                output_bitset = Some(PathBuf::from(next_str(&args, &mut i, "--output-bitset")?));
             }
             "--json-out" => {
-                i += 1;
-                let val = args.get(i).ok_or_else(|| {
-                    VectorSearchError::InvalidArgument("Missing value for --json-out".into())
-                })?;
-                json_path = Some(PathBuf::from(val));
+                json_path = Some(PathBuf::from(next_str(&args, &mut i, "--json-out")?));
             }
             "--threads" | "-t" => {
-                i += 1;
-                threads = args
-                    .get(i)
-                    .ok_or_else(|| {
-                        VectorSearchError::InvalidArgument("Missing value for --threads".into())
-                    })?
-                    .parse()
-                    .map_err(|e| {
-                        VectorSearchError::InvalidArgument(format!("Invalid --threads: {e}"))
-                    })?;
+                threads = parse_next(&args, &mut i, flag)?;
             }
             other => {
                 return Err(VectorSearchError::InvalidArgument(format!(
@@ -339,7 +238,6 @@ fn parse_cli_args() -> Result<Option<CliConfig>> {
                 )));
             }
         }
-        i += 1;
     }
 
     Ok(Some(CliConfig {
@@ -387,21 +285,10 @@ fn run() -> Result<()> {
     // 1. Load or generate base and query vectors
     let (base_matrix, query_matrix, is_synthetic) = if let Some(ref base_p) = config.base_fvecs {
         println!("Loading base vectors from {}...", base_p.display());
-        let mut loaded_base = read_fvecs(base_p)?;
-        if let Some(take_b) = config.explicit_num_base {
-            if loaded_base.rows() > take_b {
-                loaded_base = loaded_base.slice_first_rows(take_b);
-            }
-        }
+        let loaded_base = read_fvecs_max_rows(base_p, config.explicit_num_base)?;
         let loaded_query = if let Some(ref query_p) = config.query_fvecs {
             println!("Loading query vectors from {}...", query_p.display());
-            let mut q_mat = read_fvecs(query_p)?;
-            if let Some(take_q) = config.explicit_num_query {
-                if q_mat.rows() > take_q {
-                    q_mat = q_mat.slice_first_rows(take_q);
-                }
-            }
-            q_mat
+            read_fvecs_max_rows(query_p, config.explicit_num_query)?
         } else {
             let take_q = config.num_query.min(loaded_base.rows());
             println!("Using first {take_q} base vectors as queries...");
@@ -501,7 +388,7 @@ fn run() -> Result<()> {
     let elapsed = start.elapsed();
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
     let qps = if elapsed_ms > 0.0 {
-        (q as f64) / (elapsed.as_secs_f64())
+        (q as f64) / elapsed.as_secs_f64()
     } else {
         0.0
     };
@@ -609,19 +496,15 @@ fn run() -> Result<()> {
   }}
 }}
 "#,
-            cpu_model = hw.cpu_model,
+            git_commit = escape_json(&git_commit),
+            cpu_model = escape_json(&hw.cpu_model),
             logical_cores = hw.logical_cores,
             selectivity = config.selectivity,
             seed_attr = config.filter_seed,
             requested_k = config.k,
         );
 
-        if let Some(parent) = Path::new(json_p).parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)?;
-            }
-        }
-        fs::write(json_p, json_text)?;
+        write_file_with_parents(json_p, json_text)?;
         println!("Provenance JSON written successfully.");
     }
 

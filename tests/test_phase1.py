@@ -12,6 +12,7 @@ Verifies:
 import os
 import tempfile
 
+import faiss  # type: ignore[import-untyped]
 import numpy as np
 import pytest
 
@@ -230,11 +231,6 @@ def test_exact_knn_distance_clamping():
 
 def test_exact_knn_faiss_parity():
     """Verify ExactKNN matches FAISS IndexFlatL2 results 100%."""
-    try:
-        import faiss  # type: ignore
-    except ImportError:
-        pytest.skip("FAISS is not installed; skipping FAISS parity test.")
-
     base, query = generate_synthetic_sift(num_base=1_000, num_query=50, dim=64, seed=101)
     k = 10
 

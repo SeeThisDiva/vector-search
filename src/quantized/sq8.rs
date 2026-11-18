@@ -4,8 +4,7 @@
 //! All distance kernels are 100% safe Rust (`#![forbid(unsafe_code)]`, `std`-only) using
 //! `as_chunks::<8>()` 8-way unrolling and zero per-dimension float divisions in hot loops.
 
-use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
@@ -20,14 +19,14 @@ use super::graph::{
     QuantizedMemoryProfile, QuantizedSearchScratch, QuantizedStorageMode, TimedQuantizedSearch,
 };
 use super::{
-    format_metric_output_distance, metric_from_u8, metric_to_u8, read_f32_vec, read_f64, read_u64,
-    read_u8, write_f32_slice, write_f64, write_u64, write_u8,
+    format_metric_output_distance, impl_quantized_index_common, inspect_streaming_fvecs,
+    metric_from_u8, metric_to_u8, read_f32_vec, read_index_snapshot, read_magic, read_u8,
+    read_usize_u64, stream_fvecs_bounded, validate_base_matrix, write_f32_slice,
+    write_index_snapshot, write_u64, write_u8,
 };
 
 const SQ8_VECTORS_MAGIC: &[u8; 8] = b"SQ8VEC01";
 const SQ8_SNAPSHOT_MAGIC: &[u8; 8] = b"HSQ8SN01";
-const IO_BUF_CAPACITY: usize = 256 * 1024;
-const STREAMING_CHUNK_ROWS: usize = 4_096;
 
 /// Asymmetric `L2^2` SQ8 kernel selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -316,9 +315,7 @@ impl Sq8Quantizer {
 
     /// Deserializes and validates quantizer tables from a binary stream.
     pub fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
-        let dim = usize::try_from(read_u64(reader)?).map_err(|_| {
-            VectorSearchError::CorruptData("Sq8Quantizer dim overflows usize".to_string())
-        })?;
+        let dim = read_usize_u64(reader, "Sq8Quantizer dim")?;
         if dim == 0 {
             return Err(VectorSearchError::CorruptData(
                 "Sq8Quantizer dim cannot be 0".to_string(),
@@ -750,19 +747,10 @@ impl Sq8Vectors {
         let t_enc = Instant::now();
         let num_vectors = matrix.rows();
         let dim = matrix.cols();
-        let total_codes = num_vectors.checked_mul(dim).ok_or_else(|| {
-            VectorSearchError::InvalidArgument("SQ8 code buffer size overflows usize".to_string())
-        })?;
-        let mut codes = vec![0_u8; total_codes];
-        let mut base_norms_sq =
-            (kernel_kind == Sq8KernelKind::NormExpanded).then(|| Vec::with_capacity(num_vectors));
+        let (mut codes, mut base_norms_sq) = alloc_codes_and_norms(num_vectors, dim, kernel_kind)?;
 
         for (i, row) in matrix.iter_rows().enumerate() {
-            let code_slice = &mut codes[i * dim..(i + 1) * dim];
-            quantizer.encode_row_unchecked(row, code_slice);
-            if let Some(norms) = base_norms_sq.as_mut() {
-                norms.push(compute_code_norm_sq(quantizer.scales(), code_slice));
-            }
+            encode_row_into_slot(&quantizer, row, i, &mut codes, &mut base_norms_sq);
         }
         let enc_s = t_enc.elapsed().as_secs_f64();
 
@@ -810,91 +798,17 @@ impl Sq8Vectors {
         kernel_kind: Sq8KernelKind,
         max_rows: Option<usize>,
     ) -> Result<(Self, f64, f64)> {
-        if max_rows == Some(0) {
-            return Err(VectorSearchError::InvalidArgument(
-                "max_rows must be positive (> 0) when specified".to_string(),
-            ));
-        }
-
         let path_ref = path.as_ref();
-        let meta = fs::metadata(path_ref)?;
-        let file_size = meta.len();
-        if file_size == 0 {
-            return Err(VectorSearchError::InvalidArgument(format!(
-                "Cannot calibrate SQ8 on empty .fvecs file: {}",
-                path_ref.display()
-            )));
-        }
-        if file_size < 4 {
-            return Err(VectorSearchError::CorruptData(format!(
-                "Corrupt .fvecs file (size {file_size} < 4 bytes): {}",
-                path_ref.display()
-            )));
-        }
-
-        let file = File::open(path_ref)?;
-        let mut reader = BufReader::with_capacity(IO_BUF_CAPACITY, file);
-
-        let mut header = [0_u8; 4];
-        reader.read_exact(&mut header)?;
-        let first_dim_i32 = i32::from_le_bytes(header);
-        if first_dim_i32 <= 0 {
-            return Err(VectorSearchError::CorruptData(format!(
-                "Invalid dimension {first_dim_i32} in .fvecs file: {}",
-                path_ref.display()
-            )));
-        }
-        let dim = first_dim_i32 as usize;
-        let record_bytes = 4_u64
-            .checked_add((dim as u64).checked_mul(4).ok_or_else(|| {
-                VectorSearchError::CorruptData("Dimension byte size overflow".to_string())
-            })?)
-            .ok_or_else(|| {
-                VectorSearchError::CorruptData("Record byte size overflow".to_string())
-            })?;
-
-        if file_size % record_bytes != 0 {
-            return Err(VectorSearchError::CorruptData(format!(
-                "File size {file_size} is not a multiple of record size {record_bytes} (dim={dim}) in {}",
-                path_ref.display()
-            )));
-        }
-
-        let total_vecs_u64 = file_size / record_bytes;
-        let total_vecs = usize::try_from(total_vecs_u64).map_err(|_| {
-            VectorSearchError::CorruptData(format!("Vector count {total_vecs_u64} exceeds usize"))
-        })?;
-        let num_vecs = match max_rows {
-            Some(limit) => total_vecs.min(limit),
-            None => total_vecs,
-        };
-        if num_vecs > u32::MAX as usize {
-            return Err(VectorSearchError::InvalidArgument(format!(
-                "base_vectors row count {num_vecs} exceeds u32::MAX"
-            )));
-        }
-
-        // Small reusable chunk buffer (4,096 rows = 2 MiB at D=128) so RowMatrix<f32> is never materialized.
-        let chunk_rows = STREAMING_CHUNK_ROWS
-            .min((16 * 1024 * 1024 / (dim * 4)).max(1))
-            .min(num_vecs);
-        let mut chunk_f32 = vec![0.0_f32; chunk_rows * dim];
-        let mut row_bytes = vec![0_u8; dim * 4];
+        let (num_vecs, dim, chunk_rows) = inspect_streaming_fvecs(path_ref, max_rows)?;
 
         // Pass 1: Calibrate mins and maxs while checking finiteness and per-record headers.
         let t_cal = Instant::now();
-        reader.seek(SeekFrom::Start(0))?;
         let mut mins = Vec::new();
         let mut maxs = Vec::new();
-        stream_fvecs_chunks(
-            &mut reader,
+        stream_fvecs_bounded(
             path_ref,
-            first_dim_i32,
-            dim,
-            num_vecs,
+            max_rows,
             chunk_rows,
-            &mut row_bytes,
-            &mut chunk_f32,
             |row_offset, rows_in_chunk, chunk| {
                 for r in 0..rows_in_chunk {
                     let row = &chunk[r * dim..(r + 1) * dim];
@@ -912,32 +826,23 @@ impl Sq8Vectors {
 
         // Pass 2: Encode quantized u8 codes directly into compact output Vec<u8>.
         let t_enc = Instant::now();
-        let total_codes = num_vecs.checked_mul(dim).ok_or_else(|| {
-            VectorSearchError::InvalidArgument("SQ8 code buffer size overflows usize".to_string())
-        })?;
-        let mut codes = vec![0_u8; total_codes];
-        let mut base_norms_sq =
-            (kernel_kind == Sq8KernelKind::NormExpanded).then(|| Vec::with_capacity(num_vecs));
+        let (mut codes, mut base_norms_sq) = alloc_codes_and_norms(num_vecs, dim, kernel_kind)?;
 
-        reader.seek(SeekFrom::Start(0))?;
-        stream_fvecs_chunks(
-            &mut reader,
+        stream_fvecs_bounded(
             path_ref,
-            first_dim_i32,
-            dim,
-            num_vecs,
+            max_rows,
             chunk_rows,
-            &mut row_bytes,
-            &mut chunk_f32,
             |row_offset, rows_in_chunk, chunk| {
                 for r in 0..rows_in_chunk {
                     let global_id = row_offset + r;
                     let row = &chunk[r * dim..(r + 1) * dim];
-                    let code_slice = &mut codes[global_id * dim..(global_id + 1) * dim];
-                    quantizer.encode_row_unchecked(row, code_slice);
-                    if let Some(norms) = base_norms_sq.as_mut() {
-                        norms.push(compute_code_norm_sq(quantizer.scales(), code_slice));
-                    }
+                    encode_row_into_slot(
+                        &quantizer,
+                        row,
+                        global_id,
+                        &mut codes,
+                        &mut base_norms_sq,
+                    );
                 }
             },
         )?;
@@ -1036,18 +941,10 @@ impl Sq8Vectors {
 
     /// Deserializes and validates [`Sq8Vectors`] from a binary stream.
     pub fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
-        let mut magic = [0_u8; 8];
-        reader.read_exact(&mut magic)?;
-        if &magic != SQ8_VECTORS_MAGIC {
-            return Err(VectorSearchError::CorruptData(
-                "Invalid Sq8Vectors snapshot magic header".to_string(),
-            ));
-        }
+        read_magic(reader, SQ8_VECTORS_MAGIC, "Sq8Vectors")?;
         let metric = metric_from_u8(read_u8(reader)?)?;
         let kernel_kind = Sq8KernelKind::from_u8(read_u8(reader)?)?;
-        let num_vectors = usize::try_from(read_u64(reader)?).map_err(|_| {
-            VectorSearchError::CorruptData("Sq8Vectors num_vectors overflows usize".to_string())
-        })?;
+        let num_vectors = read_usize_u64(reader, "Sq8Vectors num_vectors")?;
         if num_vectors == 0 || num_vectors > u32::MAX as usize {
             return Err(VectorSearchError::CorruptData(format!(
                 "Invalid Sq8Vectors num_vectors: {num_vectors}"
@@ -1058,9 +955,7 @@ impl Sq8Vectors {
         let expected_codes_len = num_vectors.checked_mul(quantizer.dim()).ok_or_else(|| {
             VectorSearchError::CorruptData("Sq8Vectors codes length overflows usize".to_string())
         })?;
-        let codes_len = usize::try_from(read_u64(reader)?).map_err(|_| {
-            VectorSearchError::CorruptData("Sq8Vectors codes_len overflows usize".to_string())
-        })?;
+        let codes_len = read_usize_u64(reader, "Sq8Vectors codes_len")?;
         if codes_len != expected_codes_len {
             return Err(VectorSearchError::CorruptData(format!(
                 "Sq8Vectors codes length mismatch: expected {expected_codes_len}, got {codes_len}"
@@ -1069,16 +964,13 @@ impl Sq8Vectors {
         let mut codes = vec![0_u8; codes_len];
         reader.read_exact(&mut codes)?;
 
-        let has_norms = read_u8(reader)?;
-        let base_norms_sq = match has_norms {
-            0 => {
-                if kernel_kind == Sq8KernelKind::NormExpanded {
-                    return Err(VectorSearchError::CorruptData(
-                        "NormExpanded Sq8Vectors snapshot missing base_norms_sq".to_string(),
-                    ));
-                }
-                None
+        let base_norms_sq = match read_u8(reader)? {
+            0 if kernel_kind == Sq8KernelKind::NormExpanded => {
+                return Err(VectorSearchError::CorruptData(
+                    "NormExpanded Sq8Vectors snapshot missing base_norms_sq".to_string(),
+                ));
             }
+            0 => None,
             1 => Some(read_f32_vec(reader, num_vectors)?),
             other => {
                 return Err(VectorSearchError::CorruptData(format!(
@@ -1390,172 +1282,36 @@ impl HnswSq8Index {
         })
     }
 
-    /// Drops retained raw `f32` vectors (if any) and transitions storage mode to [`QuantizedStorageMode::QuantizedOnly`].
-    #[must_use]
-    pub fn into_quantized_only(mut self) -> Self {
-        self.raw_base = None;
-        self.storage_mode = QuantizedStorageMode::QuantizedOnly;
-        self
-    }
-
-    /// Attaches shared raw `f32` vectors after validating shape and finiteness, enabling exact rerank.
-    pub fn with_raw_base(mut self, raw_base: Arc<RowMatrix<f32>>) -> Result<Self> {
-        validate_base_matrix(&raw_base)?;
-        if raw_base.rows() != self.num_vectors() {
-            return Err(VectorSearchError::InvalidArgument(format!(
-                "raw_base row count ({}) does not match index vector count ({})",
-                raw_base.rows(),
-                self.num_vectors()
-            )));
-        }
-        if raw_base.cols() != self.dim() {
-            return Err(VectorSearchError::DimensionMismatch {
-                expected: self.dim(),
-                actual: raw_base.cols(),
-            });
-        }
-        self.raw_base = Some(raw_base);
-        self.storage_mode = QuantizedStorageMode::WithExactRerank;
-        Ok(self)
-    }
-
-    /// Writes a deterministic quantized-only binary snapshot (`graph + Sq8Vectors`) to `path`.
-    pub fn write_snapshot<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let path_ref = path.as_ref();
-        if let Some(parent) = path_ref.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)?;
-            }
-        }
-        let file = File::create(path_ref)?;
-        let mut writer = BufWriter::with_capacity(IO_BUF_CAPACITY, file);
-        self.write_to(&mut writer)?;
-        writer.flush()?;
-        Ok(())
-    }
-
-    /// Loads a quantized-only [`HnswSq8Index`] snapshot from `path` (holding zero raw `f32` vectors).
-    pub fn read_snapshot<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let file = File::open(path.as_ref())?;
-        let mut reader = BufReader::with_capacity(IO_BUF_CAPACITY, file);
-        Self::read_from(&mut reader)
-    }
+    impl_quantized_index_common!(HnswSq8Index, Sq8Vectors, Sq8QueryState);
 
     /// Writes a deterministic quantized-only snapshot to a binary stream.
     pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        writer.write_all(SQ8_SNAPSHOT_MAGIC)?;
-        write_u8(
+        write_index_snapshot(
             writer,
-            match self.build_mode {
-                QuantizedBuildMode::Float32GraphThenQuantize => 0,
-                QuantizedBuildMode::QuantizedDirect => 1,
-            },
-        )?;
-        write_f64(writer, self.build_timings.calibration_or_train_s)?;
-        write_f64(writer, self.build_timings.encode_s)?;
-        write_f64(writer, self.build_timings.graph_build_s)?;
-        write_f64(writer, self.build_timings.total_s)?;
-        self.graph.write_to(writer)?;
-        self.vectors.write_to(writer)?;
-        Ok(())
+            SQ8_SNAPSHOT_MAGIC,
+            self.build_mode,
+            self.build_timings,
+            &self.graph,
+            |w| self.vectors.write_to(w),
+        )
     }
 
     /// Reads and validates a quantized-only snapshot from a binary stream.
     pub fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
-        let mut magic = [0_u8; 8];
-        reader.read_exact(&mut magic)?;
-        if &magic != SQ8_SNAPSHOT_MAGIC {
-            return Err(VectorSearchError::CorruptData(
-                "Invalid HnswSq8Index snapshot magic header".to_string(),
-            ));
-        }
-        let build_mode = match read_u8(reader)? {
-            0 => QuantizedBuildMode::Float32GraphThenQuantize,
-            1 => QuantizedBuildMode::QuantizedDirect,
-            other => {
-                return Err(VectorSearchError::CorruptData(format!(
-                    "Invalid QuantizedBuildMode tag in snapshot: {other}"
-                )));
-            }
-        };
-        let calibration_or_train_s = read_f64(reader)?;
-        let encode_s = read_f64(reader)?;
-        let graph_build_s = read_f64(reader)?;
-        let total_s = read_f64(reader)?;
-        if !calibration_or_train_s.is_finite()
-            || !encode_s.is_finite()
-            || !graph_build_s.is_finite()
-            || !total_s.is_finite()
-        {
-            return Err(VectorSearchError::CorruptData(
-                "Non-finite build timings in HnswSq8Index snapshot".to_string(),
-            ));
-        }
-        let graph = CompactHnswGraph::read_from(reader)?;
-        let vectors = Sq8Vectors::read_from(reader)?;
-        if graph.num_vectors() != vectors.len() {
-            return Err(VectorSearchError::CorruptData(format!(
-                "Snapshot node count mismatch: graph={}, vectors={}",
-                graph.num_vectors(),
-                vectors.len()
-            )));
-        }
-        if graph.metric() != vectors.metric() {
-            return Err(VectorSearchError::CorruptData(format!(
-                "Snapshot metric mismatch: graph={}, vectors={}",
-                graph.metric(),
-                vectors.metric()
-            )));
-        }
-
+        let (graph, vectors, build_mode, build_timings) = read_index_snapshot(
+            reader,
+            SQ8_SNAPSHOT_MAGIC,
+            "HnswSq8Index",
+            Sq8Vectors::read_from,
+        )?;
         Ok(Self {
             graph,
             vectors,
             raw_base: None,
             build_mode,
             storage_mode: QuantizedStorageMode::QuantizedOnly,
-            build_timings: QuantizedBuildTimings {
-                calibration_or_train_s,
-                encode_s,
-                graph_build_s,
-                total_s,
-            },
+            build_timings,
         })
-    }
-
-    /// Reference to the underlying [`CompactHnswGraph`].
-    #[inline]
-    #[must_use]
-    pub fn graph(&self) -> &CompactHnswGraph {
-        &self.graph
-    }
-
-    /// Reference to the quantized [`Sq8Vectors`] store.
-    #[inline]
-    #[must_use]
-    pub fn vectors(&self) -> &Sq8Vectors {
-        &self.vectors
-    }
-
-    /// Reference to optional retained raw `f32` base vectors (`None` in `QuantizedOnly` mode).
-    #[inline]
-    #[must_use]
-    pub fn raw_base(&self) -> Option<&RowMatrix<f32>> {
-        self.raw_base.as_deref()
-    }
-
-    /// Graph build precision mode used to construct this index.
-    #[inline]
-    #[must_use]
-    pub fn build_mode(&self) -> QuantizedBuildMode {
-        self.build_mode
-    }
-
-    /// Current raw-vector storage mode (`QuantizedOnly` or `WithExactRerank`).
-    #[inline]
-    #[must_use]
-    pub fn storage_mode(&self) -> QuantizedStorageMode {
-        self.storage_mode
     }
 
     /// Phase-level build timings recorded during construction.
@@ -1563,48 +1319,6 @@ impl HnswSq8Index {
     #[must_use]
     pub fn build_timings(&self) -> QuantizedBuildTimings {
         self.build_timings
-    }
-
-    /// Number of indexed vectors (`N`).
-    #[inline]
-    #[must_use]
-    pub fn num_vectors(&self) -> usize {
-        self.graph.num_vectors()
-    }
-
-    /// Vector dimensionality (`D`).
-    #[inline]
-    #[must_use]
-    pub fn dim(&self) -> usize {
-        self.vectors.dim()
-    }
-
-    /// Configured distance metric.
-    #[inline]
-    #[must_use]
-    pub fn metric(&self) -> Metric {
-        self.graph.metric()
-    }
-
-    /// Maximum layer height in the graph.
-    #[inline]
-    #[must_use]
-    pub fn max_layer(&self) -> usize {
-        self.graph.max_layer()
-    }
-
-    /// Global entry point node ID, or `None` if empty.
-    #[inline]
-    #[must_use]
-    pub fn entry_point(&self) -> Option<usize> {
-        self.graph.entry_point()
-    }
-
-    /// Canonical 64-bit FNV-1a graph topology fingerprint matching `HnswIndex::graph_fingerprint()`.
-    #[inline]
-    #[must_use]
-    pub fn graph_fingerprint(&self) -> u64 {
-        self.graph.graph_fingerprint()
     }
 
     /// Steady-state payload memory profile across codes, calibration, graph, and optional raw vectors.
@@ -1631,158 +1345,36 @@ impl HnswSq8Index {
             self.graph.config().effective_m_max0(),
         )
     }
-
-    /// Executes an untimed warmup query to populate scratch buffer capacities and CPU caches.
-    pub fn warmup(
-        &self,
-        query: &[f32],
-        k: usize,
-        ef_search: usize,
-        scratch: &mut QuantizedSearchScratch<Sq8QueryState>,
-    ) -> Result<()> {
-        let _ = self.search_knn_with_scratch(query, k, ef_search, scratch)?;
-        Ok(())
-    }
-
-    /// Pure quantized top-`k` search reusing `scratch`.
-    pub fn search_knn_with_scratch(
-        &self,
-        query: &[f32],
-        k: usize,
-        ef_search: usize,
-        scratch: &mut QuantizedSearchScratch<Sq8QueryState>,
-    ) -> Result<Vec<Neighbor>> {
-        self.graph
-            .search_knn_with_scratch(&self.vectors, query, k, ef_search, scratch)
-    }
-
-    /// Quantized search with optional exact top-`R` reranking using stored raw vectors (`WithExactRerank`).
-    pub fn search_knn_rerank_with_scratch(
-        &self,
-        query: &[f32],
-        k: usize,
-        ef_search: usize,
-        rerank_top_r: Option<usize>,
-        scratch: &mut QuantizedSearchScratch<Sq8QueryState>,
-    ) -> Result<Vec<Neighbor>> {
-        let mut out = Vec::with_capacity(k.min(self.num_vectors()));
-        self.graph.search_knn_rerank_opt_into_with_scratch(
-            &self.vectors,
-            self.raw_base.as_deref(),
-            query,
-            k,
-            ef_search,
-            rerank_top_r,
-            scratch,
-            &mut out,
-        )?;
-        Ok(out)
-    }
-
-    /// Quantized search with optional exact top-`R` reranking against a caller-supplied `raw_base`
-    /// without storing `raw_base` inside [`HnswSq8Index`].
-    pub fn search_knn_rerank_with_base_scratch(
-        &self,
-        raw_base: &RowMatrix<f32>,
-        query: &[f32],
-        k: usize,
-        ef_search: usize,
-        rerank_top_r: Option<usize>,
-        scratch: &mut QuantizedSearchScratch<Sq8QueryState>,
-    ) -> Result<Vec<Neighbor>> {
-        self.graph.search_knn_rerank_with_scratch(
-            &self.vectors,
-            raw_base,
-            query,
-            k,
-            ef_search,
-            rerank_top_r,
-            scratch,
-        )
-    }
-
-    /// Batch sequential search returning `Vec<Vec<Neighbor>>`.
-    pub fn search_batch_with_scratch(
-        &self,
-        queries: &RowMatrix<f32>,
-        k: usize,
-        ef_search: usize,
-        rerank_top_r: Option<usize>,
-        scratch: &mut QuantizedSearchScratch<Sq8QueryState>,
-    ) -> Result<Vec<Vec<Neighbor>>> {
-        self.graph.search_batch_with_scratch(
-            &self.vectors,
-            self.raw_base.as_deref(),
-            queries,
-            k,
-            ef_search,
-            rerank_top_r,
-            scratch,
-        )
-    }
-
-    /// Timed sequential batch search returning `Vec<Vec<Neighbor>>`, per-query latencies, and [`super::SearchMetrics`].
-    pub fn search_batch_timed_with_scratch(
-        &self,
-        queries: &RowMatrix<f32>,
-        k: usize,
-        ef_search: usize,
-        rerank_top_r: Option<usize>,
-        scratch: &mut QuantizedSearchScratch<Sq8QueryState>,
-    ) -> Result<TimedQuantizedSearch> {
-        self.graph.search_batch_timed_with_scratch(
-            &self.vectors,
-            self.raw_base.as_deref(),
-            queries,
-            k,
-            ef_search,
-            rerank_top_r,
-            scratch,
-        )
-    }
-
-    /// Timed sequential batch search with caller-supplied `raw_base` (for reranking without owning raw vectors).
-    pub fn search_batch_with_base_timed_with_scratch(
-        &self,
-        raw_base: &RowMatrix<f32>,
-        queries: &RowMatrix<f32>,
-        k: usize,
-        ef_search: usize,
-        rerank_top_r: Option<usize>,
-        scratch: &mut QuantizedSearchScratch<Sq8QueryState>,
-    ) -> Result<TimedQuantizedSearch> {
-        self.graph.search_batch_timed_with_scratch(
-            &self.vectors,
-            Some(raw_base),
-            queries,
-            k,
-            ef_search,
-            rerank_top_r,
-            scratch,
-        )
-    }
 }
 
-fn validate_base_matrix(base_vectors: &RowMatrix<f32>) -> Result<()> {
-    if base_vectors.rows() == 0 || base_vectors.cols() == 0 {
-        return Err(VectorSearchError::InvalidArgument(
-            "base_vectors cannot be empty (rows and cols must be > 0)".to_string(),
-        ));
+fn alloc_codes_and_norms(
+    num_vecs: usize,
+    dim: usize,
+    kernel_kind: Sq8KernelKind,
+) -> Result<(Vec<u8>, Option<Vec<f32>>)> {
+    let total_codes = num_vecs.checked_mul(dim).ok_or_else(|| {
+        VectorSearchError::InvalidArgument("SQ8 code buffer size overflows usize".to_string())
+    })?;
+    let codes = vec![0_u8; total_codes];
+    let base_norms_sq =
+        (kernel_kind == Sq8KernelKind::NormExpanded).then(|| Vec::with_capacity(num_vecs));
+    Ok((codes, base_norms_sq))
+}
+
+#[inline]
+fn encode_row_into_slot(
+    quantizer: &Sq8Quantizer,
+    row: &[f32],
+    row_id: usize,
+    codes: &mut [u8],
+    base_norms_sq: &mut Option<Vec<f32>>,
+) {
+    let dim = quantizer.dim();
+    let code_slice = &mut codes[row_id * dim..(row_id + 1) * dim];
+    quantizer.encode_row_unchecked(row, code_slice);
+    if let Some(norms) = base_norms_sq.as_mut() {
+        norms.push(compute_code_norm_sq(quantizer.scales(), code_slice));
     }
-    if base_vectors.rows() > u32::MAX as usize {
-        return Err(VectorSearchError::InvalidArgument(format!(
-            "base_vectors row count {} exceeds u32::MAX",
-            base_vectors.rows()
-        )));
-    }
-    if let Some(pos) = base_vectors.as_slice().iter().position(|v| !v.is_finite()) {
-        let row = pos / base_vectors.cols();
-        let col = pos % base_vectors.cols();
-        return Err(VectorSearchError::InvalidArgument(format!(
-            "base_vectors contains non-finite value (NaN/Inf) at ({row}, {col})"
-        )));
-    }
-    Ok(())
 }
 
 #[inline]
@@ -1806,59 +1398,4 @@ fn compute_code_norm_sq(scales: &[f32], code: &[u8]) -> f32 {
         sum += d * d;
     }
     sum as f32
-}
-
-#[allow(clippy::too_many_arguments)]
-fn stream_fvecs_chunks<R: Read, F>(
-    reader: &mut R,
-    path_ref: &Path,
-    expected_dim_i32: i32,
-    dim: usize,
-    num_vecs: usize,
-    chunk_rows: usize,
-    row_bytes: &mut [u8],
-    chunk_f32: &mut [f32],
-    mut on_chunk: F,
-) -> Result<()>
-where
-    F: FnMut(usize, usize, &[f32]),
-{
-    let mut header = [0_u8; 4];
-    let mut rows_read = 0_usize;
-
-    while rows_read < num_vecs {
-        let take = chunk_rows.min(num_vecs - rows_read);
-        for r in 0..take {
-            let global_row = rows_read + r;
-            reader.read_exact(&mut header)?;
-            let rec_dim = i32::from_le_bytes(header);
-            if rec_dim != expected_dim_i32 {
-                return Err(VectorSearchError::CorruptData(format!(
-                    "Inconsistent .fvecs record dimension at row {global_row}: expected {dim}, got {rec_dim} in {}",
-                    path_ref.display()
-                )));
-            }
-            reader.read_exact(row_bytes)?;
-            let dst = &mut chunk_f32[r * dim..(r + 1) * dim];
-            for (col, (&bytes, out_val)) in row_bytes
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .zip(dst.iter_mut())
-                .enumerate()
-            {
-                let v = f32::from_le_bytes(bytes);
-                if !v.is_finite() {
-                    return Err(VectorSearchError::InvalidArgument(format!(
-                        "base_vectors contains non-finite value (NaN/Inf) at ({global_row}, {col})"
-                    )));
-                }
-                *out_val = v;
-            }
-        }
-        on_chunk(rows_read, take, &chunk_f32[..take * dim]);
-        rows_read += take;
-    }
-
-    Ok(())
 }

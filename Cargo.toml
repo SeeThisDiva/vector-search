@@ -2,7 +2,7 @@
 name = "vector-search"
 version = "0.1.0"
 edition = "2021"
-description = "From-scratch HNSW Approximate Nearest Neighbor Search and Brute-Force Ground Truth Benchmark Harness"
+description = "From-scratch HNSW Approximate Nearest Neighbor Search (unfiltered, filtered, SQ8/PQ quantized) and Brute-Force Ground Truth Benchmark Harness"
 license = "MIT"
 rust-version = "1.88"
 readme = "README.md"
@@ -28,24 +28,24 @@ name = "phase4"
 path = "src/bin/phase4.rs"
 
 [[bin]]
-name = "generate_metadata"
-path = "src/bin/generate_metadata.rs"
-
-[[bin]]
-name = "filtered_exact_knn"
-path = "src/bin/filtered_exact_knn.rs"
-
-[[bin]]
 name = "phase5"
 path = "src/bin/phase5.rs"
+
+[[bin]]
+name = "phase6"
+path = "src/bin/phase6.rs"
 
 [[bin]]
 name = "phase7"
 path = "src/bin/phase7.rs"
 
 [[bin]]
-name = "phase6"
-path = "src/bin/phase6.rs"
+name = "generate_metadata"
+path = "src/bin/generate_metadata.rs"
+
+[[bin]]
+name = "filtered_exact_knn"
+path = "src/bin/filtered_exact_knn.rs"
 
 [features]
 default = []

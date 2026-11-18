@@ -14,289 +14,16 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeMap;
+mod common;
+
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
 
+use common::{read_json_file, JsonValue, TempTestDir};
 use vector_search::dataset::{generate_synthetic_sift, read_ivecs, write_fvecs};
 use vector_search::distance::Metric;
 use vector_search::exact_knn::ExactKnn;
 use vector_search::recall::verify_self_recall;
-
-struct TempTestDir(PathBuf);
-
-impl TempTestDir {
-    fn new(label: &str) -> Self {
-        let mut dir = std::env::temp_dir();
-        dir.push(format!(
-            "vecsearch_p7_{label}_{}_{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&dir).expect("create temp dir");
-        Self(dir)
-    }
-}
-
-impl Drop for TempTestDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum JsonValue {
-    Null,
-    Bool(bool),
-    Number(f64),
-    String(String),
-    Array(Vec<JsonValue>),
-    Object(BTreeMap<String, JsonValue>),
-}
-
-impl JsonValue {
-    fn as_object(&self) -> &BTreeMap<String, JsonValue> {
-        match self {
-            Self::Object(map) => map,
-            other => panic!("Expected JSON object, got {other:?}"),
-        }
-    }
-
-    fn as_array(&self) -> &[JsonValue] {
-        match self {
-            Self::Array(arr) => arr,
-            other => panic!("Expected JSON array, got {other:?}"),
-        }
-    }
-
-    fn as_str(&self) -> &str {
-        match self {
-            Self::String(s) => s,
-            other => panic!("Expected JSON string, got {other:?}"),
-        }
-    }
-
-    fn as_bool(&self) -> bool {
-        match self {
-            Self::Bool(b) => *b,
-            other => panic!("Expected JSON bool, got {other:?}"),
-        }
-    }
-
-    fn as_f64(&self) -> f64 {
-        match self {
-            Self::Number(n) => *n,
-            other => panic!("Expected JSON number, got {other:?}"),
-        }
-    }
-
-    fn as_usize(&self) -> usize {
-        let n = self.as_f64();
-        assert!(
-            n >= 0.0 && (n - n.round()).abs() < 1e-9,
-            "Expected non-negative integer JSON number, got {n}"
-        );
-        n.round() as usize
-    }
-
-    fn get(&self, key: &str) -> &JsonValue {
-        self.as_object()
-            .get(key)
-            .unwrap_or_else(|| panic!("Missing JSON key '{key}'"))
-    }
-}
-
-struct JsonParser<'a> {
-    bytes: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> JsonParser<'a> {
-    fn parse(input: &'a str) -> JsonValue {
-        let mut p = Self {
-            bytes: input.as_bytes(),
-            pos: 0,
-        };
-        let val = p.parse_value();
-        p.skip_ws();
-        assert_eq!(
-            p.pos,
-            p.bytes.len(),
-            "Trailing characters in JSON at byte {}",
-            p.pos
-        );
-        val
-    }
-
-    fn skip_ws(&mut self) {
-        while self.pos < self.bytes.len() && self.bytes[self.pos].is_ascii_whitespace() {
-            self.pos += 1;
-        }
-    }
-
-    fn peek(&self) -> u8 {
-        assert!(self.pos < self.bytes.len(), "Unexpected EOF in JSON");
-        self.bytes[self.pos]
-    }
-
-    fn expect_bytes(&mut self, expected: &[u8]) {
-        assert!(
-            self.pos + expected.len() <= self.bytes.len()
-                && &self.bytes[self.pos..self.pos + expected.len()] == expected,
-            "Expected {:?} at pos {}",
-            String::from_utf8_lossy(expected),
-            self.pos
-        );
-        self.pos += expected.len();
-    }
-
-    fn parse_value(&mut self) -> JsonValue {
-        self.skip_ws();
-        match self.peek() {
-            b'{' => self.parse_object(),
-            b'[' => self.parse_array(),
-            b'"' => JsonValue::String(self.parse_string()),
-            b't' => {
-                self.expect_bytes(b"true");
-                JsonValue::Bool(true)
-            }
-            b'f' => {
-                self.expect_bytes(b"false");
-                JsonValue::Bool(false)
-            }
-            b'n' => {
-                self.expect_bytes(b"null");
-                JsonValue::Null
-            }
-            b'-' | b'0'..=b'9' => self.parse_number(),
-            other => panic!("Unexpected byte {} at pos {}", other as char, self.pos),
-        }
-    }
-
-    fn parse_object(&mut self) -> JsonValue {
-        self.expect_bytes(b"{");
-        self.skip_ws();
-        let mut map = BTreeMap::new();
-        if self.peek() == b'}' {
-            self.pos += 1;
-            return JsonValue::Object(map);
-        }
-        loop {
-            self.skip_ws();
-            let key = self.parse_string();
-            self.skip_ws();
-            self.expect_bytes(b":");
-            let val = self.parse_value();
-            assert!(
-                map.insert(key.clone(), val).is_none(),
-                "Duplicate JSON key '{key}'"
-            );
-            self.skip_ws();
-            match self.peek() {
-                b',' => self.pos += 1,
-                b'}' => {
-                    self.pos += 1;
-                    break;
-                }
-                other => panic!("Expected ',' or '}}' in object, got {}", other as char),
-            }
-        }
-        JsonValue::Object(map)
-    }
-
-    fn parse_array(&mut self) -> JsonValue {
-        self.expect_bytes(b"[");
-        self.skip_ws();
-        let mut arr = Vec::new();
-        if self.peek() == b']' {
-            self.pos += 1;
-            return JsonValue::Array(arr);
-        }
-        loop {
-            arr.push(self.parse_value());
-            self.skip_ws();
-            match self.peek() {
-                b',' => self.pos += 1,
-                b']' => {
-                    self.pos += 1;
-                    break;
-                }
-                other => panic!("Expected ',' or ']' in array, got {}", other as char),
-            }
-        }
-        JsonValue::Array(arr)
-    }
-
-    fn parse_string(&mut self) -> String {
-        self.expect_bytes(b"\"");
-        let mut out = String::new();
-        while self.pos < self.bytes.len() {
-            let b = self.bytes[self.pos];
-            self.pos += 1;
-            match b {
-                b'"' => return out,
-                b'\\' => {
-                    assert!(
-                        self.pos < self.bytes.len(),
-                        "Dangling escape in JSON string"
-                    );
-                    let esc = self.bytes[self.pos];
-                    self.pos += 1;
-                    match esc {
-                        b'"' => out.push('"'),
-                        b'\\' => out.push('\\'),
-                        b'/' => out.push('/'),
-                        b'n' => out.push('\n'),
-                        b'r' => out.push('\r'),
-                        b't' => out.push('\t'),
-                        b'b' => out.push('\u{0008}'),
-                        b'f' => out.push('\u{000c}'),
-                        b'u' => {
-                            assert!(self.pos + 4 <= self.bytes.len(), "Truncated \\uXXXX escape");
-                            let hex = std::str::from_utf8(&self.bytes[self.pos..self.pos + 4])
-                                .expect("valid utf8 hex");
-                            let code = u32::from_str_radix(hex, 16).expect("valid hex escape");
-                            self.pos += 4;
-                            out.push(char::from_u32(code).expect("valid unicode scalar"));
-                        }
-                        other => panic!("Unknown JSON escape \\{}", other as char),
-                    }
-                }
-                _ => {
-                    self.pos -= 1;
-                    let rem = std::str::from_utf8(&self.bytes[self.pos..]).expect("valid utf8");
-                    let ch = rem.chars().next().expect("non-empty char");
-                    out.push(ch);
-                    self.pos += ch.len_utf8();
-                }
-            }
-        }
-        panic!("Unterminated JSON string");
-    }
-
-    fn parse_number(&mut self) -> JsonValue {
-        let start = self.pos;
-        if self.bytes[self.pos] == b'-' {
-            self.pos += 1;
-        }
-        while self.pos < self.bytes.len()
-            && (self.bytes[self.pos].is_ascii_digit()
-                || matches!(self.bytes[self.pos], b'.' | b'e' | b'E' | b'+' | b'-'))
-        {
-            self.pos += 1;
-        }
-        let s = std::str::from_utf8(&self.bytes[start..self.pos]).expect("valid utf8 number");
-        let n = s
-            .parse::<f64>()
-            .unwrap_or_else(|e| panic!("Invalid JSON number '{s}': {e}"));
-        assert!(n.is_finite(), "Non-finite JSON number '{s}'");
-        JsonValue::Number(n)
-    }
-}
 
 fn phase7_bin() -> &'static str {
     env!("CARGO_BIN_EXE_phase7")
@@ -304,9 +31,9 @@ fn phase7_bin() -> &'static str {
 
 #[test]
 fn test_phase7_cli_single_mode_and_no_keep_pruned_shrink_synthetic() {
-    let tmp = TempTestDir::new("single_nkp");
-    let single_json_path = tmp.0.join("rust_single.json");
-    let nkp_json_path = tmp.0.join("rust_nkp.json");
+    let tmp = TempTestDir::new("p7_single_nkp");
+    let single_json_path = tmp.path().join("rust_single.json");
+    let nkp_json_path = tmp.path().join("rust_nkp.json");
 
     let out_single = Command::new(phase7_bin())
         .args([
@@ -377,8 +104,8 @@ fn test_phase7_cli_single_mode_and_no_keep_pruned_shrink_synthetic() {
         String::from_utf8_lossy(&out_nkp.stderr)
     );
 
-    let single = JsonParser::parse(&fs::read_to_string(&single_json_path).unwrap());
-    let nkp = JsonParser::parse(&fs::read_to_string(&nkp_json_path).unwrap());
+    let single = read_json_file(&single_json_path);
+    let nkp = read_json_file(&nkp_json_path);
 
     assert_eq!(single.get("schema_version").as_usize(), 1);
     assert_eq!(single.get("phase").as_usize(), 7);
@@ -511,10 +238,10 @@ fn test_phase7_cli_single_mode_and_no_keep_pruned_shrink_synthetic() {
 
 #[test]
 fn test_phase7_cli_multithread_mode_and_config_id_override() {
-    let tmp = TempTestDir::new("multithread");
-    let single_c2_path = tmp.0.join("c2_single.json");
-    let mt_c2_path = tmp.0.join("c2_mt4.json");
-    let custom_cid_path = tmp.0.join("custom_cid.json");
+    let tmp = TempTestDir::new("p7_multithread");
+    let single_c2_path = tmp.path().join("c2_single.json");
+    let mt_c2_path = tmp.path().join("c2_mt4.json");
+    let custom_cid_path = tmp.path().join("custom_cid.json");
 
     let out_single = Command::new(phase7_bin())
         .args([
@@ -582,8 +309,8 @@ fn test_phase7_cli_multithread_mode_and_config_id_override() {
         String::from_utf8_lossy(&out_mt.stderr)
     );
 
-    let single_c2 = JsonParser::parse(&fs::read_to_string(&single_c2_path).unwrap());
-    let mt_c2 = JsonParser::parse(&fs::read_to_string(&mt_c2_path).unwrap());
+    let single_c2 = read_json_file(&single_c2_path);
+    let mt_c2 = read_json_file(&mt_c2_path);
 
     assert_eq!(single_c2.get("config_id").as_str(), "C2");
     assert_eq!(mt_c2.get("config_id").as_str(), "C2");
@@ -647,7 +374,7 @@ fn test_phase7_cli_multithread_mode_and_config_id_override() {
         .output()
         .expect("execute custom config-id");
     assert!(out_cid.status.success());
-    let custom_cid = JsonParser::parse(&fs::read_to_string(&custom_cid_path).unwrap());
+    let custom_cid = read_json_file(&custom_cid_path);
     assert_eq!(custom_cid.get("config_id").as_str(), "C2-nkp");
     assert!(!custom_cid
         .get("hnsw_config")
@@ -657,10 +384,10 @@ fn test_phase7_cli_multithread_mode_and_config_id_override() {
 
 #[test]
 fn test_phase7_prepare_gt_and_ivecs_roundtrip() {
-    let tmp = TempTestDir::new("gt_roundtrip");
-    let data_dir = tmp.0.join("data");
-    let base_path = tmp.0.join("base.fvecs");
-    let query_path = tmp.0.join("query.fvecs");
+    let tmp = TempTestDir::new("p7_gt_roundtrip");
+    let data_dir = tmp.path().join("data");
+    let base_path = tmp.path().join("base.fvecs");
+    let query_path = tmp.path().join("query.fvecs");
 
     let (base, query) = generate_synthetic_sift(300, 30, 32, 6, 42).unwrap();
     write_fvecs(&base_path, &base).unwrap();
@@ -698,8 +425,8 @@ fn test_phase7_prepare_gt_and_ivecs_roundtrip() {
     assert_eq!(gt_loaded.as_slice(), expected_exact.indices.as_slice());
 
     // 2. Roundtrip using --gt-path and compare recall against in-memory exact GT
-    let json_with_gt = tmp.0.join("with_gt.json");
-    let json_mem_gt = tmp.0.join("mem_gt.json");
+    let json_with_gt = tmp.path().join("with_gt.json");
+    let json_mem_gt = tmp.path().join("mem_gt.json");
 
     let out_with_gt = Command::new(phase7_bin())
         .arg("--base-fvecs")
@@ -753,8 +480,8 @@ fn test_phase7_prepare_gt_and_ivecs_roundtrip() {
         .expect("execute phase7 without gt-path");
     assert!(out_mem_gt.status.success());
 
-    let parsed_gt = JsonParser::parse(&fs::read_to_string(&json_with_gt).unwrap());
-    let parsed_mem = JsonParser::parse(&fs::read_to_string(&json_mem_gt).unwrap());
+    let parsed_gt = read_json_file(&json_with_gt);
+    let parsed_mem = read_json_file(&json_mem_gt);
     assert!(parsed_gt
         .get("ground_truth_source")
         .as_str()
@@ -775,7 +502,7 @@ fn test_phase7_prepare_gt_and_ivecs_roundtrip() {
     }
 
     // 3. --prepare-100k-gt with explicit --gt-path on --synthetic
-    let explicit_gt = tmp.0.join("explicit_gt.ivecs");
+    let explicit_gt = tmp.path().join("explicit_gt.ivecs");
     let out_syn_prep = Command::new(phase7_bin())
         .args([
             "--synthetic",
@@ -798,8 +525,8 @@ fn test_phase7_prepare_gt_and_ivecs_roundtrip() {
 
 #[test]
 fn test_phase7_no_silent_synthetic_fallback_and_cli_validation() {
-    let tmp = TempTestDir::new("validation");
-    let empty_data_dir = tmp.0.join("empty_data");
+    let tmp = TempTestDir::new("p7_validation");
+    let empty_data_dir = tmp.path().join("empty_data");
     fs::create_dir_all(&empty_data_dir).unwrap();
 
     // Missing SIFT1M + --offline without --synthetic MUST fail loudly (never silent fallback)

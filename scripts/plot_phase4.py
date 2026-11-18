@@ -7,53 +7,68 @@ Generates deterministic, publication-grade benchmark charts from Phase 4 JSON re
 3. Chart 3: Build Time (s) vs Best Achievable Recall (at fixed latency budget).
 4. Chart 4: Graph Memory per Vector (B/vec) vs M.
 
-All charts are saved in both PNG (300 DPI) and SVG formats.
-Follows the AGENT_PLAN.md Milestone T2.4 specification.
+All charts are saved in both PNG (300 DPI) and deterministic SVG formats.
 """
 
 from __future__ import annotations
 
 import argparse
-import glob
-import json
-import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Literal
 
-import matplotlib  # type: ignore
+import matplotlib.pyplot as plt
 
-# Use Agg backend for headless, deterministic rendering
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # type: ignore
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.plot_common import (
+    OKABE_ITO_AMBER,
+    OKABE_ITO_BLACK,
+    OKABE_ITO_BLUE,
+    OKABE_ITO_GREEN,
+    OKABE_ITO_ORANGE,
+    OKABE_ITO_PINK,
+    OKABE_ITO_SKY,
+    compute_pareto_frontier,
+    compute_recall_xlim,
+    configure_ax,
+    configure_matplotlib,
+    safe_float,
+    safe_int,
+    save_figure,
+)
+
+configure_matplotlib(svg_hashsalt="vector-search-phase4")
 
 
-@dataclass
+@dataclass(frozen=True)
 class SweepPoint:
+    """Single efSearch operating point from a Phase 4 report."""
+
     ef_search: int
     recall: float
     qps: float
-    mean_ms: float
-    p50_ms: float
-    p95_ms: float
     p99_ms: float
 
 
-@dataclass
+@dataclass(frozen=True)
 class IndexReport:
-    filename: str
+    """Normalized Phase 4 index configuration report."""
+
     scale_vectors: int
     m: int
     ef_construction: int
     build_time_s: float
-    build_qps: float
     graph_only_bytes_per_vec: float
-    total_bytes_per_vec: float
-    peak_rss_mb: float
-    graph_fingerprint_hex: str
-    hardware_summary: str
     cpu_model: str
     affinity_mask: str
     dataset_description: str
+    num_queries: int
+    k: int
     sweep_runs: int
     points: list[SweepPoint]
 
@@ -62,216 +77,173 @@ class IndexReport:
         return f"M={self.m}, efC={self.ef_construction}"
 
 
-def parse_report_file(path: str) -> IndexReport | None:
+def _dict_field(data: dict[str, Any], key: str) -> dict[str, Any]:
+    val = data.get(key)
+    return val if isinstance(val, dict) else {}
+
+
+def parse_report_file(path: str | Path) -> IndexReport | None:
+    """Parse one Phase 4 JSON report into an ``IndexReport``, returning ``None`` on mismatch."""
+    import json
+
+    file_path = Path(path)
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
-        print(f"[WARN] Failed to parse {path}: {e}", file=sys.stderr)
+        data = json.loads(file_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"[WARN] Failed to parse {file_path}: {exc}", file=sys.stderr)
         return None
 
-    if data.get("phase") != 4:
+    if not isinstance(data, dict) or data.get("phase") != 4:
         return None
 
-    scale_vectors = data.get("scale_vectors", 0)
-    hnsw_cfg = data.get("hnsw_config", {})
-    m = hnsw_cfg.get("m", 0)
-    efc = hnsw_cfg.get("ef_construction", 0)
-
-    build_info = data.get("index_build", {})
-    build_time_s = build_info.get("build_time_s", 0.0)
-    build_qps = build_info.get("build_qps", 0.0)
-    fingerprint_hex = build_info.get("graph_fingerprint_hex", "")
-
-    mem_profile = data.get("memory_profile", {})
-    graph_only_bytes = mem_profile.get("graph_only_bytes_per_vector", 0.0)
-    total_bytes = mem_profile.get("bytes_per_vector", 0.0)
-    peak_rss = mem_profile.get("peak_rss_mb", 0.0)
-
-    hw = data.get("hardware", {})
-    hw_summary = hw.get("summary", "")
-    cpu_model = hw.get("cpu_model", "")
-
-    env = data.get("environment", {})
-    affinity_mask = env.get("processor_affinity_mask", "not_set")
-
-    dataset = data.get("dataset", {})
-    dataset_desc = dataset.get("source_description", "SIFT")
-    sweep_runs = data.get("sweep_runs", 3)
+    hnsw_cfg = _dict_field(data, "hnsw_config")
+    build_info = _dict_field(data, "index_build")
+    mem_profile = _dict_field(data, "memory_profile")
+    hw = _dict_field(data, "hardware")
+    env = _dict_field(data, "environment")
+    dataset = _dict_field(data, "dataset")
 
     raw_points = data.get("ef_search_sweep", [])
-    points: list[SweepPoint] = []
-    for pt in raw_points:
-        points.append(
-            SweepPoint(
-                ef_search=pt.get("ef_search", 0),
-                recall=pt.get("recall_at_k", 0.0),
-                qps=pt.get("qps", 0.0),
-                mean_ms=pt.get("mean_ms", 0.0),
-                p50_ms=pt.get("p50_ms", 0.0),
-                p95_ms=pt.get("p95_ms", 0.0),
-                p99_ms=pt.get("p99_ms", 0.0),
-            )
+    if not isinstance(raw_points, list):
+        return None
+
+    points = [
+        SweepPoint(
+            ef_search=safe_int(pt.get("ef_search")),
+            recall=safe_float(pt.get("recall_at_k")),
+            qps=safe_float(pt.get("qps")),
+            p99_ms=safe_float(pt.get("p99_ms")),
         )
+        for pt in raw_points
+        if isinstance(pt, dict)
+    ]
+
+    cpu_model = str(hw.get("cpu_model") or env.get("cpu_model") or "Unknown CPU")
+    affinity_mask = str(env.get("processor_affinity_mask") or "not_set")
+    dataset_desc = str(dataset.get("source_description") or "SIFT")
 
     return IndexReport(
-        filename=os.path.basename(path),
-        scale_vectors=scale_vectors,
-        m=m,
-        ef_construction=efc,
-        build_time_s=build_time_s,
-        build_qps=build_qps,
-        graph_only_bytes_per_vec=graph_only_bytes,
-        total_bytes_per_vec=total_bytes,
-        peak_rss_mb=peak_rss,
-        graph_fingerprint_hex=fingerprint_hex,
-        hardware_summary=hw_summary,
+        scale_vectors=safe_int(data.get("scale_vectors")),
+        m=safe_int(hnsw_cfg.get("m")),
+        ef_construction=safe_int(hnsw_cfg.get("ef_construction")),
+        build_time_s=safe_float(build_info.get("build_time_s")),
+        graph_only_bytes_per_vec=safe_float(
+            mem_profile.get("graph_only_bytes_per_vector", data.get("graph_only_bytes_per_vector"))
+        ),
         cpu_model=cpu_model,
         affinity_mask=affinity_mask,
         dataset_description=dataset_desc,
-        sweep_runs=sweep_runs,
+        num_queries=safe_int(dataset.get("num_query"), default=10_000),
+        k=safe_int(dataset.get("k"), default=10),
+        sweep_runs=safe_int(data.get("sweep_runs"), default=3),
         points=points,
     )
 
 
-def compute_pareto_frontier_latency(
-    all_points: list[tuple[float, float, str]],
-) -> list[tuple[float, float, str]]:
-    """Compute Pareto frontier for Recall vs Latency (higher recall, lower latency).
-
-    all_points: list of (recall, latency_ms, label)
-    Returns sorted Pareto optimal points.
-    """
-    # Sort primarily by recall ascending, then latency ascending
-    sorted_pts = sorted(all_points, key=lambda x: (x[0], x[1]))
-    frontier: list[tuple[float, float, str]] = []
-
-    # Traverse from right (highest recall) to left:
-    # A point is Pareto optimal if its latency is strictly lower than all points with higher recall.
-    min_latency = float("inf")
-    for pt in reversed(sorted_pts):
-        _r, lat, _lbl = pt
-        if lat < min_latency:
-            frontier.append(pt)
-            min_latency = lat
-
-    frontier.reverse()
-    return frontier
-
-
-def compute_pareto_frontier_qps(
-    all_points: list[tuple[float, float, str]],
-) -> list[tuple[float, float, str]]:
-    """Compute Pareto frontier for Recall vs QPS (higher recall, higher QPS).
-
-    all_points: list of (recall, qps, label)
-    Returns sorted Pareto optimal points.
-    """
-    sorted_pts = sorted(all_points, key=lambda x: (x[0], -x[1]))
-    frontier: list[tuple[float, float, str]] = []
-
-    # Traverse from right (highest recall) to left:
-    # A point is Pareto optimal if its QPS is strictly higher than all points with higher recall.
-    max_qps = -1.0
-    for pt in reversed(sorted_pts):
-        _r, qps, _lbl = pt
-        if qps > max_qps:
-            frontier.append(pt)
-            max_qps = qps
-
-    frontier.reverse()
-    return frontier
-
-
 def distinct_color_for_m(m: int) -> str:
     palette = {
-        8: "#1f77b4",   # Blue
-        12: "#2ca02c",  # Green
-        16: "#ff7f0e",  # Orange
-        24: "#d62728",  # Red
-        32: "#9467bd",  # Purple
-        48: "#8c564b",  # Brown
+        8: OKABE_ITO_BLUE,
+        12: OKABE_ITO_GREEN,
+        16: OKABE_ITO_ORANGE,
+        24: OKABE_ITO_PINK,
+        32: OKABE_ITO_AMBER,
+        48: OKABE_ITO_SKY,
     }
     return palette.get(m, "#333333")
 
 
 def linestyle_for_efc(efc: int) -> str:
-    styles = {
-        40: ":",       # dotted
-        100: "-",      # solid
-        200: "--",     # dashed
-        400: "-.",     # dash-dot
-    }
-    return styles.get(efc, "-")
+    return {40: ":", 100: "-", 200: "--", 400: "-."}.get(efc, "-")
 
 
 def marker_for_efc(efc: int) -> str:
-    markers = {
-        40: "o",
-        100: "s",
-        200: "^",
-        400: "D",
-    }
-    return markers.get(efc, "o")
+    return {40: "o", 100: "s", 200: "^", 400: "D"}.get(efc, "o")
 
 
-def plot_chart1_recall_vs_latency(
+def _format_scale_tag(scale_vectors: int) -> str:
+    if scale_vectors >= 1_000_000 and scale_vectors % 1_000_000 == 0:
+        return f"{scale_vectors // 1_000_000}M"
+    if scale_vectors >= 1_000 and scale_vectors % 1_000 == 0:
+        return f"{scale_vectors // 1_000}k"
+    return f"{scale_vectors:,}" if scale_vectors > 0 else "n/a"
+
+
+def _build_provenance_caption(reports: list[IndexReport], detail_line: str | None = None) -> str:
+    rep = reports[0] if reports else None
+    hw_str = rep.cpu_model if rep else "Unknown CPU"
+    affinity = rep.affinity_mask if rep else "not_set"
+    scale_tag = _format_scale_tag(rep.scale_vectors) if rep else "n/a"
+    ds_desc = rep.dataset_description if rep else "SIFT"
+    runs = rep.sweep_runs if rep else 3
+    num_q = rep.num_queries if rep else 10_000
+    k_val = rep.k if rep else 10
+
+    line1 = f"Single thread (Affinity: {affinity}) | CPU: {hw_str}"
+    line2 = detail_line or (
+        f"{ds_desc} ({scale_tag}, {num_q:,} queries, k={k_val}) | 1 warmup + {runs} timed reps per efSearch"
+    )
+    return f"{line1}\n{line2}"
+
+
+def _plot_recall_pareto_chart(
     reports: list[IndexReport],
-    reports_1m: list[IndexReport],
-    out_dir: str,
-) -> None:
-    """Chart 1: Recall@10 (x) vs p99 Latency (ms, log scale) with explicit Pareto frontier."""
-    _fig, ax = plt.subplots(figsize=(10, 6.5), dpi=300)
+    out_dir: str | Path,
+    *,
+    y_fn: Callable[[SweepPoint], float],
+    maximize_y: bool,
+    log_y: bool,
+    ylabel: str,
+    title: str,
+    stem: str,
+    pareto_label: str,
+    legend_loc: Literal["upper left", "upper right"],
+    legend_bbox: tuple[float, float],
+    reports_1m: list[IndexReport] | None = None,
+) -> list[Path]:
+    fig, ax = plt.subplots(figsize=(10, 6.5), dpi=300)
+    configure_ax(ax, log_x=False, log_y=log_y)
 
-    all_eval_pts: list[tuple[float, float, str]] = []
-
-    # Plot 100k series
+    all_eval_pts: list[tuple[float, float]] = []
     for rpt in sorted(reports, key=lambda r: (r.m, r.ef_construction)):
         xs = [pt.recall for pt in rpt.points]
-        ys = [pt.p99_ms for pt in rpt.points]
-        for pt in rpt.points:
-            all_eval_pts.append((pt.recall, pt.p99_ms, f"{rpt.label} (ef={pt.ef_search})"))
-
-        color = distinct_color_for_m(rpt.m)
-        ls = linestyle_for_efc(rpt.ef_construction)
-        mk = marker_for_efc(rpt.ef_construction)
-
+        ys = [y_fn(pt) for pt in rpt.points]
+        all_eval_pts.extend(zip(xs, ys, strict=True))
         ax.plot(
             xs,
             ys,
-            color=color,
-            linestyle=ls,
-            marker=mk,
+            color=distinct_color_for_m(rpt.m),
+            linestyle=linestyle_for_efc(rpt.ef_construction),
+            marker=marker_for_efc(rpt.ef_construction),
             markersize=3.5,
             alpha=0.65,
             linewidth=1.2,
             label=rpt.label,
         )
 
-    # Compute and plot Pareto frontier for 100k
-    pareto_pts = compute_pareto_frontier_latency(all_eval_pts)
+    pareto_pts = compute_pareto_frontier(
+        all_eval_pts,
+        x_fn=lambda p: p[0],
+        y_fn=lambda p: p[1],
+        maximize_x=True,
+        maximize_y=maximize_y,
+    )
     if pareto_pts:
-        pxs = [pt[0] for pt in pareto_pts]
-        pys = [pt[1] for pt in pareto_pts]
         ax.plot(
-            pxs,
-            pys,
-            color="#000000",
+            [pt[0] for pt in pareto_pts],
+            [pt[1] for pt in pareto_pts],
+            color=OKABE_ITO_BLACK,
             linestyle="-",
             linewidth=2.5,
             marker="*",
             markersize=8,
-            label="Pareto Frontier (100k)",
+            label=pareto_label,
             zorder=10,
         )
 
-    # Plot 1M series if present
-    for rpt in reports_1m:
-        xs = [pt.recall for pt in rpt.points]
-        ys = [pt.p99_ms for pt in rpt.points]
+    for rpt in reports_1m or ():
         ax.plot(
-            xs,
-            ys,
+            [pt.recall for pt in rpt.points],
+            [y_fn(pt) for pt in rpt.points],
             linestyle="-",
             marker="X",
             markersize=6,
@@ -280,180 +252,103 @@ def plot_chart1_recall_vs_latency(
             zorder=9,
         )
 
-    ax.set_yscale("log")
-    ax.set_xlabel("Recall@10", fontsize=11, fontweight="bold")
-    ax.set_ylabel("p99 Latency [ms] (log scale)", fontsize=11, fontweight="bold")
-    ax.set_title(
-        "HNSW Parameter Sweep: Recall@10 vs p99 Latency (100k SIFT1M Prefix)",
-        fontsize=13,
-        fontweight="bold",
-        pad=12,
-    )
+    recalls = [pt[0] for pt in all_eval_pts]
+    ax.set_xlim(*compute_recall_xlim(recalls, default=(0.70, 1.002), hi_cap=1.002))
+    k_val = reports[0].k if reports else 10
+    ax.set_xlabel(f"Recall@{k_val}", fontsize=11, fontweight="bold")
+    ax.set_ylabel(ylabel, fontsize=11, fontweight="bold")
+    ax.set_title(title, fontsize=13, fontweight="bold", pad=12)
 
-    # Focus on the high-recall region if appropriate
-    min_recall = min((pt[0] for pt in all_eval_pts), default=0.7)
-    x_lower = max(0.60, min(0.85, (min_recall // 0.05) * 0.05))
-    ax.set_xlim(x_lower, 1.002)
-    ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.5)
-
-    # Metadata caption
-    rep_sample = reports[0] if reports else None
-    hw_str = rep_sample.cpu_model if rep_sample else "Unknown CPU"
-    caption = (
-        f"Single thread (Affinity: P-core 0x0004) | CPU: {hw_str}\n"
-        f"SIFT1M 100k prefix (10k queries, k=10) | 1 warmup + 3 timed reps per efSearch"
-    )
-    plt.figtext(
+    fig.text(
         0.5,
         -0.02,
-        caption,
+        _build_provenance_caption(reports),
         wrap=True,
         horizontalalignment="center",
         fontsize=8.5,
         color="#444444",
     )
-
     ax.legend(
-        loc="upper left",
-        bbox_to_anchor=(1.02, 1.0),
+        loc=legend_loc,
+        bbox_to_anchor=legend_bbox,
         fontsize=7.5,
         frameon=True,
         title="Index Configs",
         title_fontsize=8.5,
     )
-    plt.tight_layout()
-
-    png_path = os.path.join(out_dir, "chart1_recall_vs_p99.png")
-    svg_path = os.path.join(out_dir, "chart1_recall_vs_p99.svg")
-    plt.savefig(png_path, dpi=300, bbox_inches="tight")
-    plt.savefig(svg_path, format="svg", bbox_inches="tight")
-    plt.close()
-    print(f"[Plotter] Saved: {png_path} & {svg_path}")
+    fig.tight_layout()
+    saved = save_figure(fig, out_dir, stem, bbox_inches="tight")
+    print(f"[Plotter] Saved: {saved[0]} & {saved[1]}")
+    return saved
 
 
-def plot_chart2_recall_vs_qps(reports: list[IndexReport], out_dir: str) -> None:
+def plot_chart1_recall_vs_latency(
+    reports: list[IndexReport],
+    reports_1m: list[IndexReport],
+    out_dir: str | Path,
+) -> list[Path]:
+    """Chart 1: Recall@10 (x) vs p99 Latency (ms, log scale) with explicit Pareto frontier."""
+    scale_tag = _format_scale_tag(reports[0].scale_vectors) if reports else "100k"
+    return _plot_recall_pareto_chart(
+        reports,
+        out_dir,
+        y_fn=lambda pt: pt.p99_ms,
+        maximize_y=False,
+        log_y=True,
+        ylabel="p99 Latency [ms] (log scale)",
+        title=f"HNSW Parameter Sweep: Recall@10 vs p99 Latency ({scale_tag} SIFT1M Prefix)",
+        stem="chart1_recall_vs_p99",
+        pareto_label=f"Pareto Frontier ({scale_tag})",
+        legend_loc="upper left",
+        legend_bbox=(1.02, 1.0),
+        reports_1m=reports_1m,
+    )
+
+
+def plot_chart2_recall_vs_qps(
+    reports: list[IndexReport],
+    out_dir: str | Path,
+) -> list[Path]:
     """Chart 2: Recall@10 (x) vs Single-Thread QPS (y) with explicit Pareto frontier."""
-    _fig, ax = plt.subplots(figsize=(10, 6.5), dpi=300)
-
-    all_eval_pts: list[tuple[float, float, str]] = []
-
-    for rpt in sorted(reports, key=lambda r: (r.m, r.ef_construction)):
-        xs = [pt.recall for pt in rpt.points]
-        ys = [pt.qps for pt in rpt.points]
-        for pt in rpt.points:
-            all_eval_pts.append((pt.recall, pt.qps, f"{rpt.label} (ef={pt.ef_search})"))
-
-        color = distinct_color_for_m(rpt.m)
-        ls = linestyle_for_efc(rpt.ef_construction)
-        mk = marker_for_efc(rpt.ef_construction)
-
-        ax.plot(
-            xs,
-            ys,
-            color=color,
-            linestyle=ls,
-            marker=mk,
-            markersize=3.5,
-            alpha=0.65,
-            linewidth=1.2,
-            label=rpt.label,
-        )
-
-    pareto_pts = compute_pareto_frontier_qps(all_eval_pts)
-    if pareto_pts:
-        pxs = [pt[0] for pt in pareto_pts]
-        pys = [pt[1] for pt in pareto_pts]
-        ax.plot(
-            pxs,
-            pys,
-            color="#000000",
-            linestyle="-",
-            linewidth=2.5,
-            marker="*",
-            markersize=8,
-            label="Pareto Frontier",
-            zorder=10,
-        )
-
-    ax.set_xlabel("Recall@10", fontsize=11, fontweight="bold")
-    ax.set_ylabel("Throughput [Queries / Second]", fontsize=11, fontweight="bold")
-    ax.set_title(
-        "HNSW Parameter Sweep: Recall@10 vs QPS (100k SIFT1M Prefix)",
-        fontsize=13,
-        fontweight="bold",
-        pad=12,
+    scale_tag = _format_scale_tag(reports[0].scale_vectors) if reports else "100k"
+    return _plot_recall_pareto_chart(
+        reports,
+        out_dir,
+        y_fn=lambda pt: pt.qps,
+        maximize_y=True,
+        log_y=False,
+        ylabel="Throughput [Queries / Second]",
+        title=f"HNSW Parameter Sweep: Recall@10 vs QPS ({scale_tag} SIFT1M Prefix)",
+        stem="chart2_recall_vs_qps",
+        pareto_label="Pareto Frontier",
+        legend_loc="upper right",
+        legend_bbox=(1.25, 1.0),
     )
-
-    min_recall = min((pt[0] for pt in all_eval_pts), default=0.7)
-    x_lower = max(0.60, min(0.85, (min_recall // 0.05) * 0.05))
-    ax.set_xlim(x_lower, 1.002)
-    ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.5)
-
-    rep_sample = reports[0] if reports else None
-    hw_str = rep_sample.cpu_model if rep_sample else "Unknown CPU"
-    caption = (
-        f"Single thread (Affinity: P-core 0x0004) | CPU: {hw_str}\n"
-        f"SIFT1M 100k prefix (10k queries, k=10) | 1 warmup + 3 timed reps per efSearch"
-    )
-    plt.figtext(
-        0.5,
-        -0.02,
-        caption,
-        wrap=True,
-        horizontalalignment="center",
-        fontsize=8.5,
-        color="#444444",
-    )
-
-    ax.legend(
-        loc="upper right",
-        bbox_to_anchor=(1.25, 1.0),
-        fontsize=7.5,
-        frameon=True,
-        title="Index Configs",
-        title_fontsize=8.5,
-    )
-    plt.tight_layout()
-
-    png_path = os.path.join(out_dir, "chart2_recall_vs_qps.png")
-    svg_path = os.path.join(out_dir, "chart2_recall_vs_qps.svg")
-    plt.savefig(png_path, dpi=300, bbox_inches="tight")
-    plt.savefig(svg_path, format="svg", bbox_inches="tight")
-    plt.close()
-    print(f"[Plotter] Saved: {png_path} & {svg_path}")
 
 
 def plot_chart3_build_time_vs_recall(
     reports: list[IndexReport],
-    out_dir: str,
+    out_dir: str | Path,
     latency_budget_ms: float = 1.0,
-) -> None:
+) -> list[Path]:
     """Chart 3: Build time vs best achievable recall at a fixed latency budget, per config."""
-    _fig, ax = plt.subplots(figsize=(9, 6), dpi=300)
+    fig, ax = plt.subplots(figsize=(9, 6), dpi=300)
+    configure_ax(ax, log_x=False, log_y=False)
 
     for rpt in sorted(reports, key=lambda r: (r.m, r.ef_construction)):
-        # Best recall where p99 latency <= latency_budget_ms
         eligible = [pt for pt in rpt.points if pt.p99_ms <= latency_budget_ms]
-        if eligible:
-            best_r = max(pt.recall for pt in eligible)
-        else:
-            best_r = min(pt.recall for pt in rpt.points)  # lowest recall if none meet budget
-
-        color = distinct_color_for_m(rpt.m)
-        mk = marker_for_efc(rpt.ef_construction)
-
+        best_r = max(pt.recall for pt in eligible) if eligible else min(pt.recall for pt in rpt.points)
         ax.scatter(
             rpt.build_time_s,
             best_r,
-            color=color,
-            marker=mk,
+            color=distinct_color_for_m(rpt.m),
+            marker=marker_for_efc(rpt.ef_construction),
             s=80,
             edgecolors="#222222",
             linewidth=0.8,
             alpha=0.85,
             label=rpt.label,
         )
-        # Small text label for clarity
         ax.annotate(
             f"({rpt.m},{rpt.ef_construction})",
             (rpt.build_time_s, best_r),
@@ -465,60 +360,49 @@ def plot_chart3_build_time_vs_recall(
 
     ax.set_xlabel("Index Build Time [seconds]", fontsize=11, fontweight="bold")
     ax.set_ylabel(
-        f"Achievable Recall@10 (at p99 ≤ {latency_budget_ms:.1f} ms)",
+        f"Achievable Recall@10 (at p99 <= {latency_budget_ms:.1f} ms)",
         fontsize=11,
         fontweight="bold",
     )
     ax.set_title(
-        f"Construction Efficiency: Build Time vs Best Achievable Recall (p99 ≤ {latency_budget_ms:.1f} ms)",
+        f"Construction Efficiency: Build Time vs Best Achievable Recall (p99 <= {latency_budget_ms:.1f} ms)",
         fontsize=12,
         fontweight="bold",
         pad=12,
     )
-    ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
-
-    rep_sample = reports[0] if reports else None
-    hw_str = rep_sample.cpu_model if rep_sample else "Unknown CPU"
-    caption = (
-        f"Single thread build & search (P-core 0x0004) | CPU: {hw_str}\n"
-        f"100k SIFT1M prefix | Fixed latency constraint: p99 ≤ {latency_budget_ms:.1f} ms"
-    )
-    plt.figtext(
+    scale_tag = _format_scale_tag(reports[0].scale_vectors) if reports else "100k"
+    fig.text(
         0.5,
         -0.02,
-        caption,
+        _build_provenance_caption(
+            reports,
+            f"{scale_tag} SIFT1M prefix | Fixed latency constraint: p99 <= {latency_budget_ms:.1f} ms",
+        ),
         wrap=True,
         horizontalalignment="center",
         fontsize=8.5,
         color="#444444",
     )
-
-    plt.tight_layout()
-    png_path = os.path.join(out_dir, "chart3_build_time_vs_recall.png")
-    svg_path = os.path.join(out_dir, "chart3_build_time_vs_recall.svg")
-    plt.savefig(png_path, dpi=300, bbox_inches="tight")
-    plt.savefig(svg_path, format="svg", bbox_inches="tight")
-    plt.close()
-    print(f"[Plotter] Saved: {png_path} & {svg_path}")
+    fig.tight_layout()
+    saved = save_figure(fig, out_dir, "chart3_build_time_vs_recall", bbox_inches="tight")
+    print(f"[Plotter] Saved: {saved[0]} & {saved[1]}")
+    return saved
 
 
-def plot_chart4_memory_vs_m(reports: list[IndexReport], out_dir: str) -> None:
+def plot_chart4_memory_vs_m(
+    reports: list[IndexReport],
+    out_dir: str | Path,
+) -> list[Path]:
     """Chart 4: Graph memory per vector vs M."""
-    _fig, ax = plt.subplots(figsize=(8, 5.5), dpi=300)
+    fig, ax = plt.subplots(figsize=(8, 5.5), dpi=300)
+    configure_ax(ax, log_x=False, log_y=False)
 
-    # Group by M and average/report graph_only_bytes_per_vec
-    m_values: list[int] = []
-    mem_values: list[float] = []
-
-    # Map each report
-    for rpt in sorted(reports, key=lambda r: (r.m, r.ef_construction)):
-        m_values.append(rpt.m)
-        mem_values.append(rpt.graph_only_bytes_per_vec)
-
-    # Unique M sorted
+    ordered = sorted(reports, key=lambda r: (r.m, r.ef_construction))
+    m_values = [rpt.m for rpt in ordered]
+    mem_values = [rpt.graph_only_bytes_per_vec for rpt in ordered]
     unique_m = sorted(set(m_values))
     mean_mem_by_m = [
-        sum(mem for m, mem in zip(m_values, mem_values) if m == um)
+        sum(mem for m, mem in zip(m_values, mem_values, strict=True) if m == um)
         / m_values.count(um)
         for um in unique_m
     ]
@@ -526,7 +410,7 @@ def plot_chart4_memory_vs_m(reports: list[IndexReport], out_dir: str) -> None:
     ax.scatter(
         m_values,
         mem_values,
-        color="#1f77b4",
+        color=OKABE_ITO_BLUE,
         alpha=0.6,
         s=60,
         edgecolors="black",
@@ -536,18 +420,14 @@ def plot_chart4_memory_vs_m(reports: list[IndexReport], out_dir: str) -> None:
     ax.plot(
         unique_m,
         mean_mem_by_m,
-        color="#d62728",
+        color=OKABE_ITO_ORANGE,
         linestyle="-",
         linewidth=2.0,
         marker="o",
         label="Empirical Mean (u32 Flat Adjacency)",
         zorder=5,
     )
-
-    # Theoretical line: (2*M + 1) * 4 bytes for layer0 + upper arena overhead (~M * 1.5 * 4 bytes) + 8B metadata
-    # Layer0 = (2*M + 1) * 4 bytes.
-    # Total graph ~ 8*M + 4 + upper_layers + 8 B
-    for um, mem in zip(unique_m, mean_mem_by_m):
+    for um, mem in zip(unique_m, mean_mem_by_m, strict=True):
         ax.annotate(
             f"{mem:.1f} B/vec",
             (um, mem),
@@ -567,47 +447,39 @@ def plot_chart4_memory_vs_m(reports: list[IndexReport], out_dir: str) -> None:
         pad=12,
     )
     ax.set_xticks(unique_m)
-    ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
-
-    rep_sample = reports[0] if reports else None
-    hw_str = rep_sample.cpu_model if rep_sample else "Unknown CPU"
-    caption = (
-        f"Contiguous u32 flat adjacency layout (Phase 3.5 T1.7)\n"
-        f"Zero external pointers | 100k SIFT1M Prefix | Architecture: {hw_str}"
-    )
-    plt.figtext(
+    scale_tag = _format_scale_tag(reports[0].scale_vectors) if reports else "100k"
+    rep_cpu = reports[0].cpu_model if reports else "Unknown CPU"
+    fig.text(
         0.5,
         -0.02,
-        caption,
+        f"Contiguous u32 flat adjacency layout (Phase 3.5 T1.7)\n"
+        f"Zero external pointers | {scale_tag} SIFT1M Prefix | Architecture: {rep_cpu}",
         wrap=True,
         horizontalalignment="center",
         fontsize=8.5,
         color="#444444",
     )
-
     ax.legend(loc="upper left", fontsize=9, frameon=True)
-    plt.tight_layout()
-
-    png_path = os.path.join(out_dir, "chart4_memory_vs_m.png")
-    svg_path = os.path.join(out_dir, "chart4_memory_vs_m.svg")
-    plt.savefig(png_path, dpi=300, bbox_inches="tight")
-    plt.savefig(svg_path, format="svg", bbox_inches="tight")
-    plt.close()
-    print(f"[Plotter] Saved: {png_path} & {svg_path}")
+    fig.tight_layout()
+    saved = save_figure(fig, out_dir, "chart4_memory_vs_m", bbox_inches="tight")
+    print(f"[Plotter] Saved: {saved[0]} & {saved[1]}")
+    return saved
 
 
-def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Phase 4 Parameter Sweep Plotter (Milestone T2.4)"
     )
     parser.add_argument(
         "--results-dir",
-        default="results/phase4",
+        type=Path,
+        default=Path("results/phase4"),
         help="Directory containing scale_100000_*.json and summary.json",
     )
     parser.add_argument(
         "--output-dir",
-        default="results/phase4",
+        type=Path,
+        default=Path("results/phase4"),
         help="Directory to output generated charts",
     )
     parser.add_argument(
@@ -622,46 +494,45 @@ def main() -> None:
         default=1.0,
         help="Fixed latency budget for Chart 3 (default: 1.0 ms)",
     )
-    args = parser.parse_args()
+    return parser.parse_args(argv)
 
-    results_dir = os.path.abspath(args.results_dir)
-    out_dir = os.path.abspath(args.output_dir)
-    os.makedirs(out_dir, exist_ok=True)
 
-    pattern_100k = os.path.join(results_dir, f"scale_{args.scale}_m*_efc*.json")
-    files_100k = glob.glob(pattern_100k)
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    results_dir = args.results_dir.resolve()
+    out_dir = args.output_dir.resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    if not files_100k:
-        print(f"[Plotter] No JSON reports found matching pattern: {pattern_100k}")
-        sys.exit(1)
+    files_primary = sorted(results_dir.glob(f"scale_{args.scale}_m*_efc*.json"))
+    if not files_primary:
+        print(
+            f"[Plotter] No JSON reports found matching pattern: "
+            f"{results_dir / f'scale_{args.scale}_m*_efc*.json'}"
+        )
+        return 1
 
-    reports_100k: list[IndexReport] = []
-    for fp in files_100k:
-        rpt = parse_report_file(fp)
-        if rpt and rpt.scale_vectors == args.scale:
-            reports_100k.append(rpt)
+    reports_primary = [
+        rpt
+        for fp in files_primary
+        if (rpt := parse_report_file(fp)) is not None and rpt.scale_vectors == args.scale
+    ]
+    print(f"[Plotter] Loaded {len(reports_primary)} reports for scale={args.scale} from {results_dir}")
 
-    print(f"[Plotter] Loaded {len(reports_100k)} reports for scale={args.scale} from {results_dir}")
-
-    # Check for 1M final reports
-    pattern_1m = os.path.join(results_dir, "scale_1000000_m*_efc*.json")
-    files_1m = glob.glob(pattern_1m)
-    reports_1m: list[IndexReport] = []
-    for fp in files_1m:
-        rpt = parse_report_file(fp)
-        if rpt and rpt.scale_vectors == 1_000_000:
-            reports_1m.append(rpt)
-
+    reports_1m = [
+        rpt
+        for fp in sorted(results_dir.glob("scale_1000000_m*_efc*.json"))
+        if (rpt := parse_report_file(fp)) is not None and rpt.scale_vectors == 1_000_000
+    ]
     if reports_1m:
         print(f"[Plotter] Loaded {len(reports_1m)} reports for 1M finals.")
 
-    # Generate all 4 charts
-    plot_chart1_recall_vs_latency(reports_100k, reports_1m, out_dir)
-    plot_chart2_recall_vs_qps(reports_100k, out_dir)
-    plot_chart3_build_time_vs_recall(reports_100k, out_dir, args.latency_budget_ms)
-    plot_chart4_memory_vs_m(reports_100k, out_dir)
+    plot_chart1_recall_vs_latency(reports_primary, reports_1m, out_dir)
+    plot_chart2_recall_vs_qps(reports_primary, out_dir)
+    plot_chart3_build_time_vs_recall(reports_primary, out_dir, args.latency_budget_ms)
+    plot_chart4_memory_vs_m(reports_primary, out_dir)
     print(f"[Plotter] All 4 charts successfully generated in {out_dir}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

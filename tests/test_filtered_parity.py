@@ -7,7 +7,6 @@ selectivity tiers {50%, 10%, 1%, 0.1%} on 10k smoke datasets.
 
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -21,38 +20,7 @@ from src.hnsw_phase1.dataset import (
     write_fvecs,
     write_ivecs,
 )
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _resolve_rust_filtered_exact_knn_binary() -> Path:
-    """Locates or builds the compiled Rust `filtered_exact_knn` release binary."""
-    exe_name = "filtered_exact_knn.exe" if os.name == "nt" else "filtered_exact_knn"
-    release_bin = REPO_ROOT / "target" / "release" / exe_name
-    debug_bin = REPO_ROOT / "target" / "debug" / exe_name
-
-    if release_bin.is_file():
-        return release_bin
-
-    cargo = shutil.which("cargo")
-    if cargo is not None:
-        proc = subprocess.run(
-            [cargo, "build", "--release", "--bin", "filtered_exact_knn"],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode == 0 and release_bin.is_file():
-            return release_bin
-
-    if debug_bin.is_file():
-        return debug_bin
-
-    raise RuntimeError(
-        f"Rust `filtered_exact_knn` binary not found at {release_bin} or {debug_bin}, "
-        "and failed to build via cargo."
-    )
+from tests.helpers import REPO_ROOT, resolve_rust_binary
 
 
 def numpy_filtered_exact_knn(
@@ -95,7 +63,7 @@ def numpy_filtered_exact_knn(
 
 def test_filtered_parity_sift_10k_all_four_selectivity_tiers() -> None:
     """Verifies 100% ID and numerical parity on 10k SIFT (or fresh-clone fallback) across 4 tiers."""
-    rust_bin = _resolve_rust_filtered_exact_knn_binary()
+    rust_bin = resolve_rust_binary("filtered_exact_knn")
     cached_base = REPO_ROOT / "data" / "siftsmall" / "siftsmall_base.fvecs"
     cached_query = REPO_ROOT / "data" / "siftsmall" / "siftsmall_query.fvecs"
 
@@ -190,7 +158,7 @@ def test_filtered_parity_sift_10k_all_four_selectivity_tiers() -> None:
 
 def test_filtered_parity_synthetic_10k_all_four_selectivity_tiers() -> None:
     """Verifies parity on 10k synthetic dataset across all 4 selectivity tiers."""
-    rust_bin = _resolve_rust_filtered_exact_knn_binary()
+    rust_bin = resolve_rust_binary("filtered_exact_knn")
     tiers = [0.5, 0.1, 0.01, 0.001]
     k = 10
 
@@ -245,7 +213,7 @@ def test_filtered_parity_synthetic_10k_all_four_selectivity_tiers() -> None:
 
 def test_filtered_parity_canonical_tie_breaking() -> None:
     """Verifies canonical (distance, id) tie-breaking between Rust and NumPy."""
-    rust_bin = _resolve_rust_filtered_exact_knn_binary()
+    rust_bin = resolve_rust_binary("filtered_exact_knn")
 
     # Query at [0, 0, 0, 0]
     # IDs 1, 3, 5 all have d^2 = 4.0; IDs 0, 4 have d^2 = 25.0
@@ -315,7 +283,7 @@ def test_filtered_parity_canonical_tie_breaking() -> None:
 
 def test_filtered_parity_edge_cases_zero_matches_and_fewer_than_k() -> None:
     """Verifies edge cases: 0 matches (empty result) and fewer than k matches."""
-    rust_bin = _resolve_rust_filtered_exact_knn_binary()
+    rust_bin = resolve_rust_binary("filtered_exact_knn")
 
     base = np.array(
         [
@@ -400,7 +368,7 @@ def test_filtered_parity_edge_cases_zero_matches_and_fewer_than_k() -> None:
 
 def test_filtered_parity_strict_validations() -> None:
     """Verifies that non-finite query components and dimension mismatches trigger non-zero exit."""
-    rust_bin = _resolve_rust_filtered_exact_knn_binary()
+    rust_bin = resolve_rust_binary("filtered_exact_knn")
 
     base = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
 

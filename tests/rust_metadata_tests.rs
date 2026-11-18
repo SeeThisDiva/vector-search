@@ -10,9 +10,12 @@
 //! 7. Binary persistence (.bin & .ivecs) round-trips.
 //! 8. CLI subprocess execution with provenance JSON validation.
 
+mod common;
+
 use std::fs;
 use std::process::Command;
 
+use common::TempTestDir;
 use vector_search::dataset::{
     generate_mode_a_bitset, generate_mode_b_bitset, generate_mode_b_bitset_detailed,
     generate_synthetic_sift, read_bitset, read_ivecs, write_bitset, write_bitset_as_ivecs,
@@ -194,9 +197,9 @@ fn test_integration_mode_b_spatial_locality() {
 
 #[test]
 fn test_integration_bitset_persistence_roundtrip() {
-    let temp_dir = std::env::temp_dir();
-    let bin_path = temp_dir.join("integration_bitset.bin");
-    let ivecs_path = temp_dir.join("integration_bitset.ivecs");
+    let tmp = TempTestDir::new("metadata_bitset");
+    let bin_path = tmp.path().join("integration_bitset.bin");
+    let ivecs_path = tmp.path().join("integration_bitset.ivecs");
 
     let bitset = generate_mode_a_bitset(1_500, 0.05, 777);
     assert_eq!(bitset.count_ones(), 75);
@@ -214,16 +217,13 @@ fn test_integration_bitset_persistence_roundtrip() {
 
     let bitset_ids: Vec<i32> = bitset.iter_ones().map(|id| id as i32).collect();
     assert_eq!(loaded_ivecs.row(0), bitset_ids.as_slice());
-
-    let _ = fs::remove_file(bin_path);
-    let _ = fs::remove_file(ivecs_path);
 }
 
 #[test]
 fn test_integration_cli_subprocess_execution() {
-    let temp_dir = std::env::temp_dir();
-    let bin_out = temp_dir.join("cli_test_out.bin");
-    let json_out = temp_dir.join("cli_test_out.json");
+    let tmp = TempTestDir::new("metadata_cli");
+    let bin_out = tmp.path().join("cli_test_out.bin");
+    let json_out = tmp.path().join("cli_test_out.json");
 
     // Run CLI executable
     let status = Command::new(env!("CARGO_BIN_EXE_generate_metadata"))
@@ -261,7 +261,4 @@ fn test_integration_cli_subprocess_execution() {
     assert!(json_text.contains("\"actual_popcount\": 50"));
     assert!(json_text.contains("\"git_commit\":"));
     assert!(json_text.contains("\"active_cluster_ids\":"));
-
-    let _ = fs::remove_file(bin_out);
-    let _ = fs::remove_file(json_out);
 }

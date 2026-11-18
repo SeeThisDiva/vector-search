@@ -2,51 +2,21 @@
 
 import json
 import os
-import shutil
 import subprocess
 import tempfile
-from pathlib import Path
 
+import faiss  # type: ignore[import-untyped]
 import numpy as np
-import pytest
 
 from src.hnsw_phase1.dataset import read_fvecs, read_ivecs, write_fvecs
 from src.hnsw_phase1.exact_knn import ExactKNN
 from src.hnsw_phase1.recall import compute_recall_at_k
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _resolve_rust_phase1_binary() -> Path:
-    """Locates or builds the compiled Rust `phase1` release binary."""
-    exe_name = "phase1.exe" if os.name == "nt" else "phase1"
-    release_bin = REPO_ROOT / "target" / "release" / exe_name
-    debug_bin = REPO_ROOT / "target" / "debug" / exe_name
-
-    if release_bin.is_file():
-        return release_bin
-
-    cargo = shutil.which("cargo")
-    if cargo is not None:
-        proc = subprocess.run(
-            [cargo, "build", "--release", "--bin", "phase1"],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode == 0 and release_bin.is_file():
-            return release_bin
-
-    if debug_bin.is_file():
-        return debug_bin
-
-    pytest.skip("Rust `phase1` binary and `cargo` toolchain not available; skipping Rust parity test.")
+from tests.helpers import REPO_ROOT, resolve_rust_binary
 
 
 def test_rust_synthetic_fvecs_ivecs_and_faiss_parity() -> None:
     """Verify Rust synthetic vector generation, Texmex binary I/O, JSON report, and FAISS parity."""
-    rust_bin = _resolve_rust_phase1_binary()
+    rust_bin = resolve_rust_binary("phase1")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         report_json_path = os.path.join(tmpdir, "report.json")
@@ -110,12 +80,7 @@ def test_rust_synthetic_fvecs_ivecs_and_faiss_parity() -> None:
         assert np.array_equal(rust_indices, py_indices)
         assert np.allclose(rust_distances, py_distances, atol=1e-2, rtol=1e-4)
 
-        # 4. Verify 100% parity against FAISS IndexFlatL2 (if installed)
-        try:
-            import faiss  # type: ignore
-        except ImportError:
-            return
-
+        # 4. Verify 100% parity against FAISS IndexFlatL2
         index = faiss.IndexFlatL2(64)
         index.add(base)
         faiss_distances, faiss_indices = index.search(query, 10)
@@ -127,7 +92,7 @@ def test_rust_synthetic_fvecs_ivecs_and_faiss_parity() -> None:
 
 def test_rust_custom_tie_breaking_and_zero_clamping() -> None:
     """Verify Rust canonical (distance, id) tie-breaking and zero clamping on Python-written .fvecs."""
-    rust_bin = _resolve_rust_phase1_binary()
+    rust_bin = resolve_rust_binary("phase1")
 
     base = np.array(
         [
@@ -186,7 +151,7 @@ def test_rust_custom_tie_breaking_and_zero_clamping() -> None:
 
 def test_rust_siftsmall_vs_faiss_parity() -> None:
     """Verify Rust ExactKNN on authentic cached siftsmall (or offline fallback) matches FAISS 100%."""
-    rust_bin = _resolve_rust_phase1_binary()
+    rust_bin = resolve_rust_binary("phase1")
     siftsmall_cached = (REPO_ROOT / "data" / "siftsmall" / "siftsmall_base.fvecs").is_file()
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -231,11 +196,6 @@ def test_rust_siftsmall_vs_faiss_parity() -> None:
         rust_idx = read_ivecs(os.path.join(tmpdir, "groundtruth.ivecs"))
         rust_dist = read_fvecs(os.path.join(tmpdir, "groundtruth.fvecs"))
 
-        try:
-            import faiss  # type: ignore
-        except ImportError:
-            return
-
         index = faiss.IndexFlatL2(128)
         index.add(base)
         faiss_dist, faiss_idx = index.search(query, 10)
@@ -246,7 +206,7 @@ def test_rust_siftsmall_vs_faiss_parity() -> None:
 
 def test_rust_cli_invalid_arguments_rejected() -> None:
     """Verify Rust CLI rejects invalid flags and zero k cleanly without panicking."""
-    rust_bin = _resolve_rust_phase1_binary()
+    rust_bin = resolve_rust_binary("phase1")
 
     for bad_args in (
         ["--k", "0", "--offline", "--no-save"],

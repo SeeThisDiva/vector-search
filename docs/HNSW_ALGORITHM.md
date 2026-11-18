@@ -503,10 +503,10 @@ Output:
 
 ## 6. Summary of Phase 1 Ground Truth Role
 
-Before constructing the HNSW proximity graphs (Phases 2–7), an unassailable baseline must be established:
+Phase 1 establishes the exact ground-truth baseline used to evaluate HNSW across Phases 2–7:
 1. **Brute-Force Exact Search**: Evaluates exact distances across all $N$ vectors for every query $q$.
 2. **Canonical Tie-Breaking**: Guarantees bit-exact deterministic outputs via $(distance, id)$ total ordering.
-3. **Automated Recall Harness**: Asserts $\text{Recall}@K(\text{Exact}, \text{Exact}) \equiv 1.0$, providing the benchmark against which HNSW graph configurations will be evaluated.
+3. **Automated Recall Harness**: Asserts $\text{Recall}@K(\text{Exact}, \text{Exact}) \equiv 1.0$, providing the verified reference against which HNSW graph configurations, filtered strategies, and quantized indexes are evaluated.
 
 ### Numerical Stability in Distance Calculations
 When using the BLAS GEMM expansion $D^2 = \|q\|^2 + \|b\|^2 - 2(q \cdot b)$ for high-throughput brute-force search, IEEE 754 float32 non-associativity between C-level vector norm summation and SIMD FMA matrix multiplication can introduce rounding discrepancies of $\le 1$ to $3$ ULPs (relative error $< 10^{-6}$). Distances are clamped strictly to $D^2 \ge 0.0$. Relative positive threshold clamping is omitted to avoid collapsing distinct closely-spaced vectors and to preserve peak GEMM throughput.

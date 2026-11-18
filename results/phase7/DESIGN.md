@@ -2,7 +2,7 @@
 
 > **Document Status**: DRAFT protocol & architecture specification for Dev's **Gate G6** review (not signed off).  
 > **Scope**: Milestone M5 (`AGENT_PLAN.md` §5 M5, §6 Gate G6). Strictly `IndexHNSWFlat` (float32 L2 squared) head-to-head comparison; quantized HNSW (`IndexHNSWSQ` / Milestone M4 Phase 6) is out of scope here.  
-> **Ground Rules**: Per [`AGENT_PLAN.md`](../../AGENT_PLAN.md) §1 rule 3, no unmeasured `100k`/`1M` FAISS numbers are claimed or assumed here. Any empirical FAISS metrics shown in Section 2 are explicitly labeled **Environment Verification Sanity Probes (`siftsmall` 10k / synthetic 100k)**, not published benchmark results.
+> **Ground Rules**: Per [`AGENT_PLAN.md`](../../docs/dev/AGENT_PLAN.md) §1 rule 3, no unmeasured `100k`/`1M` FAISS numbers are claimed or assumed here. Any empirical FAISS metrics shown in Section 2 are explicitly labeled **Environment Verification Sanity Probes (`siftsmall` 10k / synthetic 100k)**, not published benchmark results.
 
 ---
 
@@ -10,7 +10,7 @@
 
 Phase 7 answers one clear engineering question: **How does our from-scratch, `#![forbid(unsafe_code)]`, `std`-only Rust HNSW implementation compare against Meta's industry-standard C++ FAISS `IndexHNSWFlat` on the exact same machine, dataset, ground truth, and metric?**
 
-Per [`AGENT_PLAN.md`](../../AGENT_PLAN.md) §5 M5, this benchmark is governed by five non-negotiable fairness principles:
+Per [`AGENT_PLAN.md`](../../docs/dev/AGENT_PLAN.md) §5 M5, this benchmark is governed by five non-negotiable fairness principles:
 
 1. **Same Machine, Dataset, Query Set, $k$, and Ground Truth**: Authentic INRIA Texmex `SIFT1M` ($100\text{k}$ prefix and full $1\text{M}$ base, $128$-d `float32`, $10,000$ queries, $k = 10$, squared Euclidean $L_2^2$).
 2. **Matched-Recall Evaluation (Never Equal-`efSearch`)**: Because FAISS and Rust build structurally different graphs (`keep_pruned` backfill, shrink headroom, RNG level sequences), identical `efSearch` values yield different `Recall@10`. Every latency, QPS, and p99 comparison is evaluated **at matched `Recall@10`** along full Pareto curves and fixed recall targets.
@@ -166,7 +166,7 @@ Both engines execute in **separate, isolated processes** pinned to `0x0004` (P-c
 
 ### 5.2 Secondary Comparison: Multi-Thread Search & Build Disclosure
 
-Because [`AGENT_PLAN.md`](../../AGENT_PLAN.md) §5 M5 states *"separately, report multi-thread numbers for both sides if the Rust side has a parallel build by then"*, and §7 item 2 keeps parallel Rust build out of scope, we separate **Search** (both have parallel implementations!) from **Build** (only FAISS is parallel):
+Because [`AGENT_PLAN.md`](../../docs/dev/AGENT_PLAN.md) §5 M5 states *"separately, report multi-thread numbers for both sides if the Rust side has a parallel build by then"*, and §7 item 2 keeps parallel Rust build out of scope, we separate **Search** (both have parallel implementations!) from **Build** (only FAISS is parallel):
 
 1. **Multi-Thread Batch Query Throughput (`T = 6` P-cores `0x0555` and `T = 16` all cores `0xFFFF`)**:
    - **Rust ALREADY implements parallel batch search**: `HnswIndex::search_batch_parallel(&queries, k, ef_search, num_threads)` (`src/hnsw.rs:1612`) partitions `queries` across `num_threads` `std::thread::scope` workers, each reusing one `VisitedTracker`.

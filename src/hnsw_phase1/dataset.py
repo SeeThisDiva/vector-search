@@ -1,8 +1,19 @@
 """Dataset generator and standard Texmex binary I/O for vector search benchmarks."""
 
-import os
+from pathlib import Path
+from typing import Any
 
 import numpy as np
+
+__all__ = [
+    "generate_synthetic_sift",
+    "read_fvecs",
+    "read_fvecs_prefix",
+    "read_ivecs",
+    "read_ivecs_prefix",
+    "write_fvecs",
+    "write_ivecs",
+]
 
 
 def generate_synthetic_sift(
@@ -88,7 +99,77 @@ def generate_synthetic_sift(
     return base_vectors, query_vectors
 
 
-def read_fvecs(file_path: str) -> np.ndarray:
+def _read_vecs(
+    file_path: str | Path,
+    *,
+    dtype: type[np.float32] | type[np.int32],
+    label: str,
+    max_rows: int | None = None,
+) -> np.ndarray:
+    """Read up to ``max_rows`` vectors (or all rows when None) from a Texmex ``.fvecs``/``.ivecs`` file."""
+    path = Path(file_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"File not found: {path}")
+    if max_rows is not None and max_rows <= 0:
+        raise ValueError(f"max_rows must be positive when set, got {max_rows}")
+
+    file_size = path.stat().st_size
+    if file_size == 0:
+        return np.empty((0, 0), dtype=dtype)
+    if file_size < 4:
+        raise ValueError(f"Corrupt {label} file (size {file_size} < 4 bytes): {path}")
+
+    with path.open("rb") as f:
+        width = int(np.frombuffer(f.read(4), dtype=np.int32)[0])
+        if width <= 0:
+            raise ValueError(f"Invalid record width {width} in {label} file: {path}")
+        record_bytes = 4 + 4 * width
+        if file_size % record_bytes != 0:
+            raise ValueError(
+                f"File size {file_size} is not a multiple of record size {record_bytes} (width={width}) in {path}"
+            )
+        total_rows = file_size // record_bytes
+        if max_rows is not None and max_rows > total_rows:
+            raise ValueError(
+                f"Requested {max_rows} rows, but {path} contains only {total_rows} rows"
+            )
+        rows_to_read = total_rows if max_rows is None else max_rows
+        f.seek(0)
+        data = f.read(rows_to_read * record_bytes)
+
+    # View 4-byte words as target dtype; column 0 is width header, columns 1..width are payload.
+    array_view: np.ndarray = np.frombuffer(data, dtype=dtype).reshape(rows_to_read, width + 1)
+    return np.ascontiguousarray(array_view[:, 1:], dtype=dtype)
+
+
+def _write_vecs(
+    file_path: str | Path,
+    data: np.ndarray,
+    *,
+    dtype: type[np.float32] | type[np.int32],
+) -> None:
+    """Write a 1D or 2D ndarray to a standard Texmex ``.fvecs`` or ``.ivecs`` binary file."""
+    path = Path(file_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    arr: np.ndarray[Any, Any] = np.ascontiguousarray(data, dtype=dtype)
+    if arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+    elif arr.ndim != 2:
+        raise ValueError(f"Expected 1D or 2D array, got shape {arr.shape}")
+
+    num_vecs, width = arr.shape
+    if num_vecs == 0:
+        path.write_bytes(b"")
+        return
+
+    # Prefix each row with its 4-byte int32 width reinterpreted as `dtype`.
+    width_col = np.full((num_vecs, 1), width, dtype=np.int32).view(dtype)
+    record = np.hstack((width_col, arr))
+    path.write_bytes(record.tobytes())
+
+
+def read_fvecs(file_path: str | Path) -> np.ndarray:
     """
     Reads a standard Texmex .fvecs binary file into a 2D float32 ndarray.
 
@@ -98,7 +179,7 @@ def read_fvecs(file_path: str) -> np.ndarray:
 
     Parameters
     ----------
-    file_path : str
+    file_path : str | Path
         Path to the .fvecs file.
 
     Returns
@@ -106,67 +187,29 @@ def read_fvecs(file_path: str) -> np.ndarray:
     np.ndarray
         Array of shape (N, d), dtype float32. Empty array (0, 0) if file is empty.
     """
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File not found: {file_path}")
-
-    file_size = os.path.getsize(file_path)
-    if file_size == 0:
-        return np.empty((0, 0), dtype=np.float32)
-
-    if file_size < 4:
-        raise ValueError(f"Corrupt .fvecs file (size {file_size} < 4 bytes): {file_path}")
-
-    with open(file_path, "rb") as f:
-        dim = int(np.frombuffer(f.read(4), dtype=np.int32)[0])
-        if dim <= 0:
-            raise ValueError(f"Invalid dimension {dim} in .fvecs file: {file_path}")
-        record_bytes = 4 + 4 * dim
-        if file_size % record_bytes != 0:
-            raise ValueError(
-                f"File size {file_size} is not a multiple of record size {record_bytes} (dim={dim})"
-            )
-        f.seek(0)
-        data = f.read()
-
-    record_len = dim + 1
-    # View 4-byte words as float32; column 0 is dimension (as float), columns 1..dim are components
-    array_view = np.frombuffer(data, dtype=np.float32).reshape(-1, record_len)
-    return np.ascontiguousarray(array_view[:, 1:], dtype=np.float32)
+    return _read_vecs(file_path, dtype=np.float32, label=".fvecs")
 
 
-def write_fvecs(file_path: str, data: np.ndarray) -> None:
+def read_fvecs_prefix(file_path: str | Path, max_rows: int | None = None) -> np.ndarray:
+    """Read up to ``max_rows`` vectors from a Texmex ``.fvecs`` file without loading the full file."""
+    return _read_vecs(file_path, dtype=np.float32, label=".fvecs", max_rows=max_rows)
+
+
+def write_fvecs(file_path: str | Path, data: np.ndarray) -> None:
     """
     Writes a 2D float32 ndarray into standard Texmex .fvecs binary format.
 
     Parameters
     ----------
-    file_path : str
+    file_path : str | Path
         Path to output .fvecs file. Parent directories are created if missing.
     data : np.ndarray
         2D array of shape (N, d), or 1D array of shape (d,).
     """
-    os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
-
-    arr = np.ascontiguousarray(data, dtype=np.float32)
-    if arr.ndim == 1:
-        arr = arr.reshape(1, -1)
-    elif arr.ndim != 2:
-        raise ValueError(f"Expected 1D or 2D array, got shape {arr.shape}")
-
-    num_vecs, dim = arr.shape
-    if num_vecs == 0:
-        with open(file_path, "wb"):
-            pass
-        return
-
-    # Prefix each vector with 4-byte int32 dimension
-    dim_col = np.full((num_vecs, 1), dim, dtype=np.int32).view(np.float32)
-    record = np.hstack((dim_col, arr))
-    with open(file_path, "wb") as f:
-        f.write(record.tobytes())
+    _write_vecs(file_path, data, dtype=np.float32)
 
 
-def read_ivecs(file_path: str) -> np.ndarray:
+def read_ivecs(file_path: str | Path) -> np.ndarray:
     """
     Reads a standard Texmex .ivecs binary file into a 2D int32 ndarray.
 
@@ -176,7 +219,7 @@ def read_ivecs(file_path: str) -> np.ndarray:
 
     Parameters
     ----------
-    file_path : str
+    file_path : str | Path
         Path to the .ivecs file.
 
     Returns
@@ -184,59 +227,23 @@ def read_ivecs(file_path: str) -> np.ndarray:
     np.ndarray
         Array of shape (N, k), dtype int32. Empty array (0, 0) if file is empty.
     """
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File not found: {file_path}")
-
-    file_size = os.path.getsize(file_path)
-    if file_size == 0:
-        return np.empty((0, 0), dtype=np.int32)
-
-    if file_size < 4:
-        raise ValueError(f"Corrupt .ivecs file (size {file_size} < 4 bytes): {file_path}")
-
-    with open(file_path, "rb") as f:
-        k = int(np.frombuffer(f.read(4), dtype=np.int32)[0])
-        if k <= 0:
-            raise ValueError(f"Invalid neighbor count {k} in .ivecs file: {file_path}")
-        record_bytes = 4 + 4 * k
-        if file_size % record_bytes != 0:
-            raise ValueError(
-                f"File size {file_size} is not a multiple of record size {record_bytes} (k={k})"
-            )
-        f.seek(0)
-        data = f.read()
-
-    record_len = k + 1
-    array_view = np.frombuffer(data, dtype=np.int32).reshape(-1, record_len)
-    return np.ascontiguousarray(array_view[:, 1:], dtype=np.int32)
+    return _read_vecs(file_path, dtype=np.int32, label=".ivecs")
 
 
-def write_ivecs(file_path: str, data: np.ndarray) -> None:
+def read_ivecs_prefix(file_path: str | Path, max_rows: int | None = None) -> np.ndarray:
+    """Read up to ``max_rows`` rows from a Texmex ``.ivecs`` file without loading the full file."""
+    return _read_vecs(file_path, dtype=np.int32, label=".ivecs", max_rows=max_rows)
+
+
+def write_ivecs(file_path: str | Path, data: np.ndarray) -> None:
     """
     Writes a 2D int32 ndarray into standard Texmex .ivecs binary format.
 
     Parameters
     ----------
-    file_path : str
+    file_path : str | Path
         Path to output .ivecs file. Parent directories are created if missing.
     data : np.ndarray
         2D array of shape (N, k), or 1D array of shape (k,).
     """
-    os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
-
-    arr = np.ascontiguousarray(data, dtype=np.int32)
-    if arr.ndim == 1:
-        arr = arr.reshape(1, -1)
-    elif arr.ndim != 2:
-        raise ValueError(f"Expected 1D or 2D array, got shape {arr.shape}")
-
-    num_vecs, k = arr.shape
-    if num_vecs == 0:
-        with open(file_path, "wb"):
-            pass
-        return
-
-    dim_col = np.full((num_vecs, 1), k, dtype=np.int32)
-    record = np.hstack((dim_col, arr))
-    with open(file_path, "wb") as f:
-        f.write(record.tobytes())
+    _write_vecs(file_path, data, dtype=np.int32)

@@ -2,13 +2,14 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::{BTreeMap, HashSet};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+mod common;
 
+use std::collections::HashSet;
+use std::fs;
+use std::path::PathBuf;
+use std::process::{Command, Output};
+
+use common::{read_json_file, JsonValue, TempTestDir};
 use vector_search::benchmark::detect_provenance;
 use vector_search::dataset::{generate_synthetic_sift, write_fvecs};
 use vector_search::distance::Metric;
@@ -19,41 +20,6 @@ use vector_search::quantized::{
     HnswPqIndex, HnswSq8Index, PqConfig, QuantizedBuildMode, QuantizedStorageMode,
 };
 
-// ============================================================================
-// Self-contained RAII TempDir & Binary Runner
-// ============================================================================
-
-static TEMP_SEQ: AtomicUsize = AtomicUsize::new(0);
-
-struct TempDir {
-    path: PathBuf,
-}
-
-impl TempDir {
-    fn new(prefix: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos());
-        let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "vector_search_{prefix}_{}_{nanos}_{seq}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&dir).expect("create temp dir");
-        Self { path: dir }
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
-
 fn phase6_bin_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_phase6"))
 }
@@ -63,237 +29,6 @@ fn run_phase6(args: &[&str]) -> Output {
         .args(args)
         .output()
         .expect("spawn phase6 binary")
-}
-
-// ============================================================================
-// Strict JSON Parser (rejects duplicate object keys)
-// ============================================================================
-
-#[derive(Debug, Clone, PartialEq)]
-enum JsonValue {
-    Null,
-    Bool(bool),
-    Number(f64),
-    Str(String),
-    Array(Vec<JsonValue>),
-    Object(BTreeMap<String, JsonValue>),
-}
-
-impl JsonValue {
-    fn as_object(&self) -> &BTreeMap<String, JsonValue> {
-        match self {
-            Self::Object(map) => map,
-            other => panic!("Expected JSON object, got {other:?}"),
-        }
-    }
-
-    fn as_array(&self) -> &[JsonValue] {
-        match self {
-            Self::Array(arr) => arr,
-            other => panic!("Expected JSON array, got {other:?}"),
-        }
-    }
-
-    fn as_str(&self) -> &str {
-        match self {
-            Self::Str(s) => s,
-            other => panic!("Expected JSON string, got {other:?}"),
-        }
-    }
-
-    fn as_f64(&self) -> f64 {
-        match self {
-            Self::Number(v) => *v,
-            other => panic!("Expected JSON number, got {other:?}"),
-        }
-    }
-
-    fn as_usize(&self) -> usize {
-        let v = self.as_f64();
-        assert!(v >= 0.0 && (v - v.round()).abs() < 1e-9, "Not usize: {v}");
-        v.round() as usize
-    }
-
-    fn as_bool(&self) -> bool {
-        match self {
-            Self::Bool(b) => *b,
-            other => panic!("Expected JSON bool, got {other:?}"),
-        }
-    }
-
-    fn get(&self, key: &str) -> &JsonValue {
-        self.as_object()
-            .get(key)
-            .unwrap_or_else(|| panic!("Missing JSON key '{key}'"))
-    }
-}
-
-struct JsonParser<'a> {
-    bytes: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> JsonParser<'a> {
-    fn parse(text: &'a str) -> JsonValue {
-        let mut p = Self {
-            bytes: text.as_bytes(),
-            pos: 0,
-        };
-        let val = p.parse_value();
-        p.skip_ws();
-        assert_eq!(p.pos, p.bytes.len(), "Trailing characters in JSON");
-        val
-    }
-
-    fn skip_ws(&mut self) {
-        while self.pos < self.bytes.len() && self.bytes[self.pos].is_ascii_whitespace() {
-            self.pos += 1;
-        }
-    }
-
-    fn peek(&mut self) -> Option<u8> {
-        self.skip_ws();
-        self.bytes.get(self.pos).copied()
-    }
-
-    fn expect(&mut self, expected: u8) {
-        self.skip_ws();
-        assert!(self.pos < self.bytes.len(), "Unexpected EOF");
-        assert_eq!(
-            self.bytes[self.pos], expected,
-            "Expected '{}' at byte {}",
-            expected as char, self.pos
-        );
-        self.pos += 1;
-    }
-
-    fn parse_value(&mut self) -> JsonValue {
-        match self.peek().expect("Unexpected EOF in JSON value") {
-            b'{' => self.parse_object(),
-            b'[' => self.parse_array(),
-            b'"' => JsonValue::Str(self.parse_string()),
-            b't' => {
-                self.consume_literal(b"true");
-                JsonValue::Bool(true)
-            }
-            b'f' => {
-                self.consume_literal(b"false");
-                JsonValue::Bool(false)
-            }
-            b'n' => {
-                self.consume_literal(b"null");
-                JsonValue::Null
-            }
-            b'-' | b'0'..=b'9' => self.parse_number(),
-            other => panic!("Unexpected token '{}' at byte {}", other as char, self.pos),
-        }
-    }
-
-    fn consume_literal(&mut self, lit: &[u8]) {
-        self.skip_ws();
-        assert!(self.bytes[self.pos..].starts_with(lit), "Bad JSON literal");
-        self.pos += lit.len();
-    }
-
-    fn parse_string(&mut self) -> String {
-        self.expect(b'"');
-        let mut out = String::new();
-        while self.pos < self.bytes.len() {
-            let b = self.bytes[self.pos];
-            self.pos += 1;
-            if b == b'"' {
-                return out;
-            }
-            if b == b'\\' {
-                let esc = self.bytes[self.pos];
-                self.pos += 1;
-                match esc {
-                    b'"' => out.push('"'),
-                    b'\\' => out.push('\\'),
-                    b'/' => out.push('/'),
-                    b'b' => out.push('\x08'),
-                    b'f' => out.push('\x0c'),
-                    b'n' => out.push('\n'),
-                    b'r' => out.push('\r'),
-                    b't' => out.push('\t'),
-                    other => panic!("Unsupported escape \\{}", other as char),
-                }
-            } else {
-                out.push(b as char);
-            }
-        }
-        panic!("Unterminated JSON string");
-    }
-
-    fn parse_number(&mut self) -> JsonValue {
-        self.skip_ws();
-        let start = self.pos;
-        while self.pos < self.bytes.len() {
-            let b = self.bytes[self.pos];
-            if b.is_ascii_digit() || matches!(b, b'-' | b'+' | b'.' | b'e' | b'E') {
-                self.pos += 1;
-            } else {
-                break;
-            }
-        }
-        let s = std::str::from_utf8(&self.bytes[start..self.pos]).expect("utf8 number");
-        JsonValue::Number(s.parse::<f64>().expect("parse f64"))
-    }
-
-    fn parse_array(&mut self) -> JsonValue {
-        self.expect(b'[');
-        let mut items = Vec::new();
-        if self.peek() == Some(b']') {
-            self.pos += 1;
-            return JsonValue::Array(items);
-        }
-        loop {
-            items.push(self.parse_value());
-            match self.peek() {
-                Some(b',') => self.pos += 1,
-                Some(b']') => {
-                    self.pos += 1;
-                    break;
-                }
-                other => panic!("Expected ',' or ']' in array, got {other:?}"),
-            }
-        }
-        JsonValue::Array(items)
-    }
-
-    fn parse_object(&mut self) -> JsonValue {
-        self.expect(b'{');
-        let mut map = BTreeMap::new();
-        if self.peek() == Some(b'}') {
-            self.pos += 1;
-            return JsonValue::Object(map);
-        }
-        loop {
-            let key = self.parse_string();
-            assert!(
-                !map.contains_key(&key),
-                "Duplicate JSON key '{key}' emitted"
-            );
-            self.expect(b':');
-            let val = self.parse_value();
-            map.insert(key, val);
-            match self.peek() {
-                Some(b',') => self.pos += 1,
-                Some(b'}') => {
-                    self.pos += 1;
-                    break;
-                }
-                other => panic!("Expected ',' or '}}' in object, got {other:?}"),
-            }
-        }
-        JsonValue::Object(map)
-    }
-}
-
-fn read_json_file(path: &Path) -> JsonValue {
-    let text = fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("Failed reading JSON '{}': {e}", path.display()));
-    JsonParser::parse(&text)
 }
 
 // ============================================================================
@@ -324,7 +59,7 @@ fn test_phase6_help_and_invalid_cli_errors() {
     let bogus = run_phase6(&["--definitely-unknown-flag"]);
     assert!(!bogus.status.success(), "Unknown flag must fail");
 
-    let tmp = TempDir::new("phase6_strict");
+    let tmp = TempTestDir::new("phase6_strict");
     let data_dir = tmp.path().join("empty_data");
     let out_dir = tmp.path().join("out");
     fs::create_dir_all(&data_dir).expect("create empty data dir");
@@ -380,7 +115,7 @@ fn test_phase6_help_and_invalid_cli_errors() {
 
 #[test]
 fn test_phase6_microbench_cli_writes_way_a_vs_way_b_json() {
-    let tmp = TempDir::new("phase6_microbench");
+    let tmp = TempTestDir::new("phase6_microbench");
     let json_path = tmp.path().join("microbench_kernels.json");
 
     let out = run_phase6(&[
@@ -450,7 +185,7 @@ fn test_phase6_microbench_cli_writes_way_a_vs_way_b_json() {
 
 #[test]
 fn test_phase6_matrix_synthetic_subset_and_resume() {
-    let tmp = TempDir::new("phase6_matrix");
+    let tmp = TempTestDir::new("phase6_matrix");
     let data_dir = tmp.path().join("data");
     let out_dir = tmp.path().join("out");
 
@@ -634,7 +369,7 @@ fn test_phase6_matrix_synthetic_subset_and_resume() {
 
 #[test]
 fn test_phase6_streaming_fvecs_qbuild_and_gt_cache() {
-    let tmp = TempDir::new("phase6_stream");
+    let tmp = TempTestDir::new("phase6_stream");
     let data_dir = tmp.path().join("data");
     let out_dir = tmp.path().join("out");
     fs::create_dir_all(&data_dir).expect("mkdir data");
@@ -688,7 +423,7 @@ fn test_phase6_streaming_fvecs_qbuild_and_gt_cache() {
 
 #[test]
 fn test_phase6_internal_profile_query_subprocess() {
-    let tmp = TempDir::new("phase6_iso_query");
+    let tmp = TempTestDir::new("phase6_iso_query");
     let (base, _query) = generate_synthetic_sift(64, 8, 32, 4, 7).expect("generate synthetic");
     let hnsw_cfg = HnswConfig {
         m: 8,
@@ -776,7 +511,7 @@ fn test_phase6_internal_profile_query_subprocess() {
 
 #[test]
 fn test_phase6_parity_check_cli_json() {
-    let tmp = TempDir::new("phase6_parity_cli");
+    let tmp = TempTestDir::new("phase6_parity_cli");
     let (base, query) = generate_synthetic_sift(64, 5, 32, 4, 19).expect("generate synthetic");
     let base_path = tmp.path().join("base.fvecs");
     let query_path = tmp.path().join("query.fvecs");

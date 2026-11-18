@@ -115,7 +115,7 @@ def run_phase1_benchmark(
     total_elements = num_query * k
 
     try:
-        import faiss  # type: ignore
+        import faiss
 
         faiss_available = True
         index = faiss.IndexFlatL2(dim)

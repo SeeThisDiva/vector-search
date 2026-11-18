@@ -17,11 +17,15 @@
 
 #![forbid(unsafe_code)]
 
+mod common;
+
 use std::fs;
-use std::path::Path;
 use std::process::Command;
 
-use vector_search::dataset::{generate_mode_a_bitset, read_fvecs};
+use common::{
+    load_siftsmall_or_skip, make_synthetic_2d_index, make_synthetic_2d_matrix, TempTestDir,
+};
+use vector_search::dataset::generate_mode_a_bitset;
 use vector_search::distance::Metric;
 use vector_search::error::VectorSearchError;
 use vector_search::exact_knn::FilteredExactKnn;
@@ -30,31 +34,10 @@ use vector_search::hnsw::{FilterStrategy, FilteredSearchScratch, HnswConfig, Hns
 use vector_search::matrix::RowMatrix;
 use vector_search::recall::compute_recall_at_k;
 
-/// Helper: builds a small deterministic 2D synthetic dataset.
-fn make_synthetic_2d_matrix() -> RowMatrix<f32> {
-    let mut rows = Vec::new();
-    for i in 0..100 {
-        let x = (i as f32) * 1.5;
-        let y = ((i * 7) % 31) as f32;
-        rows.push(vec![x, y]);
-    }
-    RowMatrix::from_rows(&rows).unwrap()
-}
-
-fn make_synthetic_index(matrix: &RowMatrix<f32>) -> HnswIndex<'_> {
-    let config = HnswConfig {
-        m: 16,
-        ef_construction: 64,
-        seed: 42,
-        ..Default::default()
-    };
-    HnswIndex::build(matrix, Metric::L2Squared, config).unwrap()
-}
-
 #[test]
 fn test_strategy3_empty_bitset_zero_matches() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let query = [10.0_f32, 5.0_f32];
     let k = 5;
 
@@ -77,8 +60,8 @@ fn test_strategy3_empty_bitset_zero_matches() {
 
 #[test]
 fn test_strategy3_fewer_than_k_matches() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let query = [10.0_f32, 5.0_f32];
     let k = 10;
 
@@ -111,8 +94,8 @@ fn test_strategy3_fewer_than_k_matches() {
 
 #[test]
 fn test_strategy3_predicate_with_no_bitset_error_handling() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let query = [10.0_f32, 5.0_f32];
     let k = 5;
 
@@ -182,8 +165,8 @@ fn test_strategy3_canonical_tie_breaking() {
 
 #[test]
 fn test_strategy3_fallback_from_strategy1() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let query = [10.0_f32, 5.0_f32];
     let k = 10;
 
@@ -236,8 +219,8 @@ fn test_strategy3_fallback_from_strategy1() {
 
 #[test]
 fn test_strategy3_fallback_from_strategy2() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let query = [10.0_f32, 5.0_f32];
     let k = 10;
 
@@ -284,8 +267,8 @@ fn test_strategy3_fallback_from_strategy2() {
 
 #[test]
 fn test_strategy3_opaque_predicate_does_not_fallback() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let query = [10.0_f32, 5.0_f32];
     let k = 10;
 
@@ -311,8 +294,8 @@ fn test_strategy3_opaque_predicate_does_not_fallback() {
 
 #[test]
 fn test_strategy3_unified_dispatch_and_scratch() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let query = [25.0_f32, 12.0_f32];
     let k = 8;
 
@@ -360,8 +343,8 @@ fn test_strategy3_unified_dispatch_and_scratch() {
 
 #[test]
 fn test_strategy3_batch_sequential_and_parallel_parity() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let q_rows = vec![
         vec![5.0_f32, 2.0],
         vec![15.0, 8.0],
@@ -393,8 +376,8 @@ fn test_strategy3_batch_sequential_and_parallel_parity() {
 
 #[test]
 fn test_strategy3_input_validation() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let bitset = DenseBitset::ones(100);
     let params = FilteredSearchParams::default();
 
@@ -419,16 +402,12 @@ fn test_strategy3_input_validation() {
 
 #[test]
 fn test_strategy3_sift10k_exact_parity_all_4_tiers() {
-    let sift_base_path = Path::new("data/siftsmall/siftsmall_base.fvecs");
-    let sift_query_path = Path::new("data/siftsmall/siftsmall_query.fvecs");
-
-    if !sift_base_path.exists() || !sift_query_path.exists() {
-        eprintln!("[WARN] siftsmall dataset not found, skipping 10k SIFT exact parity test");
+    let Some(loaded) = load_siftsmall_or_skip("test_strategy3_sift10k_exact_parity_all_4_tiers")
+    else {
         return;
-    }
-
-    let base = read_fvecs(sift_base_path).expect("Failed to read siftsmall_base.fvecs");
-    let queries = read_fvecs(sift_query_path).expect("Failed to read siftsmall_query.fvecs");
+    };
+    let base = loaded.base;
+    let queries = loaded.query;
     let n = base.rows();
     assert_eq!(n, 10_000);
 
@@ -504,12 +483,8 @@ fn test_strategy3_sift10k_exact_parity_all_4_tiers() {
 
 #[test]
 fn test_strategy3_microbenchmark_cli_execution_and_json_validation() {
-    let out_dir = Path::new("target/test_output");
-    let _ = fs::create_dir_all(out_dir);
-    let json_file = out_dir.join("test_microbench.json");
-    if json_file.exists() {
-        let _ = fs::remove_file(&json_file);
-    }
+    let tmp = TempTestDir::new("strategy3_microbench");
+    let json_file = tmp.path().join("test_microbench.json");
 
     let bin_path = env!("CARGO_BIN_EXE_phase5");
     let status = Command::new(bin_path)
@@ -547,21 +522,12 @@ fn test_strategy3_microbenchmark_cli_execution_and_json_validation() {
     assert!(content.contains(r#""t_cand_ns""#));
     assert!(content.contains(r#""theoretical_model""#));
     assert!(content.contains(r#""predicted_c_brute_ns""#));
-
-    // Cleanup
-    let _ = fs::remove_file(&json_file);
 }
 
 #[test]
 fn test_strategy3_class_preserving_unfiltered_and_fingerprint() {
-    let matrix = make_synthetic_2d_matrix();
-    let config = HnswConfig {
-        m: 16,
-        ef_construction: 64,
-        seed: 42,
-        ..Default::default()
-    };
-    let mut index = HnswIndex::build(&matrix, Metric::L2Squared, config).unwrap();
+    let matrix = make_synthetic_2d_matrix(100);
+    let mut index = make_synthetic_2d_index(&matrix);
     let fp = index.graph_fingerprint();
     assert_ne!(fp, 0, "Graph fingerprint must be non-zero");
 
@@ -584,8 +550,8 @@ fn test_strategy3_class_preserving_unfiltered_and_fingerprint() {
 
 #[test]
 fn test_strategy3_scratch_zero_reallocation_and_undersized_error() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let bitset = DenseBitset::ones(100);
     let params = FilteredSearchParams::default();
 

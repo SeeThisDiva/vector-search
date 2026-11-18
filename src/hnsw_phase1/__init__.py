@@ -4,7 +4,9 @@ from src.hnsw_phase1.benchmark import run_phase1_benchmark
 from src.hnsw_phase1.dataset import (
     generate_synthetic_sift,
     read_fvecs,
+    read_fvecs_prefix,
     read_ivecs,
+    read_ivecs_prefix,
     write_fvecs,
     write_ivecs,
 )
@@ -21,7 +23,9 @@ __all__ = [
     "evaluate_recall_summary",
     "generate_synthetic_sift",
     "read_fvecs",
+    "read_fvecs_prefix",
     "read_ivecs",
+    "read_ivecs_prefix",
     "run_phase1_benchmark",
     "verify_self_recall",
     "write_fvecs",

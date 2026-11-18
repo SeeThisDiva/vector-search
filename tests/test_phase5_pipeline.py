@@ -12,15 +12,13 @@ Exercises the compiled Rust `phase5` binary (`--smoke --synthetic`), verifies:
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 from scripts.plot_phase5 import generate_all_phase5_charts
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from tests.helpers import REPO_ROOT, assert_charts_created, resolve_rust_binary
 
 EXPECTED_CHART_STEMS: tuple[str, ...] = (
     "chart1_recall_vs_selectivity",
@@ -31,22 +29,9 @@ EXPECTED_CHART_STEMS: tuple[str, ...] = (
 )
 
 
-def _ensure_phase5_release_binary() -> Path:
-    exe_name = "phase5.exe" if os.name == "nt" else "phase5"
-    bin_path = REPO_ROOT / "target" / "release" / exe_name
-    if not bin_path.is_file():
-        subprocess.run(
-            ["cargo", "build", "--release", "--bin", "phase5"],
-            cwd=REPO_ROOT,
-            check=True,
-        )
-    assert bin_path.is_file(), f"Expected release binary at {bin_path}"
-    return bin_path
-
-
 def test_phase5_synthetic_pipeline_resume_and_charts(tmp_path: Path) -> None:
     """Run synthetic micro-matrix, resume skip, and plot_phase5.py multi-cell + single-cell."""
-    phase5_bin = _ensure_phase5_release_binary()
+    phase5_bin = resolve_rust_binary("phase5")
     data_dir = tmp_path / "data"
     out_dir = tmp_path / "out"
     charts_dir = tmp_path / "charts"
@@ -130,11 +115,7 @@ def test_phase5_synthetic_pipeline_resume_and_charts(tmp_path: Path) -> None:
         scale=250,
     )
     assert len(created) == 10
-    for stem in EXPECTED_CHART_STEMS:
-        png = charts_dir / f"{stem}.png"
-        svg = charts_dir / f"{stem}.svg"
-        assert png.is_file() and png.stat().st_size > 1000
-        assert svg.is_file() and svg.stat().st_size > 1000
+    assert_charts_created(charts_dir, EXPECTED_CHART_STEMS)
 
     # Single-cell CLI smoke test via scripts/plot_phase5.py
     single_dir = tmp_path / "single_cell"
@@ -156,6 +137,4 @@ def test_phase5_synthetic_pipeline_resume_and_charts(tmp_path: Path) -> None:
         cwd=REPO_ROOT,
         check=True,
     )
-    for stem in EXPECTED_CHART_STEMS:
-        assert (single_charts / f"{stem}.png").is_file()
-        assert (single_charts / f"{stem}.svg").is_file()
+    assert_charts_created(single_charts, EXPECTED_CHART_STEMS)

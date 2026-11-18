@@ -1,8 +1,7 @@
-"""
-Phase 1 Execution Script: HNSW Algorithm Foundations, Brute-Force Ground Truth & Recall Harness.
+"""Phase 1 Execution Script: ExactKNN Brute-Force Ground Truth & Recall Harness.
 
-Usage:
-    python run_phase1.py [--num-base 10000] [--num-query 100] [--dim 128] [--k 10] [--seed 42] [--output-dir data]
+Run from the repository root:
+    python run_phase1.py [--num-base 10000] [--num-query 100] [--dim 128] [--k 10] [--seed 42] [--output-dir data] [--no-save]
 """
 
 import argparse
@@ -10,7 +9,7 @@ import argparse
 from src.hnsw_phase1.benchmark import run_phase1_benchmark
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="Phase 1: HNSW Algorithm Foundations, Brute-Force Ground Truth & Recall Verification"
     )
@@ -134,10 +133,11 @@ def main() -> None:
     print("  [OK] R1: HNSW Algorithm documentation authored at docs/HNSW_ALGORITHM.md")
     print("  [OK] R2: Brute-force exact search engine & Texmex binary I/O established")
     print("  [OK] R3: Recall harness verified with 100.0% self-recall invariant")
-    print("  [OK] R4: Fully reproducible benchmark pipeline halted for user review")
-    print("\nExecution stopped cleanly. Awaiting user review before proceeding to Phase 2.")
+    print("  [OK] R4: Fully reproducible benchmark pipeline verified")
+    print("\nPhase 1 ExactKNN baseline complete.")
     print("=" * 80)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

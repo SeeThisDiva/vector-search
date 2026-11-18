@@ -12,10 +12,10 @@ mod common;
 
 use std::fs;
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
+use common::{make_random_matrix, TempTestDir};
 use vector_search::benchmark::verify_index_against_golden_fixture;
 use vector_search::dataset::{generate_synthetic_sift, read_fvecs_max_rows, write_fvecs};
 use vector_search::distance::{inner_product, l2_squared, Metric};
@@ -31,29 +31,6 @@ use vector_search::quantized::{
 };
 use vector_search::recall::compute_recall_at_k;
 use vector_search::rng::DeterministicRng;
-
-struct TempDirGuard {
-    path: PathBuf,
-}
-
-impl TempDirGuard {
-    fn new(prefix: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), nanos));
-        let _ = fs::remove_dir_all(&path);
-        fs::create_dir_all(&path).expect("create temp test dir");
-        Self { path }
-    }
-}
-
-impl Drop for TempDirGuard {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
 
 /// Test-only exact `f32` adapter over `QuantizedDistanceSource` used to prove
 /// `CompactHnswGraph::build_with_source` produces bit-identical graphs and search results
@@ -153,16 +130,6 @@ impl QuantizedDistanceSource for F32SourceAdapter<'_> {
     fn vector_memory_bytes(&self) -> usize {
         self.matrix.memory_bytes()
     }
-}
-
-fn make_random_matrix(rows: usize, cols: usize, lo: f64, hi: f64, seed: u64) -> RowMatrix<f32> {
-    let mut rng = DeterministicRng::new(seed);
-    let mut data = Vec::with_capacity(rows * cols);
-    for _ in 0..rows * cols {
-        let u = rng.next_f64_open01();
-        data.push((lo + u * (hi - lo)) as f32);
-    }
-    RowMatrix::new(rows, cols, data).unwrap()
 }
 
 fn assert_compact_graph_matches_hnsw(compact: &CompactHnswGraph, hnsw: &HnswIndex<'_>) {
@@ -733,12 +700,12 @@ fn phase6_sq8_symmetric_distance_axioms() {
 
 #[test]
 fn phase6_sq8_streaming_fvecs_bit_identical_parity() {
-    let tmp = TempDirGuard::new("phase6_sq8_streaming");
+    let tmp = TempTestDir::new("phase6_sq8_streaming");
 
     // 9,005 rows exercises > 2 full 4,096-row streaming chunks + remainder chunk.
     for &dim in &[13_usize, 128] {
         let mat = make_random_matrix(9_005, dim, -10.0, 255.0, 700 + dim as u64);
-        let fvecs_path = tmp.path.join(format!("vecs_d{dim}.fvecs"));
+        let fvecs_path = tmp.path().join(format!("vecs_d{dim}.fvecs"));
         write_fvecs(&fvecs_path, &mat).unwrap();
 
         for max_rows in [None, Some(5_000)] {
@@ -766,7 +733,7 @@ fn phase6_sq8_streaming_fvecs_bit_identical_parity() {
 
     // Verify full streaming HnswSq8Index matches in-memory QuantizedDirect bit-for-bit
     let small_mat = make_random_matrix(300, 16, 0.0, 100.0, 808);
-    let small_path = tmp.path.join("small_build.fvecs");
+    let small_path = tmp.path().join("small_build.fvecs");
     write_fvecs(&small_path, &small_mat).unwrap();
     let queries = make_random_matrix(10, 16, 0.0, 100.0, 809);
 
@@ -799,13 +766,13 @@ fn phase6_sq8_streaming_fvecs_bit_identical_parity() {
         Sq8Vectors::from_fvecs_streaming(&small_path, Metric::L2Squared, Some(0)),
         Err(VectorSearchError::InvalidArgument(_))
     ));
-    let empty_fvecs = tmp.path.join("empty.fvecs");
+    let empty_fvecs = tmp.path().join("empty.fvecs");
     fs::write(&empty_fvecs, []).unwrap();
     assert!(matches!(
         Sq8Vectors::from_fvecs_streaming(&empty_fvecs, Metric::L2Squared, None),
         Err(VectorSearchError::InvalidArgument(_))
     ));
-    let corrupt_fvecs = tmp.path.join("corrupt.fvecs");
+    let corrupt_fvecs = tmp.path().join("corrupt.fvecs");
     fs::write(&corrupt_fvecs, [1_u8, 2, 3]).unwrap();
     assert!(matches!(
         Sq8Vectors::from_fvecs_streaming(&corrupt_fvecs, Metric::L2Squared, None),
@@ -814,7 +781,7 @@ fn phase6_sq8_streaming_fvecs_bit_identical_parity() {
 
     let mut nan_mat = make_random_matrix(10, 8, 0.0, 1.0, 12);
     nan_mat.as_mut_slice()[3] = f32::NAN;
-    let nan_path = tmp.path.join("nan.fvecs");
+    let nan_path = tmp.path().join("nan.fvecs");
     write_fvecs(&nan_path, &nan_mat).unwrap();
     assert!(matches!(
         Sq8Vectors::from_fvecs_streaming(&nan_path, Metric::L2Squared, None),
@@ -936,8 +903,8 @@ fn phase6_sq8_non_finite_and_invalid_argument_guards() {
 
 #[test]
 fn phase6_sq8_only_drop_raw_and_snapshot_roundtrip() {
-    let tmp = TempDirGuard::new("phase6_sq8_snapshot");
-    let snap_path = tmp.path.join("sq8_index.bin");
+    let tmp = TempTestDir::new("phase6_sq8_snapshot");
+    let snap_path = tmp.path().join("sq8_index.bin");
 
     let (base, queries) = generate_synthetic_sift(400, 15, 128, 8, 42).unwrap();
     let cfg = HnswConfig::new(16, 100);

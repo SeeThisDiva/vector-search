@@ -11,7 +11,7 @@
 
 ## 1. Executive Summary & Pilot Measurement Baseline
 
-Per [`AGENT_PLAN.md`](../../AGENT_PLAN.md) Milestone `T2.1`, before executing the full Phase 4 parameter exploration, we established an empirical timing and memory baseline using a complete 100k pilot execution at the reference operating point ($M=16$, $\text{efConstruction}=100$). This eliminates guesswork and provides exact, reproducible scaling coefficients for wall-clock time and disk/RAM consumption.
+Per [`AGENT_PLAN.md`](../../docs/dev/AGENT_PLAN.md) Milestone `T2.1`, before executing the full Phase 4 parameter exploration, we established an empirical timing and memory baseline using a complete 100k pilot execution at the reference operating point ($M=16$, $\text{efConstruction}=100$). This eliminates guesswork and provides exact, reproducible scaling coefficients for wall-clock time and disk/RAM consumption.
 
 ### 1.1 Pilot Execution Summary
 
@@ -76,7 +76,7 @@ ef_construction = 40, 100, 200, 400
 ### 2.1 Grid Filtering & Cardinality: 23 vs 24 Configurations
 
 - Standard Cartesian Product: $6 \text{ values of } M \times 4 \text{ values of } \text{efConstruction} = 24 \text{ combinations}$.
-- Invariant Condition: per [`AGENT_PLAN.md`](../../AGENT_PLAN.md) Section 4 and HNSW design principles, construction beam width must be at least the layer degree limit ($\text{efConstruction} \ge M$).
+- Invariant Condition: per [`AGENT_PLAN.md`](../../docs/dev/AGENT_PLAN.md) Section 4 and HNSW design principles, construction beam width must be at least the layer degree limit ($\text{efConstruction} \ge M$).
 - At $M=48$ and $\text{efConstruction}=40$, we have $40 < 48$, which violates this constraint. `Phase4GridSpec::parse_str` automatically filters out this invalid pair, yielding **23 strictly valid Cartesian configurations**.
 - **Alternative (24 configs)**: If Dev prefers an even 24-point grid, an explicit configuration line `config = m:48, ef_construction:48` can be added as the 24th point.
 
@@ -149,7 +149,7 @@ T_{\text{sweep}}(M) &= T_{\text{sweep},0} \cdot \left(\frac{M}{16}\right)^\gamma
 
 ## 4. 1M Final Confirmation Budget (3 to 4 Pareto-Optimal Configurations)
 
-Per [`AGENT_PLAN.md`](../../AGENT_PLAN.md) Section 4, the 1M phase does **not** re-sweep the entire 23-config grid. Instead, we select the top 3–4 Pareto frontier configurations identified from the 100k sweep, plus the Phase 3 reference ($M=16, \text{efC}=100$).
+Per [`AGENT_PLAN.md`](../../docs/dev/AGENT_PLAN.md) Section 4, the 1M phase does **not** re-sweep the entire 23-config grid. Instead, we select the top 3–4 Pareto frontier configurations identified from the 100k sweep, plus the Phase 3 reference ($M=16, \text{efC}=100$).
 
 ### 4.1 Scaling from Phase 3.5 1M Measurement
 

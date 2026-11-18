@@ -48,16 +48,12 @@ coverage.xml
 /target/
 
 # Benchmark output data & downloaded SIFT corpora (regenerated via Cargo / run_phase1.py)
-data/*.bin
-data/*.fvecs
-data/*.ivecs
 data/**/*.bin
 data/**/*.fvecs
 data/**/*.ivecs
 data/**/*.tar.gz
 data/**/*.part
 data/**/*.json
-!results/**/*.json
 
 # Phase 5 10k smoke artifacts (disposable local validation; excluded so clean-commit 100k/1M runs report git_dirty=false)
 results/phase5/smoke/

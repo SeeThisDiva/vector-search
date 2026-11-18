@@ -15,10 +15,12 @@
 
 #![forbid(unsafe_code)]
 
-use std::path::Path;
+mod common;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use vector_search::dataset::{generate_mode_a_bitset, read_fvecs};
+use common::{load_siftsmall_or_skip, make_synthetic_2d_index, make_synthetic_2d_matrix};
+use vector_search::dataset::generate_mode_a_bitset;
 use vector_search::distance::Metric;
 use vector_search::error::VectorSearchError;
 use vector_search::exact_knn::FilteredExactKnn;
@@ -27,31 +29,10 @@ use vector_search::hnsw::{FilterStrategy, FilteredSearchScratch, HnswConfig, Hns
 use vector_search::matrix::RowMatrix;
 use vector_search::recall::compute_recall_at_k;
 
-/// Helper: builds a small deterministic 2D synthetic dataset of 100 vectors.
-fn make_synthetic_2d_matrix() -> RowMatrix<f32> {
-    let mut rows = Vec::new();
-    for i in 0..100 {
-        let x = (i as f32) * 1.5;
-        let y = ((i * 7) % 31) as f32;
-        rows.push(vec![x, y]);
-    }
-    RowMatrix::from_rows(&rows).unwrap()
-}
-
-fn make_synthetic_index(matrix: &RowMatrix<f32>) -> HnswIndex<'_> {
-    let config = HnswConfig {
-        m: 16,
-        ef_construction: 64,
-        seed: 42,
-        ..Default::default()
-    };
-    HnswIndex::build(matrix, Metric::L2Squared, config).unwrap()
-}
-
 #[test]
 fn test_strategy2_normal_intraversal_finds_k_matches() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let query = [10.0_f32, 5.0_f32];
     let k = 5;
 
@@ -175,8 +156,8 @@ fn test_strategy2_bridge_node_routing_through_non_matching_nodes() {
 
 #[test]
 fn test_strategy2_hop_budget_exhaustion_sparse_matches() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let query = [0.0_f32, 0.0_f32];
     let k = 10;
 
@@ -207,8 +188,8 @@ fn test_strategy2_hop_budget_exhaustion_sparse_matches() {
 
 #[test]
 fn test_strategy2_zero_matches_sets_hop_budget_exhausted() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let query = [10.0_f32, 5.0_f32];
     let k = 5;
 
@@ -239,15 +220,12 @@ fn test_strategy2_zero_matches_sets_hop_budget_exhausted() {
 
 #[test]
 fn test_strategy2_sift10k_recall_against_ground_truth() {
-    let sift_base_path = Path::new("data/siftsmall/siftsmall_base.fvecs");
-    let sift_query_path = Path::new("data/siftsmall/siftsmall_query.fvecs");
-
-    if !sift_base_path.exists() || !sift_query_path.exists() {
+    let Some(loaded) = load_siftsmall_or_skip("test_strategy2_sift10k_recall_against_ground_truth")
+    else {
         return;
-    }
-
-    let base = read_fvecs(sift_base_path).expect("Failed to read siftsmall_base.fvecs");
-    let queries = read_fvecs(sift_query_path).expect("Failed to read siftsmall_query.fvecs");
+    };
+    let base = loaded.base;
+    let queries = loaded.query;
     let n = base.rows();
     assert_eq!(n, 10_000);
 
@@ -306,8 +284,8 @@ fn test_strategy2_sift10k_recall_against_ground_truth() {
 
 #[test]
 fn test_strategy2_unfiltered_search_and_fingerprint_bit_identical() {
-    let matrix = make_synthetic_2d_matrix();
-    let mut index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let mut index = make_synthetic_2d_index(&matrix);
     let query = [15.0_f32, 8.0_f32];
     let k = 5;
     let ef_search = 50;
@@ -384,8 +362,8 @@ fn test_strategy2_canonical_tie_breaking() {
 
 #[test]
 fn test_strategy2_input_validation() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let bitset = DenseBitset::ones(100);
     let params = FilteredSearchParams::default();
     let query = [1.0_f32, 2.0_f32];
@@ -433,8 +411,8 @@ fn test_strategy2_input_validation() {
 
 #[test]
 fn test_strategy2_opaque_lambda_predicate_and_eval_limit() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let query = [10.0_f32, 5.0_f32];
     let k = 5;
 
@@ -473,8 +451,8 @@ fn test_strategy2_opaque_lambda_predicate_and_eval_limit() {
 
 #[test]
 fn test_strategy2_batch_sequential_and_parallel_parity() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let q_rows = vec![
         vec![5.0_f32, 2.0],
         vec![15.0, 8.0],
@@ -505,8 +483,8 @@ fn test_strategy2_batch_sequential_and_parallel_parity() {
 
 #[test]
 fn test_strategy2_unified_dispatch_and_scratch() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let query = [20.0_f32, 10.0_f32];
     let k = 5;
 
@@ -547,8 +525,8 @@ fn test_strategy2_unified_dispatch_and_scratch() {
 
 #[test]
 fn test_strategy2_eval_limit_strict_stop_and_zero_limit() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let query = [10.0_f32, 5.0_f32];
 
     // eval_limit = Some(0) with max_bridge_hops = Some(0) sets eval_limit_reached cleanly without hop_budget_exhausted
@@ -605,8 +583,8 @@ fn test_strategy2_eval_limit_strict_stop_and_zero_limit() {
 
 #[test]
 fn test_strategy2_scratch_zero_reallocation_and_undersized_error() {
-    let matrix = make_synthetic_2d_matrix();
-    let index = make_synthetic_index(&matrix);
+    let matrix = make_synthetic_2d_matrix(100);
+    let index = make_synthetic_2d_index(&matrix);
     let bitset = DenseBitset::ones(100);
 
     // effective_ef (100) + m_max0 (32) > num_nodes (100), yet frontier must not grow
