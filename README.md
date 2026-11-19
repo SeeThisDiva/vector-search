@@ -1,7 +1,87 @@
 # Vector Search: HNSW from Scratch in Safe Rust
 
-A from-scratch **Rust** (`#![forbid(unsafe_code)]`, `std`-only) Approximate Nearest Neighbor (ANN) vector search library and reproducible benchmark suite, cross-verified against **FAISS** (`IndexFlatL2`, `IndexHNSWFlat`) and official **INRIA Texmex SIFT** ground truth, grounded in:
+A `#![forbid(unsafe_code)]`, `std`-only Rust HNSW approximate nearest neighbor library and benchmark suite cross-verified against FAISS (`IndexFlatL2`, `IndexHNSWFlat`) and INRIA Texmex SIFT ground truth.
+
+![SIFT1M Recall@10 vs Single-Thread Latency Pareto Frontier and Matched C2 Build/RSS](results/hero_recall_vs_latency.png)
+
+Benchmarks compare single-threaded Rust `HnswIndex` against FAISS `IndexHNSWFlat` on 1 million 128-dimensional SIFT1M vectors (10,000 queries) on the same Windows `x86_64` machine, with Recall@10 measured against official INRIA Texmex exact ground truth. At `M=16, efConstruction=100` (C2), FAISS is about 1.5x faster per query across matched recall targets and builds faster (`404.120 s` vs `625.665 s` single-threaded; `76.360 s` on 16 threads). Rust cuts isolated peak RSS by `44.5%` (`654.53 MiB` vs `1,180.04 MiB`) because it borrows the base matrix instead of duplicating it. With reverse-edge pruning backfill disabled (`C2-nkp`) or `M=8` (`C1`), single-thread Rust matches or exceeds FAISS throughput at high recall (`0.995` and `0.98`), while trailing on default `C2`.
+
+| SIFT1M Config (1M, 1-Thread) | Batch mean latency / QPS @ recall 0.95 | Batch mean latency / QPS @ recall 0.995 (or 0.98 for C1) | 1-Thread Build (s) | Peak RSS (MiB) |
+|---|---:|---:|---:|---:|
+| **Rust C2** (`M=16, efC=100`, default) | `0.3628 ms` / `2,755.84` | `0.995`: `1.3805 ms` / `724.36` | `625.665` | **`654.53`** |
+| **Rust C2-nkp** (`M=16, efC=100`, no backfill) | `0.2930 ms` / `3,413.07` | `0.995`: **`0.9026 ms` / `1,107.94`** | `428.827` | **`654.32`** |
+| **FAISS C2** (`M=16, efC=100`, `SIMD=NONE`) | **`0.2298 ms` / `4,350.54`** | `0.995`: `0.9361 ms` / `1,068.30` | **`404.120`** *(16T: `76.360`)* | `1,180.04` |
+| **Rust C1 vs FAISS C1** (`M=8, efC=100`) | `0.4088` vs `0.3771 ms` (`2,445.95` vs `2,651.72`) | `0.98`: **`0.7370`** vs `0.9246 ms` (**`1,356.90`** vs `1,081.52`) | `313.285` vs `277.695` | **`594.31`** vs `1,118.32` |
+
+*Chart plots single-thread per-query median (p50) latency across all configs; table reports single-thread batch mean latency and QPS at matched recall (log-linear interpolated without extrapolation from [`results/phase7/matched_recall_summary.json`](results/phase7/matched_recall_summary.json) and [`results/CLAIMS.md`](results/CLAIMS.md)).*
+
+*(Hero chart: [`scripts/plot_hero.py`](scripts/plot_hero.py): [PNG](results/hero_recall_vs_latency.png) | [SVG](results/hero_recall_vs_latency.svg))*
+
+## Reproduce
+
+Commands below come directly from the repository Quickstart and CI gate (pass `--dataset synthetic` or `--synthetic --offline` on Rust binaries to run without downloading SIFT files):
+
+```bash
+# Format, clippy, Rust tests, and Python checks
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings && cargo clippy --all-targets --features instrument -- -D warnings
+cargo test --release && cargo test --release --features instrument --test challenge_m1_p35_tests --test rust_phase3_tests --test rust_filtered_counters_tests
+python -m pytest tests/ -rs --cov=src && ruff check . && mypy --config-file mypy.ini src tests scripts
+
+# Download siftsmall and run Phases 1-2
+cargo run --release --bin phase1 -- --dataset siftsmall --k 10 --json-out data/phase1_report.json
+cargo run --release --bin phase2 -- --dataset siftsmall --json-out data/phase2_report.json
+
+# Phase 7 Rust vs FAISS C2 at 100k (requires SIFT1M download + pip install -r requirements.txt)
+cargo run --release --bin phase7 -- --dataset sift1m --scale 100000 --m 16 --ef-construction 100 --compare-mode single --threads 1 --affinity 0x0004 --profile-rss-isolated --json-out results/phase7/rust_n100000_C2.json
+python scripts/benchmark_faiss.py --dataset sift1m --scale 100000 --m 16 --ef-construction 100 --compare-mode single --threads 1 --affinity 0x0400 --profile-rss-isolated --json-out results/phase7/faiss_n100000_C2.json
+
+# Phase 5 filtered search matrix at 100k
+cargo run --release --bin phase5 -- --matrix --scale 100000 --reps 5 --include-sensitivity --output-dir results/phase5
+
+# Regenerate README charts from tracked result JSONs
+python scripts/plot_hero.py
+python scripts/plot_filter_collapse.py
+```
+
+## Why "search then filter" collapses
+
+If only 1 in 1,000 vectors matches a filter ($\sigma = 0.001$), searching first then filtering must fetch at least 10,000 candidates to find 10 matches; past the 4,096-candidate cap it runs out of results, dropping `Recall@10` to `0.4220` (uniform) and down to `0.2197` even at $\sigma = 0.01$ when predicates correlate with vector location.
+
+![1M SIFT1M Post-Filter Collapse](results/filter_collapse.png)
+
+Filtering *after* an unfiltered top-$K'$ HNSW search (`S1_post_filter`) collapses when predicates become selective:
+
+- **The $k/\sigma$ candidate wall (`Mode A`, uniform):** With selectivity $\sigma$, an unfiltered top-$K'$ neighborhood contains roughly $\sigma K'$ matches, so returning $k = 10$ hits needs $K' \approx k/\sigma$ (`10,000` at $\sigma = 0.001$, or `19,768` with the `99.9%`-confidence factor $\gamma \approx 1.98$). Beyond `overfetch_cap = 4096` (`K'_max`), queries run out of candidates: at `1M` $\sigma = 0.001$, **`98.7%` hit the cap** and return `< k` results (`Recall@10 = 0.4220`, `54.718 ms p99`; [`cell_n1000000_independent_s0.001000.json`](results/phase5/cell_n1000000_independent_s0.001000.json)), dropping to `0.2110` (`100.0%` capped) at $\sigma = 0.0005$ ([`cell_n1000000_independent_s0.000500.json`](results/phase5/cell_n1000000_independent_s0.000500.json)).
+- **Correlated filters fail at much higher selectivity (`Mode B`):** When the predicate correlates with vector location (Voronoi clusters), queries outside active clusters find no nearby matches, shifting the `R@10 >= 0.95` crossover `~5.1×` higher (`0.023799 -> 0.120868`; [`summary_n1000000.json`](results/phase5/summary_n1000000.json)). At $\sigma = 0.01$, `S1_cap4096` still hits `0.9977` recall (`0.0%` capped) on independent `Mode A` ([`cell_n1000000_independent_s0.010000.json`](results/phase5/cell_n1000000_independent_s0.010000.json)), but drops to `0.2197` (`79.7%` cap-hit) on correlated `Mode B` ([`cell_n1000000_correlated_s0.010000.json`](results/phase5/cell_n1000000_correlated_s0.010000.json)); sweeping $\gamma \in \{\text{formula}, 1, 2, 5\}$ stalls at `0.2288–0.2304` recall (`79.4%` cap-hit; [`sensitivity_n1000000.json`](results/phase5/sensitivity_n1000000.json)).
+- **Uncapping trades starvation for tail-latency blow-up:** Dropping the cap (`S1_uncap_ef100`) rescues recall (`0.9880` at Mode B $\sigma = 0.075$) but forces massive Layer-0 graph crawls at **`2,619.118 ms` `p99`** (`3.17 QPS`; [`cell_n1000000_correlated_s0.075000.json`](results/phase5/cell_n1000000_correlated_s0.075000.json)).
+
+| `1M` Workload (`ef=100` for `S1`/`S2`) | `S1_cap4096` R@10 / `p99` (`cap%`) | `S1_uncap` R@10 / `p99` | `S2` In-Traversal R@10 / `p99` (`<k%`) | `S3` Exact `DenseBitset` R@10 / `p99` | Source JSON |
+|---|---|---|---|---|---|
+| Mode A (`ind.`), $\sigma=0.001$ | `0.4220` / `54.718 ms` (`98.7%`) | *Skipped (`<0.05`)* | `0.7753` / `183.791 ms` (`34.0%`) | **`1.0000` / `0.250 ms`** (`0%`) | [`cell_n1000000_independent_s0.001000.json`](results/phase5/cell_n1000000_independent_s0.001000.json) |
+| Mode B (`corr.`), $\sigma=0.01$ | `0.2197` / `27.558 ms` (`79.7%`) | *Skipped (`<0.05`)* | `0.2923` / `96.721 ms` (`71.3%`) | **`1.0000` / `2.585 ms`** (`0%`) | [`cell_n1000000_correlated_s0.010000.json`](results/phase5/cell_n1000000_correlated_s0.010000.json) |
+| Mode B (`corr.`), $\sigma=0.075$ | `0.5539` / `47.658 ms` (`47.3%`) | `0.9880` / `2,619.118 ms` | `0.6643` / `127.462 ms` (`34.2%`) | **`1.0000` / `13.106 ms`** (`0%`) | [`cell_n1000000_correlated_s0.075000.json`](results/phase5/cell_n1000000_correlated_s0.075000.json) |
+| Mode B (`corr.`), $\sigma=0.50$ | `0.9635` / `6.636 ms` (`0.0%`) | `0.9635` / `6.629 ms` | **`0.9882` / `6.393 ms`** (`0.0%`) | `1.0000` / `60.197 ms` (`0%`) | [`cell_n1000000_correlated_s0.500000.json`](results/phase5/cell_n1000000_correlated_s0.500000.json) |
+
+- **The Fix:**
+  1. **Moderate/high $\sigma$ ($\sigma > \sigma^*$):** Use **`S2_in_traversal`** (admitting only matching nodes while traversing non-matching bridges; [`results/phase5/FINDINGS.md`](results/phase5/FINDINGS.md)).
+  2. **Low $\sigma$ ($\sigma \le \sigma^*$):** Switch to **`S3_pre_filter`** exact `DenseBitset` scan below the matched-recall crossover (`0.023799` Mode A, `0.120868` Mode B at `1M`; [`summary_n1000000.json`](results/phase5/summary_n1000000.json)) for `1.0000` recall and `0%` under-fill.
+  3. **Opaque closures:** Enable `FilteredSearchParams::with_opaque_eval_limit()` (`DEFAULT_OPAQUE_EVAL_LIMIT = 16_384`) to bound runaway predicate scans (`p99` `53.729 ms -> 4.797 ms`, `11.20×` at Mode B $\sigma = 0.01$; [`sensitivity_n1000000.json`](results/phase5/sensitivity_n1000000.json)). Figure: [`scripts/plot_filter_collapse.py`](scripts/plot_filter_collapse.py) ([SVG](results/filter_collapse.svg)).
+
+## Limitations
+
+- **SIFT1M only:** Scale, quantization, filtered, and head-to-head benchmarks cover INRIA Texmex `SIFT1M` (`128`-d `f32`, L2 distance; plus `siftsmall` in Phases 1–2). Other vector datasets, dimensionalities, and metrics (`InnerProduct`) are not benchmarked.
+- **One machine:** All timed runs executed on a single Windows `x86_64` laptop (`12th Gen Intel(R) Core(TM) i7-12650H`, `16` logical cores, `15.8 GB` RAM) under the Windows `balanced` power plan.
+- **FAISS wheel built with SIMD off:** Stock PyPI `faiss-cpu 1.15.1` on Windows runs in `SIMDLevel_NONE` (`avx2_available == false`), so comparisons reflect baseline SSE2 builds against default-target `rustc` (`x86_64-pc-windows-msvc`). AVX2 (`-C target-cpu=native` vs an AVX2 FAISS build) is not measured.
+- **Single thread:** Primary head-to-head curves compare single-threaded search and sequential Rust builds (`HnswIndex::build` is strictly single-threaded, whereas FAISS `IndexHNSWFlat::add` parallelizes with OpenMP). Multi-thread batch search (`T=6`, `T=16`) is measured only on `C2` (`M=16, efC=100`).
+- **No `hnswlib`:** Benchmarks compare Rust `HnswIndex` against FAISS `IndexHNSWFlat` only; `hnswlib` is not included.
+
+## Headline Details
+
+Grounded in:
 > *Malkov, Y. A., & Yashunin, D. A. (2018). Efficient and robust approximate nearest neighbor search using Hierarchical Navigable Small World graphs. IEEE TPAMI, 42(4), 824–836.*
+
+This project implements a safe, zero-dependency Rust HNSW index and benchmarks it single-threaded against Meta's FAISS (`IndexHNSWFlat`, baseline SSE2) on 1 million 128-dimensional SIFT1M vectors (10,000 queries, top-10 recall). At the default `M=16, efConstruction=100` setting (C2), FAISS is ~1.5x faster per query across recall targets, while Rust cuts peak memory by ~44.5% (654.53 vs 1,180.04 MiB) by borrowing the base vectors instead of copying them. With reverse-edge pruning backfill disabled (C2-nkp) or with a sparser `M=8` graph (C1), Rust matches or beats FAISS at high recall (1.04x QPS at 0.995 recall for C2-nkp; 1.25x QPS at 0.98 recall for C1, where Rust reaches 0.9947 while FAISS C1 caps at 0.9896). All curves compare single-thread runs; FAISS also supports multi-threaded index builds (76.360 s on 16 threads vs 404.120 s single-threaded), whereas Rust's deterministic builder is strictly single-threaded (428.827 s for C2-nkp, 625.665 s for default C2).
 
 ## Overview & Key Properties
 
@@ -125,6 +205,8 @@ Swept **`23 configurations`** ($M \in \{8, 12, 16, 24, 32, 48\}$, $\text{efConst
 - **Charts ([`scripts/plot_phase4.py`](scripts/plot_phase4.py)):** [`chart1_recall_vs_p99`](results/phase4/chart1_recall_vs_p99.png) ([SVG](results/phase4/chart1_recall_vs_p99.svg)), [`chart2_recall_vs_qps`](results/phase4/chart2_recall_vs_qps.png) ([SVG](results/phase4/chart2_recall_vs_qps.svg)), [`chart3_build_time_vs_recall`](results/phase4/chart3_build_time_vs_recall.png) ([SVG](results/phase4/chart3_build_time_vs_recall.svg)), [`chart4_memory_vs_m`](results/phase4/chart4_memory_vs_m.png) ([SVG](results/phase4/chart4_memory_vs_m.svg)).
 
 ### Phase 5: Filtered Search, Crossovers & Opaque Guardrail
+
+#### Full Crossover Summary & Opaque Guardrail
 
 Evaluates `S1_post_filter` (`K'_max=4,096`, uncapped $\sigma \ge 0.05$), `S2_in_traversal`, and `S3_pre_filter` (`DenseBitset`, `T3.6` L1-hot primitives `t_word=0.3042 ns`, `t_cand=23.878 ns`) across Mode A (`independent`) & Mode B (`correlated`) predicates and 12 selectivities $\sigma \in [0.0005, 0.50]$ (`M=16, efC=100, seed=42, reps=5`; [`results/phase5/FINDINGS.md`](results/phase5/FINDINGS.md)):
 
