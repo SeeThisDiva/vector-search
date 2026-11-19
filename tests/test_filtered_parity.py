@@ -48,7 +48,7 @@ def numpy_filtered_exact_knn(
     for q_idx, q in enumerate(queries):
         diff = matching_base - q
         # Pairwise squared Euclidean distance
-        dists = np.sum(diff * diff, axis=1, dtype=np.float32)
+        dists = np.asarray(np.sum(diff * diff, axis=1, dtype=np.float32), dtype=np.float32)
         np.maximum(0.0, dists, out=dists)
 
         # Canonical tie-breaking: primary = dists, secondary = valid_ids

@@ -198,7 +198,7 @@ def sq8_asymmetric_inner_product(
     c_ip = np.sum(q * cal.mins, dtype=np.float32)
     q_scaled = (q * cal.scales).astype(np.float32)
     dots = np.sum(u8.astype(np.float32) * q_scaled, axis=1, dtype=np.float32)
-    return (c_ip + dots).astype(np.float32)
+    return np.asarray(c_ip + dots, dtype=np.float32)
 
 
 # ============================================================================
@@ -456,7 +456,7 @@ def exact_l2_squared_topk(
     out = np.empty((query_mat.shape[0], eff_k), dtype=np.int32)
     for q_idx, q in enumerate(query_mat):
         diff = base_mat - q[None, :]
-        dists = np.sum(diff * diff, axis=1, dtype=np.float32)
+        dists = np.asarray(np.sum(diff * diff, axis=1, dtype=np.float32), dtype=np.float32)
         np.maximum(np.float32(0.0), dists, out=dists)
         order = np.lexsort((ids_all, dists))
         out[q_idx] = ids_all[order[:eff_k]]
@@ -497,7 +497,7 @@ def rerank_top_r_search(
     cand_ids = beam_ids[:eff_r]
 
     diff = base_mat[cand_ids] - q[None, :]
-    exact_dists = np.sum(diff * diff, axis=1, dtype=np.float32)
+    exact_dists = np.asarray(np.sum(diff * diff, axis=1, dtype=np.float32), dtype=np.float32)
     np.maximum(np.float32(0.0), exact_dists, out=exact_dists)
     rerank_order = np.lexsort((cand_ids, exact_dists))
     return cand_ids[rerank_order[:eff_k]].astype(np.int32)
@@ -632,7 +632,10 @@ def test_sq8_shifted_kernel_resists_cancellation() -> None:
     q_hat = (q_shifted * cal.scales).astype(np.float32)
     scaled_c = codes.astype(np.float32) * cal.scales
     b_norms = np.sum(scaled_c * scaled_c, axis=1, dtype=np.float32)
-    d_expanded = c_q - np.float32(2.0) * np.sum(codes.astype(np.float32) * q_hat, axis=1, dtype=np.float32) + b_norms
+    d_expanded = np.asarray(
+        c_q - np.float32(2.0) * np.sum(codes.astype(np.float32) * q_hat, axis=1, dtype=np.float32) + b_norms,
+        dtype=np.float32,
+    )
     err_shifted = np.max(np.abs(d_shifted[1:].astype(np.float64) - d_f64[1:]))
     err_expanded = np.max(np.abs(d_expanded[1:].astype(np.float64) - d_f64[1:]))
     assert err_shifted < 1e-4
