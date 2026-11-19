@@ -351,12 +351,9 @@ fn test_strategy2_canonical_tie_breaking() {
 
     assert_eq!(output.results.len(), 4);
     // All distances are identical (25.0), so IDs must sort strictly ascending: 0, 1, 2, 3
-    for i in 0..4 {
-        assert_eq!(
-            output.results[i].1, i,
-            "Ties must be broken by ID ascending"
-        );
-        assert_eq!(output.results[i].0, 25.0);
+    for (i, item) in output.results.iter().enumerate().take(4) {
+        assert_eq!(item.1, i, "Ties must be broken by ID ascending");
+        assert_eq!(item.0, 25.0);
     }
 }
 
