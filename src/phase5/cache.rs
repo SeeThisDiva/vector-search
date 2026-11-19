@@ -150,7 +150,7 @@ pub fn load_or_generate_predicate_cache(
     attr_seed: u64,
     clust_seed: u64,
 ) -> Result<PredicateCacheArtifact> {
-    if !sigma.is_finite() || sigma < 0.0 || sigma > 1.0 {
+    if !sigma.is_finite() || !(0.0..=1.0).contains(&sigma) {
         return Err(VectorSearchError::InvalidArgument(format!(
             "Selectivity sigma must lie in [0.0, 1.0], got {sigma}"
         )));
