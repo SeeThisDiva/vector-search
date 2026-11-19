@@ -72,7 +72,7 @@ Filtering *after* an unfiltered top-$K'$ HNSW search (`S1_post_filter`) collapse
 
 - **SIFT1M only:** Scale, quantization, filtered, and head-to-head benchmarks cover INRIA Texmex `SIFT1M` (`128`-d `f32`, L2 distance; plus `siftsmall` in Phases 1–2). Other vector datasets, dimensionalities, and metrics (`InnerProduct`) are not benchmarked.
 - **One machine:** All timed runs executed on a single Windows `x86_64` laptop (`12th Gen Intel(R) Core(TM) i7-12650H`, `16` logical cores, `15.8 GB` RAM) under the Windows `balanced` power plan.
-- **FAISS wheel built with SIMD off:** Stock PyPI `faiss-cpu 1.15.1` on Windows runs in `SIMDLevel_NONE` (`avx2_available == false`), so comparisons reflect baseline SSE2 builds against default-target `rustc` (`x86_64-pc-windows-msvc`). AVX2 (`-C target-cpu=native` vs an AVX2 FAISS build) is not measured.
+- **FAISS wheel built with SIMD off:** Stock PyPI `faiss-cpu 1.15.1` on Windows runs in `SIMDLevel_NONE` (`avx2_available == false`), so comparisons reflect baseline SSE2 builds against default-target `rustc` (host triple was not recorded in the result JSONs; current builds use `x86_64-pc-windows-gnu`). AVX2 (`-C target-cpu=native` vs an AVX2 FAISS build) is not measured.
 - **Single thread:** Primary head-to-head curves compare single-threaded search and sequential Rust builds (`HnswIndex::build` is strictly single-threaded, whereas FAISS `IndexHNSWFlat::add` parallelizes with OpenMP). Multi-thread batch search (`T=6`, `T=16`) is measured only on `C2` (`M=16, efC=100`).
 - **No `hnswlib`:** Benchmarks compare Rust `HnswIndex` against FAISS `IndexHNSWFlat` only; `hnswlib` is not included.
 
@@ -246,7 +246,7 @@ Isolated [`src/quantized/`](src/quantized/mod.rs) keeps [`src/hnsw/`](src/hnsw/m
 
 ### Phase 7: Head-to-Head vs FAISS `IndexHNSWFlat`
 
-Compares safe Rust `HnswIndex` against `faiss-cpu 1.15.1` `IndexHNSWFlat(128, M, METRIC_L2)` across `C1 (8,100)`, `C2 (16,100)`, `C3 (32,200)`, and `C2-nkp (16,100, keep_pruned_shrink=false)` at `100k` (`3` builds, `5` query reps) and `1M` (`1` build, `5` query reps) in [`results/phase7/FINDINGS.md`](results/phase7/FINDINGS.md) & [`matched_recall_summary.json`](results/phase7/matched_recall_summary.json). **SIMD Baseline Disclosure:** Stock PyPI `faiss-cpu 1.15.1` on Windows ships in **`SIMDLevel_NONE`** (`avx2_available == false`), matching default-target Rust SSE2 (`x86_64-pc-windows-msvc`); AVX2 (`-C target-cpu=native` vs AVX2 FAISS) is unmeasured.
+Compares safe Rust `HnswIndex` against `faiss-cpu 1.15.1` `IndexHNSWFlat(128, M, METRIC_L2)` across `C1 (8,100)`, `C2 (16,100)`, `C3 (32,200)`, and `C2-nkp (16,100, keep_pruned_shrink=false)` at `100k` (`3` builds, `5` query reps) and `1M` (`1` build, `5` query reps) in [`results/phase7/FINDINGS.md`](results/phase7/FINDINGS.md) & [`matched_recall_summary.json`](results/phase7/matched_recall_summary.json). **SIMD Baseline Disclosure:** Stock PyPI `faiss-cpu 1.15.1` on Windows ships in **`SIMDLevel_NONE`** (`avx2_available == false`), matching default-target Rust SSE2 (host triple was not recorded in the result JSONs; current builds use `x86_64-pc-windows-gnu`); AVX2 (`-C target-cpu=native` vs AVX2 FAISS) is unmeasured.
 
 | Scale | Config (`T=1` unless noted) | Build Time (Rust vs FAISS `s`) | Graph-Only (`B/vec`) | Isolated Peak RSS (Rust vs FAISS `MiB`) |
 |---:|---|---|---|---|
