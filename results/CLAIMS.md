@@ -17,6 +17,9 @@ Every documented number is mapped to its exact document location, source JSON re
 | Host Architecture | `x86_64` | [`README.md` §Verified Benchmark Highlights](../README.md#verified-benchmark-highlights-phases-17) | `results/phase3/phase3_report.json` | `hardware.arch` | `"x86_64"` | `78e8fcb` | AMD64 / AVX2 supported |
 | Hardware Summary String | `12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)` | [`README.md` §Verified Benchmark Highlights](../README.md#verified-benchmark-highlights-phases-17) | `results/phase3/phase3_report.json` | `hardware.summary` | `"12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)"` | `78e8fcb` | Standardized hardware probe |
 | Compiler Profile | `--release` | [`README.md` §Verified Benchmark Highlights](../README.md#verified-benchmark-highlights-phases-17) | `results/phase3_5/LOG.md` | `Section 0` | `opt-level = 3, lto = "thin", codegen-units = 1` | `78e8fcb` | rustc >= 1.88 (`1.99.1`) |
+| Post-Refactor Sentinel (`C2@100k`) | `HEAD` re-verified at `8f7649c`, `231` tests pass, `C2@100k` `p50` within `3.2%` | [`README.md` §Verified Benchmark Highlights](../README.md#verified-benchmark-highlights-phases-17) | Local alternating sentinel (`8f7649c` vs `70f28b4`, `3` builds x `3` runs each) | `ef_search_sweep[*].p50_ms`, `mode1_qps` | Max `|Δp50| = 3.11%` matched (`3.17%` raw `ef=50`); clean `ef=40,50` re-check `-0.40%` / `-0.87%` `p50` | `8f7649c` | `Balanced` plan, `0x0004`, bit-identical `0x80af03bd7aebaade` |
+
+Numbers generated at the commit recorded in each result JSON; HEAD re-verified at 8f7649c, 231 tests pass, C2@100k p50 within 3.2%.
 
 ---
 

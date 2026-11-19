@@ -158,6 +158,8 @@ python -m pytest tests/ -rs --cov=src && ruff check . && mypy --config-file mypy
 
 All timed benchmarks ran in `--release` (`opt-level = 3, lto = "thin", codegen-units = 1`) on `12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)` with `git_dirty: false`. Every value below maps to a source JSON path in [`results/CLAIMS.md`](results/CLAIMS.md).
 
+Numbers generated at the commit recorded in each result JSON; HEAD re-verified at 8f7649c, 231 tests pass, C2@100k p50 within 3.2%.
+
 ### Phases 1–2: Exact Baseline & 10k HNSW (`siftsmall`)
 
 - **Phase 1 Exact Brute-Force `ExactKnn`** (`10,000` base $\times$ `128`-d `float32`, `100` queries, $k=10$): **`~3,640+ QPS`**, `p50 = 0.250 ms`, `p95 = 0.379 ms`, `p99 = 0.520 ms`; `Recall@10(GT, GT) = 100.00% (1.000000)` self-recall; **`100.00%`** (`1000/1000`) official Texmex alignment; **`100.00%`** (`100%` ID alignment) vs `faiss.IndexFlatL2`.
