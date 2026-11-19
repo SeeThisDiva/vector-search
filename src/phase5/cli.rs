@@ -1353,7 +1353,6 @@ fn run_matrix_cli(config: &CliConfig) -> Result<()> {
 }
 
 /// Executes the Phase 5 CLI from `std::env::args()` and returns a process [`ExitCode`].
-#[must_use]
 pub fn run_phase5_cli() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     let config = match parse_cli_args(&args) {
