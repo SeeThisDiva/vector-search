@@ -16,7 +16,7 @@ At $N = 10^6$ vectors, `512 B/vector` is comfortably in-RAM on a 16 GB laptop, y
 - **Product Quantization (`PQ`, Stretch Goal)**: splits $D=128$ into $M_{\text{pq}} \in \{16, 32\}$ subspaces with $K=256$ centroids per subspace (`16 B/vector` or `32 B/vector`, **32x** or **16x** vector compression), reducing vector payload below 10–18% of total memory and converting inner-loop distance evaluation into L1-resident lookup-table additions (Asymmetric Distance Computation, ADC).
 
 ### 1.2 Mission Objectives
-1. **Strict Separation from `f32` `HnswIndex`**: Keep [`src/hnsw.rs`](../../src/hnsw.rs) (`HnswIndex<'a>`) and all Phase 1–5 `f32` paths untouched and verified bit-identical (`PRESERVING` non-regression guarantee). All quantized indexes live in dedicated types (`HnswSq8Index`, `HnswPqIndex`) inside a new `src/quantized/` module.
+1. **Strict Separation from `f32` `HnswIndex`**: Keep [`src/hnsw/mod.rs`](../../src/hnsw/mod.rs) (`HnswIndex<'a>`) and all Phase 1–5 `f32` paths untouched and verified bit-identical (`PRESERVING` non-regression guarantee). All quantized indexes live in dedicated types (`HnswSq8Index`, `HnswPqIndex`) inside a new `src/quantized/` module.
 2. **SQ8 Architecture (Primary)**:
    - Per-dimension min/max calibration (`mins` + `scales` of length $D$).
    - Safe `#![forbid(unsafe_code)]`, `std`-only 8-way unrolled (`as_chunks::<8>()`) asymmetric `f32` query vs `u8` code $L_2^2$ and symmetric `u8`-vs-`u8` $L_2^2$ kernels with zero per-dimension float division in the inner loop.
@@ -245,7 +245,7 @@ The `f32` Phase 4 figures below are **verified measurements** from [`results/pha
 *(Note: Adding `M=8, efC=100` where Phase 4 measured `85.44 B/vec` graph-only and `583.42 MiB` Peak RSS yields estimated payloads of `~213.44 B/vec` (`~203.55 MiB`) for `SQ8-Only` and `~101.57 B/vec` (`~96.87 MiB`) for `PQ16-Only`.)*
 
 #### 3.3.1 Critical Engineering Note on `PeakWorkingSet64` (Build-Time vs. Query-Time RSS)
-In [`src/phase4.rs`](../../src/phase4.rs) and [`src/hardware.rs`](../../src/hardware.rs), `peak_rss_mb` records Windows `PeakWorkingSet64` (`peak_rss_scope: "process_lifetime_high_water_mark"`). Because a process lifetime high-water mark **never decreases** when `drop(base_f32)` runs:
+In [`src/phase4/mod.rs`](../../src/phase4/mod.rs) and [`src/hardware.rs`](../../src/hardware.rs), `peak_rss_mb` records Windows `PeakWorkingSet64` (`peak_rss_scope: "process_lifetime_high_water_mark"`). Because a process lifetime high-water mark **never decreases** when `drop(base_f32)` runs:
 - If a single process loads `RowMatrix<f32>` (`488.28 MiB`), builds an `f32` HNSW graph (`142.01 MiB`), and encodes SQ8 (`122.07 MiB`), `PeakWorkingSet64` will report **`~752+ MiB`** even after `RowMatrix<f32>` is dropped!
 - To measure the **true ~60% RAM reduction** honestly via OS `PeakWorkingSet64` (without guessing or filtering numbers):
   1. **Two-Pass Streaming `.fvecs` Calibration + Quantized Build (`build_sq8_streaming_from_fvecs`)**:
@@ -302,7 +302,7 @@ If Dev approves **SQ8 + PQ** at Gate G5, Phase 6 implements **Product Quantizati
 2. **Per-Subspace Independent $k$-means++ & Lloyd Refinement** (for each $m \in \{0, \dots, M_{\text{pq}}-1\}$):
    - Copy the $N_{\text{train}} \times d_{\text{sub}}$ subvectors into a contiguous scratch matrix (`2.0 MiB` for $M_{\text{pq}}=16$, `1.0 MiB` for $M_{\text{pq}}=32$ — L2/L3-cache resident!).
    - **Effective Centroid Count ($N_{\text{train}} < 256$ edge case)**: let $K_{\text{eff}} = \min(256, N_{\text{train}})$. Train $K_{\text{eff}}$ centroids cleanly; if $K_{\text{eff}} < 256$, populate remaining slots `K_eff..256` with copies of centroid `0` and restrict `encode` `argmin` to `0..K_eff` so degenerate small datasets never produce NaN/Inf or unused-slot matches.
-   - **$k$-means++ Initialization** (mirroring `deterministic_kmeans_plus_plus` in [`src/dataset.rs`](../../src/dataset.rs) on the $d_{\text{sub}}$ slice):
+   - **$k$-means++ Initialization** (mirroring `deterministic_kmeans_plus_plus` in [`src/dataset/metadata.rs`](../../src/dataset/metadata.rs) on the $d_{\text{sub}}$ slice):
      1. Pick first centroid uniformly (`rng.next_usize(n_train)`).
      2. Maintain `min_sq_dist[i]` to nearest chosen centroid so far.
      3. Sample remaining $K_{\text{eff}} - 1$ centroids with probability proportional to $D(x_i)^2$ using `f64` cumulative sum and `rng.next_f64_open01()`.

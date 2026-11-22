@@ -198,7 +198,7 @@ All 4 benchmark Pareto charts exist in `results/phase4/` in both PNG (300 DPI) a
 
 ## 4. Full Gate Execution Results
 
-Executed from the workspace root (`c:\Users\Dev Gupta\OneDrive\Documents\Project\vector search`), individually capturing real exit codes and outputs.
+Executed from the repository root, individually capturing real exit codes and outputs.
 
 ### 4.1 Gate Summary Table
 

@@ -9,4 +9,4 @@
 3. **Top-$R$ Rerank Ladder:** `R in {None, 20, 30, 50, 100}` for SQ8 (extending to `R = 200` for PQ) plus `FullBeam` (`R = ef_search`), enforcing `effective_ef = ef_search.max(R).max(k)`.
 4. **Build Precision:** Primary **`Float32GraphThenQuantize`** across all configs + **`QuantizedDirect`** ablation at `100k` (plus `1M` `Sq8Only` streaming build if `T4.6` budget permits).
 5. **Graph Configs & Scales:** Mandatory **`M=16, efConstruction=100`** (`100k` and `1M`), plus **`M=32, efConstruction=200`** at `100k` (and `1M` `Sq8Only` pending `T4.6` timing audit).
-6. **Hard Invariants & Pilot Gate:** `#![forbid(unsafe_code)]`, `std`-only crate, [`src/hnsw.rs`](../../src/hnsw.rs) untouched (`PRESERVING` on `f32` paths), and `T4.6` `100k` pilot check before multi-hour `1M` execution.
+6. **Hard Invariants & Pilot Gate:** `#![forbid(unsafe_code)]`, `std`-only crate, [`src/hnsw/mod.rs`](../../src/hnsw/mod.rs) untouched (`PRESERVING` on `f32` paths), and `T4.6` `100k` pilot check before multi-hour `1M` execution.

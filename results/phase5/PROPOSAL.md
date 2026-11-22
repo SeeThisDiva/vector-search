@@ -172,7 +172,7 @@ Using piecewise log-$\sigma$ interpolation on the 5 pilot $\sigma$ points across
 
 ## 6. Proposed Default `eval_limit` for Opaque `LambdaPredicate` Closures
 
-[`DESIGN.md`](./DESIGN.md) §1.4 & §6.1 leave `FilteredSearchParams::default().eval_limit` as `None` pending a T3.7 empirical proposal grounded in opaque closure invocation counts. Notice in [`src/hnsw.rs`](../../src/hnsw.rs) that `eval_limit` is checked **exclusively when `predicate.bitset().is_none()`**—so fast bitset predicates are never truncated by `eval_limit`.
+[`DESIGN.md`](./DESIGN.md) §1.4 & §6.1 leave `FilteredSearchParams::default().eval_limit` as `None` pending a T3.7 empirical proposal grounded in opaque closure invocation counts. Notice in [`src/hnsw/filtered.rs`](../../src/hnsw/filtered.rs) that `eval_limit` is checked **exclusively when `predicate.bitset().is_none()`**—so fast bitset predicates are never truncated by `eval_limit`.
 
 ### 6.1 Empirical Evaluation-Count Distribution (`pilot_100k.json`, $Q=1,000$ queries per row)
 

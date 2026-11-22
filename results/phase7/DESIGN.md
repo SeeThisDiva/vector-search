@@ -63,7 +63,7 @@ Verified probe output with these signatures: `Affinity before: 0xffff -> SetProc
 
 ### 2.3 Installed FAISS Binary & SIMD Provenance
 
-Inspected directly from the local Python environment (`C:\Users\Dev Gupta\AppData\Local\Programs\Python\Python313\python.exe`, `Python 3.13.5`, `MSC v.1943 64 bit (AMD64)`):
+Inspected directly from the local Python environment (`Python 3.13.5`, `MSC v.1943 64 bit (AMD64)`):
 
 | Field | Observed Value | Provenance / Diagnostic Meaning |
 |---|---|---|
