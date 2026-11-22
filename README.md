@@ -282,7 +282,7 @@ Compares safe Rust `HnswIndex` against `faiss-cpu 1.15.1` `IndexHNSWFlat(128, M,
 │   └── hnsw_phase1/           # Python reference implementation & FAISS parity helpers
 ├── scripts/                   # `benchmark_faiss.py`, `plot_hero.py`, `plot_filter_collapse.py`, `plot_phase{4..7}.py` & shared helpers
 ├── tests/                     # 18 Rust integration suites (`common/`) + 6 Python pytest suites (`helpers.py`)
-├── docs/                      # `HNSW_ALGORITHM.md` (math & pseudocode) + `dev/` (handoff & plan docs)
+├── docs/                      # `HNSW_ALGORITHM.md` (math & pseudocode)
 ├── results/                   # `README.md` index, `CLAIMS.md` ledger, `phase3/`..`phase7/` JSONs, findings & charts
 ├── data/                      # Gitignored SIFT corpora, cached prefix GT & bitsets
 └── run_phase1.py              # Python Phase 1 benchmark entry point

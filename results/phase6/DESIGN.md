@@ -1,6 +1,6 @@
 # Milestone M4 / Phase 6: Vector Quantization (SQ8 & PQ) Design Specification
 
-> **Document Status**: DRAFT design specification for Dev's **Gate G5** review (not signed off). Architectural estimates, byte-layout calculations, and expected trade-offs in this document are explicitly marked as **estimates or hypotheses** until traced to a clean-commit JSON report from a real run (`AGENT_PLAN.md` Ground Rule 3).  
+> **Document Status**: Design specification for **Gate G5** review. Architectural estimates, byte-layout calculations, and expected trade-offs in this document are explicitly marked as **estimates or hypotheses** until traced to a clean-commit JSON report from a real run.  
 > **Target Release**: `vector-search` v0.1.0 (Milestone M4 / Phase 6)  
 > **Engineering Invariants**: 100% Safe Rust (`#![forbid(unsafe_code)]`), standard library only (`std`) for the library crate, strict preservation of the `f32` `HnswIndex` graph and search behavior, zero heap allocations inside query inner loops, deterministic `(distance, id)` tie-breaking, and clean-commit JSON provenance.
 
@@ -35,7 +35,7 @@ At $N = 10^6$ vectors, `512 B/vector` is comfortably in-RAM on a 16 GB laptop, y
   - Filtered quantized search (combining Phase 5 bitsets with Phase 6 quantized indexes can be evaluated after M4 if desired, though `CompactHnswGraph` preserves the `u32` neighbor arena shape needed to support it later).
   - Disk-backed / `mmap` raw vector storage for reranking (all Mode 2 rerank benchmarks keep `RowMatrix<f32>` in memory and honestly report its RAM cost).
   - `OPQ` (Optimized Product Quantization / orthogonal rotation matrix) or `4-bit` / `SQ4` SIMD-packed LUTs (PQ16/PQ32 and SQ8 establish the foundational quantization trade-off curve first).
-  - `InnerProduct` recall benchmarking (consistent with `continuation.md`: HNSW diversity heuristic assumes non-negative distance-like values; primary SIFT1M evaluation uses `Metric::L2Squared`, while kernels support `L2Squared`, `Euclidean`, and `InnerProduct` mathematically for parity tests).
+  - `InnerProduct` recall benchmarking (HNSW diversity heuristic assumes non-negative distance-like values; primary SIFT1M evaluation uses `Metric::L2Squared`, while kernels support `L2Squared`, `Euclidean`, and `InnerProduct` mathematically for parity tests).
 
 ### 1.4 Recommended Defaults Pending Gate G5 Sign-Off
 
@@ -46,14 +46,14 @@ At $N = 10^6$ vectors, `512 B/vector` is comfortably in-RAM on a 16 GB laptop, y
 | **3** | **Graph Build Precision** | Primary: **`Float32GraphThenQuantize`** (exact Phase 4 graph quality, isolates quantization error) + **Ablation: `QuantizedDirect`** at `100k` (and `1M` `Sq8Only` streaming if 100k delta is acceptable) | `Float32GraphThenQuantize` only, or `QuantizedDirect` only |
 | **4** | **Rerank Depth Sweep ($R$)** | **Fixed ladder `R in {None, 20, 30, 50, 100}`** for SQ8 (plus **`200`** for PQ), with `effective_ef = ef_search.max(R).max(k)`; plus **Full-Beam (`R = ef_search`)** to measure pure rescoring without collapsing low `efSearch` | `R = None` and `R = 100` only |
 | **5** | **HNSW Graph Parameters** | Mandatory reference: **`M=16, efConstruction=100`** (`100k` and `1M`); **Optional Pareto config**: **`M=32, efConstruction=200`** at `100k` (and `1M` only after pilot budget review) | Add **`M=8, efC=100`** for minimum-RAM `Sq8Only`/`Pq16Only` envelope |
-| **6** | **PQ Parameters (if PQ enabled)** | **`M_pq in {16, 32}`**, `K=256` (`16 B/vec` and `32 B/vec`), `N_train = min(N, 65_536)`, `max_iters = 25`, `seed = 42` | `M_pq = 16` only (`AGENT_PLAN.md` starting point) |
+| **6** | **PQ Parameters (if PQ enabled)** | **`M_pq in {16, 32}`**, `K=256` (`16 B/vec` and `32 B/vec`), `N_train = min(N, 65_536)`, `max_iters = 25`, `seed = 42` | `M_pq = 16` only |
 
 ---
 
 ## 2. Strict Isolation from `f32` `HnswIndex`
 
 ### 2.1 `PRESERVING` Invariant for Phases 1–5
-`AGENT_PLAN.md` §5 M4 requires that float32 paths remain completely intact and tested, because the `PRESERVING` guarantees from M1 (`graph_fingerprint()` equality and bit-identical fixed-query results) do not apply to quantized variants.
+Float32 paths must remain completely intact and tested, because the `PRESERVING` guarantees from M1 (`graph_fingerprint()` equality and bit-identical fixed-query results) do not apply to quantized variants.
 
 To make regressions **structurally impossible**:
 1. **`src/hnsw.rs` (`HnswIndex<'a>`) is NOT modified** (zero changes to `HnswIndex` fields, `insert`, `search_layer`, `select_neighbors_heuristic`, `search_knn`, or `search_knn_filtered`).
@@ -378,9 +378,9 @@ All comparisons are anchored strictly to verified Phase 4 JSON outputs (`SIFT1M`
 | **1M** `M=16, efC=100` *(ref)* | `results/phase4/scale_1000000_m16_efc100.json` (`cd48e7f`, 5 runs) | `450.301` | `148.91` | `647.26` | `0.73315` / `12,711.7` / `0.1284 ms` | `0.94703` / `4,209.0` / `0.3230 ms` | `0.98061` / `2,383.9` / `0.5515 ms` | `0.99376` / `1,296.0` / `1.0673 ms` |
 | **1M** `M=32, efC=200` *(Pareto)* | `results/phase4/scale_1000000_m32_efc200.json` (`cd48e7f`, 5 runs) | `1,288.897` | `272.33` | `767.40` | `0.84614` / `7,953.7` / `0.2041 ms` | `0.98278` / `2,579.7` / `0.5304 ms` | `0.99572` / `1,476.8` / `0.9404 ms` | `0.99881` / `842.2` / `1.6854 ms` |
 
-*(Note: in Phase 6, we also run a fresh `f32` `M=16, efC=100` baseline on the same clean commit/environment when comparing latencies directly, so thermal/OS conditions match `AGENT_PLAN.md` §4!)*
+*(Note: in Phase 6, we also run a fresh `f32` `M=16, efC=100` baseline on the same clean commit/environment when comparing latencies directly, so thermal/OS conditions match the benchmark protocol!)*
 
-### 5.2 Benchmark Protocol (`AGENT_PLAN.md` §4 Compliant)
+### 5.2 Benchmark Protocol
 - **Hardware & Environment Controls**: Plugged in, best-performance power mode, OneDrive paused / non-synced working copy, single-threaded query loop pinned to a single P-core (`0x0004`), release profile (`lto = "thin"`, `codegen-units = 1`), clean tree (`git_dirty: false`).
 - **Scales & Ground Truth**:
   - `10k` (`siftsmall`): CI / parity / smoke test only (not reported as a benchmark result).
@@ -460,7 +460,7 @@ All tests enforce `#![forbid(unsafe_code)]`, run under `cargo test --release` an
 | **`T4.8`** | Execute approved `100k` & `1M` evaluation matrix (Benchmarker, clean commit, P-core pinned) | `MEASUREMENT-ONLY` | `results/phase6/*.json` | Clean tree (`git_dirty: false`); `3` reps (`100k`) / `5` reps (`1M`) after warmup; records matched-recall latency/QPS & real Peak RSS (`Sq8Only` streaming + isolated query RSS). |
 | **`T4.9`** | Plots (`scripts/plot_phase6.py`), README write-up, & `results/CLAIMS.md` audit | `MEASUREMENT-ONLY` | `scripts/plot_phase6.py`, `results/phase6/*.png`, `results/phase6/*.svg`, `README.md`, `results/CLAIMS.md` | 4 publication charts (`Recall vs p99`, `Recall vs QPS`, `RAM vs Recall`, `Rerank Ablation`); every README number mapped 1:1 to source JSON in `results/CLAIMS.md`. |
 
-*(Note: Every task executes in separate Implementer / Reviewer / Benchmarker passes per `AGENT_PLAN.md` §2, running the full verification gate before each commit.)*
+*(Note: Every task executes cleanly across implementation, review, and benchmarking passes, running the full verification gate before each commit.)*
 
 ---
 

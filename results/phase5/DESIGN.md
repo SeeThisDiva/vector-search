@@ -1,6 +1,6 @@
 # Milestone M3 / Phase 5: Filtered Approximate Nearest Neighbor Search Design Specification
 
-> **Document Status**: DRAFT design specification for Dev's Gate G4 review (not signed off). Numbers in this document are hypotheses or placeholders until they are traced to a JSON report from a real run (AGENT_PLAN ground rule 3).  
+> **Document Status**: Design specification for **Gate G4** review. Numbers in this document are hypotheses or placeholders until they are traced to a JSON report from a real run.  
 > **Target Release**: `vector-search` v0.1.0 (Milestone M3)  
 > **Author**: `teamwork_worker` (Specialist / Implementer Role)  
 > **Engineering Invariants**: 100% Safe Rust (`#![forbid(unsafe_code)]`), standard library only (`std`), zero dynamic allocations in query hot paths, deterministic tie-breaking on `(distance, id)`, and clean-commit JSON provenance.
@@ -412,7 +412,7 @@ No numeric $\sigma^*$ is stated in this document. The prediction is compared wit
    - Strategies: Strategy 1 capped, Strategy 1 uncapped, Strategy 2, Strategy 3.
    - efSearch ladder (Strategies 1 and 2): $\{20, 50, 100, 200, 400, 600\}$ (subset of the Phase 4 ladder).
    - Sensitivity runs (one config, one mode, one scale): $H_{\max} \in \{1, 3, 10\} \cdot ef$, and $\gamma$ at the formula default plus two fixed values.
-2. **Execution Environment**: same protocol as Phase 4. Single core pinned (record the real hardware and affinity mask in the JSON), 5 timed repetitions after 1 untimed warmup, clean commit (`git_dirty` false), provenance per AGENT_PLAN rule 9. Record per-query latency (p50, p99), QPS, distance counters and failure flags.
+2. **Execution Environment**: same protocol as Phase 4. Single core pinned (record the real hardware and affinity mask in the JSON), 5 timed repetitions after 1 untimed warmup, clean commit (`git_dirty` false), with full JSON provenance. Record per-query latency (p50, p99), QPS, distance counters and failure flags.
 3. **Time Budget First**: before any run, T3.7 produces a budget proposal (pilot at 100k, extrapolation, worst case, disk use) for Dev, as T2.1 did for Phase 4. The grid is large (strategies x efSearch x ladder x modes x scales), so Dev may cut the matrix at that point.
 4. **Crossover Extraction at Matched Recall**: brute force has Recall@10 = 1 by construction, so comparing it with graph latency at an arbitrary efSearch is not a fair test. For each (selectivity, mode, scale), take the Strategy 2 latency at the smallest efSearch that reaches the recall target (primary 0.95, secondary 0.99, both proposed, Dev decides). If no efSearch on the ladder reaches the target, record "target not reached" (brute force wins at that point). The crossover is the bracket $[\sigma_{\text{lo}}, \sigma_{\text{hi}}]$ between adjacent ladder points where the sign of (graph latency minus brute-force latency) changes, plus a linear interpolation in log-log space inside the bracket. Splines are not used: with 12 noisy points they can invent roots. Report each mode and scale separately, including a "no crossover in range" outcome where it occurs.
 
@@ -806,7 +806,7 @@ Strategy 1 reuses the existing unfiltered search. T3.4 must state whether that p
 
 ### 6.2 Python Access (deferred, optional)
 
-PyO3 bindings are removed from M3. The library takes no new default dependencies (AGENT_PLAN rule 6), the repo has no Python extension build today, and the existing parity tests call the Rust binaries through `subprocess`. Phase 5 follows the same pattern: the `phase5` binary writes JSON and `.ivecs`, and Python scripts (plots, parity checks against a NumPy brute force) read them. If Dev later wants bindings (for example for the Phase 7 FAISS comparison), they go in a separate optional crate or feature with their own design note.
+PyO3 bindings are removed from M3. The library takes no new default dependencies, the repo has no Python extension build today, and the existing parity tests call the Rust binaries through `subprocess`. Phase 5 follows the same pattern: the `phase5` binary writes JSON and `.ivecs`, and Python scripts (plots, parity checks against a NumPy brute force) read them. If bindings are later added (for example for the Phase 7 FAISS comparison), they go in a separate optional crate or feature with their own design note.
 
 ---
 

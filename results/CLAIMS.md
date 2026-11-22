@@ -228,19 +228,19 @@ Documented in `CLAUDE.md`, `continuation.md`, and `results/phase4/PROPOSAL.md`. 
 
 | Metric / Parameter | Documented Value | Doc + Line | Source Report JSON | JSON Key Path | Actual JSON Value | Generating Commit | Verification / Notes |
 |---|---|---|---|---|---|---|---|
-| Pilot Base Scale ($N$) | `100,000` | `CLAUDE.md:7`, `continuation.md:27`, `PROPOSAL.md:20` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `scale_vectors` | `100000` | `26a9807` | Authentic SIFT1M prefix |
+| Pilot Base Scale ($N$) | `100,000` | `PROPOSAL.md:20` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `scale_vectors` | `100000` | `26a9807` | Authentic SIFT1M prefix |
 | Pilot Query Count ($Q$) | `10,000` | `PROPOSAL.md:20,32` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `dataset.num_query` | `10000` | `26a9807` | 10k query vectors |
-| Pilot Construction Time | `26.066 s` | `CLAUDE.md:7`, `continuation.md:27`, `PROPOSAL.md:22` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `index_build.build_time_s` | `26.066005` | `26a9807` | Single thread, P-core `0x0004` |
-| Pilot Build Throughput | `3,836.41 vec/s` | `CLAUDE.md:7`, `PROPOSAL.md:22` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `index_build.build_qps` | `3836.41` | `26a9807` | 100k vectors / 26.066 s |
+| Pilot Construction Time | `26.066 s` | `PROPOSAL.md:22` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `index_build.build_time_s` | `26.066005` | `26a9807` | Single thread, P-core `0x0004` |
+| Pilot Build Throughput | `3,836.41 vec/s` | `PROPOSAL.md:22` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `index_build.build_qps` | `3836.41` | `26a9807` | 100k vectors / 26.066 s |
 | Pilot Graph Fingerprint | `0x80af03bd7aebaade` | `PROPOSAL.md:24` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `index_build.graph_fingerprint_hex` | `"0x80af03bd7aebaade"` | `26a9807` | Bit-exact golden match |
-| Pilot Graph-Only Memory | `145.57 B/vector` (`13.88 MiB`) | `CLAUDE.md:7`, `PROPOSAL.md:25,197` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `memory_profile.graph_only_bytes_per_vector` | `145.57` | `26a9807` | `13.8827` MiB graph-only total |
-| Pilot Peak RSS | `77.61 MiB` | `CLAUDE.md:7`, `PROPOSAL.md:26,197` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `memory_profile.peak_rss_mb` | `77.61` | `26a9807` | Lifetime high-water mark |
+| Pilot Graph-Only Memory | `145.57 B/vector` (`13.88 MiB`) | `PROPOSAL.md:25,197` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `memory_profile.graph_only_bytes_per_vector` | `145.57` | `26a9807` | `13.8827` MiB graph-only total |
+| Pilot Peak RSS | `77.61 MiB` | `PROPOSAL.md:26,197` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `memory_profile.peak_rss_mb` | `77.61` | `26a9807` | Lifetime high-water mark |
 | Pilot Peak RSS Scope | `process_lifetime_high_water_mark` | `PROPOSAL.md:26` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `memory_profile.peak_rss_scope` | `"process_lifetime_high_water_mark"` | `26a9807` | Distinguishes process RSS |
-| Pilot 12-Point Sweep Time | `173.49 s (2.89 min)` | `CLAUDE.md:7`, `continuation.md:27`, `PROPOSAL.md:27,48` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `ef_search_sweep` | `sum(total_s) * 4 = 173.493 s` | `26a9807` | 1 warmup + 3 timed repetitions |
-| Pilot Recall@10 (ef=10) | `0.821030` | `CLAUDE.md:7`, `continuation.md:27`, `PROPOSAL.md:36` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `ef_search_sweep[0].recall_at_k` | `0.821030` | `26a9807` | Throughput: 21,237.13 QPS |
+| Pilot 12-Point Sweep Time | `173.49 s (2.89 min)` | `PROPOSAL.md:27,48` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `ef_search_sweep` | `sum(total_s) * 4 = 173.493 s` | `26a9807` | 1 warmup + 3 timed repetitions |
+| Pilot Recall@10 (ef=10) | `0.821030` | `PROPOSAL.md:36` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `ef_search_sweep[0].recall_at_k` | `0.821030` | `26a9807` | Throughput: 21,237.13 QPS |
 | Pilot Recall@10 (ef=50) | `0.980190` | `PROPOSAL.md:40` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `ef_search_sweep[4].recall_at_k` | `0.980190` | `26a9807` | Throughput: 6,643.81 QPS |
 | Pilot Recall@10 (ef=100) | `0.993670` | `PROPOSAL.md:42` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `ef_search_sweep[6].recall_at_k` | `0.993670` | `26a9807` | Throughput: 3,728.92 QPS |
-| Pilot Recall@10 (ef=600) | `0.997020` | `CLAUDE.md:7`, `continuation.md:27`, `PROPOSAL.md:47` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `ef_search_sweep[11].recall_at_k` | `0.997020` | `26a9807` | Monotonic peak recall |
+| Pilot Recall@10 (ef=600) | `0.997020` | `PROPOSAL.md:47` | `results/phase4/pilot/scale_100000_m16_efc100.json` | `ef_search_sweep[11].recall_at_k` | `0.997020` | `26a9807` | Monotonic peak recall |
 
 ---
 
