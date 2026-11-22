@@ -224,7 +224,7 @@ Documented in `results/phase3_5/LOG.md` and `results/phase3_5/baseline_1m_report
 
 ## 9. Phase 4 Pilot Measurement Claims (100k SIFT1M Prefix, $M=16, \text{efConstruction}=100$, $k=10$)
 
-Documented in `CLAUDE.md`, `continuation.md`, and `results/phase4/PROPOSAL.md`. Source report: `results/phase4/pilot/scale_100000_m16_efc100.json` on clean commit `26a9807`.
+Documented in [`results/phase4/PROPOSAL.md`](phase4/PROPOSAL.md). Source report: `results/phase4/pilot/scale_100000_m16_efc100.json` on clean commit `26a9807`.
 
 | Metric / Parameter | Documented Value | Doc + Line | Source Report JSON | JSON Key Path | Actual JSON Value | Generating Commit | Verification / Notes |
 |---|---|---|---|---|---|---|---|

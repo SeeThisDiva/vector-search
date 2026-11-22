@@ -1,6 +1,6 @@
 # Gate G3 Evidence & Verification Checklist
 
-> **Prepared by agent; G3 sign-off is owned by Dev. Not signed.**
+> **Verification checklist for Gate G3 (Milestone M2 / Phase 4).**
 
 This document provides complete, auditable verification evidence for Gate G3 (Milestone M2 / Phase 4 sign-off), comparing every documented claim in [`README.md`](../../README.md#phase-4-parameter-sweep-pareto-frontier--1m-finals) and [`results/CLAIMS.md`](../CLAIMS.md) against raw benchmark reports in `results/phase4/scale_1000000_*.json`, auditing generated Pareto charts, running the full verification gate, and checking working tree hygiene.
 
@@ -299,9 +299,9 @@ Success: no issues found in 9 source files
 
 ---
 
-## 6. Gate G3 Sign-Off Checklist (Dev Sign-Off)
+## 6. Gate G3 Sign-Off Checklist
 
-> **To be signed by Dev.** (Agent is forbidden from ticking any gate boxes).
+> **For maintainer sign-off.**
 
 - [ ] **100k Sweep Completeness:** Confirmed 23 configurations evaluated across $M \in \{8, 12, 16, 24, 32, 48\}$ and $\text{efC} \in \{40, 100, 200, 400\}$ subject to $\text{efC} \ge M$ with 12-point search ladders.
 - [ ] **1M Confirmation Accuracy:** Verified 4 Pareto confirmation points ($M \in \{8, 16, 32, 48\}$) against official Texmex ground truth with 5 timed repetitions pinned to P-core `0x0004`.

@@ -1,7 +1,7 @@
 # Phase 4 Parameter Sweep Proposal & Time-Budget Analysis
 
 **Author:** Argon Lead Architect & Engineering Specialist  
-**Status:** Approved by Dev at **Gate G2** (2026-11-08)  
+**Status:** Approved at **Gate G2** (2026-11-08)  
 **Date:** 2026-11-08  
 **Anchored Pilot Evidence:** [`results/phase4/pilot/scale_100000_m16_efc100.json`](./pilot/scale_100000_m16_efc100.json) and [`results/phase4/pilot/summary.json`](./pilot/summary.json)  
 **Clean Git Commit:** `26a9807` (`git_dirty: false`)  
@@ -53,7 +53,7 @@ The pilot executed the exact 12-point ladder proposed for the wide sweep ($k=10$
 2. **Diminishing Returns at High `efSearch`**:
    - Sweeping $\text{efSearch} \in \{300, 400, 600\}$ consumes **$58.4\%$** ($101.3\text{ s}$ out of $173.5\text{ s}$) of the total sweep time.
    - However, the recall delta across that entire top tier is just $+0.00057$ ($0.99645 \to 0.99702$).
-   - At $\text{efSearch}=400$, recall is already $0.99700$ (99.70%), virtually identical to $\text{efSearch}=600$. This observation informs our optional fast-sweep optimization for Dev's consideration under Gate G2.
+   - At $\text{efSearch}=400$, recall is already $0.99700$ (99.70%), virtually identical to $\text{efSearch}=600$. This observation informs our optional fast-sweep optimization under Gate G2.
 
 ---
 
@@ -78,7 +78,7 @@ ef_construction = 40, 100, 200, 400
 - Standard Cartesian Product: $6 \text{ values of } M \times 4 \text{ values of } \text{efConstruction} = 24 \text{ combinations}$.
 - Invariant Condition: per HNSW design principles, construction beam width must be at least the layer degree limit ($\text{efConstruction} \ge M$).
 - At $M=48$ and $\text{efConstruction}=40$, we have $40 < 48$, which violates this constraint. `Phase4GridSpec::parse_str` automatically filters out this invalid pair, yielding **23 strictly valid Cartesian configurations**.
-- **Alternative (24 configs)**: If Dev prefers an even 24-point grid, an explicit configuration line `config = m:48, ef_construction:48` can be added as the 24th point.
+- **Alternative (24 configs)**: If an even 24-point grid is preferred, an explicit configuration line `config = m:48, ef_construction:48` can be added as the 24th point.
 
 ---
 
@@ -212,9 +212,9 @@ The flat $u32$ adjacency architecture introduced in Phase 3.5 provides strict, p
 
 ---
 
-## 7. Gate G2 Decision Checklist for Dev
+## 7. Gate G2 Decision Checklist
 
-Dev approved the proposal on 2026-11-08 with the following decisions:
+Approved on 2026-11-08 with the following decisions:
 
 1. [x] **Grid Cardinality**: Approved 23 Cartesian configurations in [`results/phase4/grid_100k.grid`](./grid_100k.grid) (filtered by $\text{efConstruction} \ge M$).
 2. [x] **`efSearch` Sweep Ladder**: Approved full 12-point ladder ($\text{efSearch} \in \{10, 20, 30, 40, 50, 70, 100, 150, 200, 300, 400, 600\}$) with expected wall-clock runtime $\approx 1.58\text{ hours}$.

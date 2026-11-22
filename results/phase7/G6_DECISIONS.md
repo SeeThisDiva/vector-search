@@ -1,6 +1,6 @@
 # Gate G6 Decisions — Approved Protocol (`T5.1`–`T5.7`)
 
-**Date Recorded:** 2026-11-16 (Dev delegated optimal speed + full quality choices across [`results/phase7/DESIGN.md`](./DESIGN.md) §8)
+**Date Recorded:** 2026-11-16 (full speed and quality protocol approved across [`results/phase7/DESIGN.md`](./DESIGN.md) §8)
 
 ## Approved Protocol
 

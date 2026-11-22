@@ -26,7 +26,7 @@ At $N = 10^6$ vectors, `512 B/vector` is comfortably in-RAM on a 16 GB laptop, y
    - Deterministic `Xoshiro256**` (`DeterministicRng`) seeded $k$-means++ initialization + Lloyd iterations from scratch in `std` Rust.
    - $M_{\text{pq}} \in \{16, 32\}$, $K = 256$ (`16 B/vec` and `32 B/vec` at $D=128$), precomputed query ADC lookup tables (`[f32; 256]` per subspace, fitting in L1d cache), deterministic training subsampling at `100k`/`1M`, and top-$R$ reranking option.
 4. **Empirical Evaluation & Gate G5 Decision Framework**:
-   - Measure recall cost, memory per vector, isolated Peak RSS, build time, p50/p99 latency, and QPS at `100k` and `1M` `SIFT1M` against the verified Phase 4 `f32` baselines, leaving Dev with clear, data-backed decisions at **Gate G5**.
+   - Measure recall cost, memory per vector, isolated Peak RSS, build time, p50/p99 latency, and QPS at `100k` and `1M` `SIFT1M` against the verified Phase 4 `f32` baselines, providing clear, data-backed inputs for **Gate G5** decisions.
 
 ### 1.3 Non-Goals & Invariants
 - **No `unsafe`, No New Library Crates**: `#![forbid(unsafe_code)]` (`src/lib.rs`) and `std`-only default dependencies (`Cargo.toml`) remain invariant. No explicit CPU ISA intrinsics (AVX2/AVX-512/NEON); kernels rely strictly on safe Rust slice patterns (`as_chunks`) for compiler auto-vectorization.
@@ -39,9 +39,9 @@ At $N = 10^6$ vectors, `512 B/vector` is comfortably in-RAM on a 16 GB laptop, y
 
 ### 1.4 Recommended Defaults Pending Gate G5 Sign-Off
 
-| # | Gate G5 Design Question | Recommended Default | Alternative(s) for Dev |
+| # | Gate G5 Design Question | Recommended Default | Alternative(s) |
 | :---: | :--- | :--- | :--- |
-| **1** | **Scope: SQ8 only vs SQ8 + PQ** | **SQ8 + PQ** (SQ8 first in `T4.1–T4.3`, then PQ in `T4.4–T4.5` on the same benchmark charts) | SQ8-only (cuts scope/time by ~40% if Dev wants faster entry to Phase 7 FAISS comparison) |
+| **1** | **Scope: SQ8 only vs SQ8 + PQ** | **SQ8 + PQ** (SQ8 first in `T4.1–T4.3`, then PQ in `T4.4–T4.5` on the same benchmark charts) | SQ8-only (cuts scope/time by ~40% for faster entry to Phase 7 FAISS comparison) |
 | **2** | **SQ8 Storage Mode** | Implement & benchmark **both** `Sq8Only` (Memory-First) and `Sq8WithRerank` (Accuracy-First), with `Sq8Only` as the memory-footprint headline | `Sq8Only` only, or `Sq8WithRerank` only |
 | **3** | **Graph Build Precision** | Primary: **`Float32GraphThenQuantize`** (exact Phase 4 graph quality, isolates quantization error) + **Ablation: `QuantizedDirect`** at `100k` (and `1M` `Sq8Only` streaming if 100k delta is acceptable) | `Float32GraphThenQuantize` only, or `QuantizedDirect` only |
 | **4** | **Rerank Depth Sweep ($R$)** | **Fixed ladder `R in {None, 20, 30, 50, 100}`** for SQ8 (plus **`200`** for PQ), with `effective_ef = ef_search.max(R).max(k)`; plus **Full-Beam (`R = ef_search`)** to measure pure rescoring without collapsing low `efSearch` | `R = None` and `R = 100` only |
@@ -202,7 +202,7 @@ Expanding $(\tilde{q}_j - s_j c_{i,j})^2$ analytically yields:
 $$d_{\text{asym}}(\mathbf{q}, \mathbf{c}_i) = \underbrace{\sum_{j=0}^{D-1} \tilde{q}_j^2}_{C_q\text{ (once per query)}} - 2 \sum_{j=0}^{D-1} \underbrace{(\tilde{q}_j \cdot s_j)}_{\hat{q}_j\text{ (once per query)}} c_{i,j} + \underbrace{\sum_{j=0}^{D-1} (s_j \cdot c_{i,j})^2}_{B_i\text{ (stored once per base vec, }+4\text{ B/vec)}}$$
 - **Pros**: Eliminates reading `scales[j]` and eliminates the subtraction and squaring inside the inner loop (reducing inner loop to one `f32::from(cc[k])` + one FMA `s_k += q_hat[k] * f32::from(cc[k])`, enabling compiler auto-vectorization over 2 streams instead of 3).
 - **Cons**: Requires `+4.00 B/vector` (`3.81 MiB` at `1M`) for `base_norms_sq: Vec<f32>`, and suffers from `f32` catastrophic cancellation if $\|\mathbf{q} - \mathbf{v}_i\|^2 \ll \|\mathbf{q} - \mathbf{min}\|^2$ (e.g., if vectors sit far from `min` with tiny pairwise separations; centering around the midpoint $\mu_j = \text{min}_j + 127.5 s_j$ with `i8`/`u8 - 128` reduces norm magnitudes somewhat, yet does not eliminate cancellation on arbitrary synthetic clusters).
-- **Decision rule (`T4.2`)**: Microbenchmark Kernel A vs Kernel B (both 8-way unrolled) on `100k` `SIFT1M` and adversarial cancellation inputs. Adopt Kernel A as default unless Kernel B clears the `AGENT_PLAN.md` §4 noise-floor rule AND passes a strict relative-error bound across SIFT1M; if Kernel B is offered, keep Kernel A for arbitrary-range safety.
+- **Decision rule (`T4.2`)**: Microbenchmark Kernel A vs Kernel B (both 8-way unrolled) on `100k` `SIFT1M` and adversarial cancellation inputs. Adopt Kernel A as default unless Kernel B clears the benchmark noise-floor rule AND passes a strict relative-error bound across SIFT1M; if Kernel B is offered, keep Kernel A for arbitrary-range safety.
 
 #### Kernel C: Symmetric Code-to-Code $L_2^2$ (for `QuantizedDirect` Graph Build)
 When comparing two quantized base nodes $a$ and $b$ (in `select_neighbors_heuristic` and reverse-edge `shrink`):
@@ -259,7 +259,7 @@ In [`src/phase4/mod.rs`](../../src/phase4/mod.rs) and [`src/hardware.rs`](../../
 #### 3.3.2 Exact Top-$R$ Reranking Semantics & Mathematical Pitfall at $R = k$
 When `rerank_top_r = Some(r)` is passed to `search_knn_rerank_with_scratch`:
 1. Reject `r == 0` with `InvalidArgument` (use `None` for no rerank; avoids silent ambiguity).
-2. Set `effective_r = r.max(k)` and **`effective_ef = ef_search.max(effective_r)`** (because Layer-0 `results` heap `W` holds at most `effective_ef` entries; if `ef_search < R`, `W` would not contain `R` candidates to rerank). Record both `requested_ef_search` and `effective_ef_search` in JSON (matching Phase 3's `ef < k` documentation in `continuation.md`).
+2. Set `effective_r = r.max(k)` and **`effective_ef = ef_search.max(effective_r)`** (because Layer-0 `results` heap `W` holds at most `effective_ef` entries; if `ef_search < R`, `W` would not contain `R` candidates to rerank). Record both `requested_ef_search` and `effective_ef_search` in JSON (matching Phase 3's `ef < k` semantics).
 3. Run quantized `CompactHnswGraph` traversal to collect `W` (`|W| <= effective_ef`).
 4. Sort/select the `effective_r` lowest-quantized-distance candidates from `W`, compute **exact `Metric` distance** against `raw_base.row(id)` using [`src/distance.rs`](../../src/distance.rs), re-sort by canonical `(exact_distance, id)`, and return the top `k`.
 5. **Crucial `R = k` invariant**: Because `Recall@k` measures **set overlap** ($|\mathcal{R}_{\text{approx}}^{(k)} \cap \mathcal{R}_{\text{exact}}^{(k)}| / k$), setting $R = k = 10$ only reorders the already-chosen 10 IDs and **cannot change `Recall@10`**. Improving `Recall@10` requires $R > k$ ($R \in \{20, 30, 50, 100, 200\}$) or `FullBeam` ($R = \max(k, \text{efSearch})$).
@@ -280,7 +280,7 @@ When `rerank_top_r = Some(r)` is passed to `search_knn_rerank_with_scratch`:
 
 ## 4. Product Quantization (PQ) Stretch Goal Design
 
-If Dev approves **SQ8 + PQ** at Gate G5, Phase 6 implements **Product Quantization (PQ)** completely from scratch in `src/quantized/pq.rs` (`#![forbid(unsafe_code)]`, `std`-only).
+If **SQ8 + PQ** is approved at Gate G5, Phase 6 implements **Product Quantization (PQ)** completely from scratch in `src/quantized/pq.rs` (`#![forbid(unsafe_code)]`, `std`-only).
 
 ### 4.1 Subspace Decomposition & Code Layout
 - **Configuration (`PqConfig`)**:
@@ -387,7 +387,7 @@ All comparisons are anchored strictly to verified Phase 4 JSON outputs (`SIFT1M`
   - `100k` (`SIFT1M` prefix): full ablation scale (`3` timed repetitions after `1` untimed warmup; cached exact ground truth `data/gt_100000_k100.ivecs`).
   - `1M` (`SIFT1M` full): final evaluation scale (`5` timed repetitions after `1` untimed warmup; official `data/sift1m/sift_groundtruth.ivecs`).
 - **`efSearch` Ladder**: `{10, 20, 30, 40, 50, 70, 100, 150, 200, 300, 400, 600}`, $k = 10$, $10{,}000$ queries.
-- **Pilot & Budget Gate (`T4.6`)**: Before running `1M` builds/sweeps, run a `100k` pilot of `SQ8` + `PQ16/PQ32`, compute exact training/encoding/build/sweep time estimates in `results/phase6/PROPOSAL.md`, and obtain Dev sign-off if any `1M` variant is pruned or expanded.
+- **Pilot & Budget Gate (`T4.6`)**: Before running `1M` builds/sweeps, run a `100k` pilot of `SQ8` + `PQ16/PQ32`, compute exact training/encoding/build/sweep time estimates in `results/phase6/PROPOSAL.md`, and review any `1M` variant pruning or expansion prior to full execution.
 
 ### 5.3 Evaluation Matrix (`100k` & `1M`)
 
@@ -455,7 +455,7 @@ All tests enforce `#![forbid(unsafe_code)]`, run under `cargo test --release` an
 | **`T4.3`** | `HnswSq8Index` (`Sq8Only`, `Sq8WithRerank`, `Float32GraphThenQuantize` & `QuantizedDirect`, streaming `.fvecs` build, binary snapshot) | `GRAPH-CHANGING` | `src/quantized/sq8.rs`, `src/quantized/mod.rs`, `tests/rust_phase6_tests.rs` | Memory-first `Sq8Only` drops raw `f32`; streaming `.fvecs` codes match in-memory bit-for-bit; `R = N` rerank matches `ExactKnn`; zero allocations in timed query loop; `siftsmall` smoke evaluation passes. |
 | **`T4.4`** | Deterministic PQ trainer (`Xoshiro256**` $k$-means++ + Lloyd) & `PqVectors` ADC/SDC kernels *(if PQ approved)* | `PRESERVING` | `src/quantized/pq.rs`, `tests/rust_phase6_tests.rs` | Deterministic across runs; handles `N < 256` and duplicate-point empty clusters; `dim % m_pq != 0` rejected; `as_chunks::<256>()` ADC matches naive reference; zero effect on `HnswIndex`/`HnswSq8Index`. |
 | **`T4.5`** | `HnswPqIndex` (`M_pq in {16, 32}`, `PqOnly` + `PqWithRerank`, `Float32GraphThenQuantize` + `QuantizedDirect`) *(if PQ approved)* | `GRAPH-CHANGING` | `src/quantized/pq.rs`, `src/quantized/mod.rs`, `tests/rust_phase6_tests.rs` | Supports `16 B/vec` and `32 B/vec`; `R = N` rerank matches `ExactKnn`; zero allocations in timed query loop; deterministic graph & query outputs for fixed seed. |
-| **`T4.6`** | `100k` Pilot run & Phase 6 Time-Budget Proposal (`results/phase6/PROPOSAL.md`) | `MEASUREMENT-ONLY` | `results/phase6/PROPOSAL.md`, `results/phase6/pilot/*.json` | Pilot measures SQ8 + PQ train/encode/build/sweep times at `100k` (`M=16, efC=100`); extrapolates `1M` wall-clock and disk budget for Dev sign-off before long `1M` runs. |
+| **`T4.6`** | `100k` Pilot run & Phase 6 Time-Budget Proposal (`results/phase6/PROPOSAL.md`) | `MEASUREMENT-ONLY` | `results/phase6/PROPOSAL.md`, `results/phase6/pilot/*.json` | Pilot measures SQ8 + PQ train/encode/build/sweep times at `100k` (`M=16, efC=100`); extrapolates `1M` wall-clock and disk budget for review before long `1M` runs. |
 | **`T4.7`** | `phase6` benchmark runner CLI, isolated query-serving RSS profiler, & NumPy parity suite | `MEASUREMENT-ONLY` | `src/phase6.rs`, `src/bin/phase6.rs`, `src/lib.rs`, `Cargo.toml`, `tests/test_phase6_parity.py` | Resumable per-config JSONs with full provenance (`git_commit`, `git_dirty`, `environment`, steady-state & peak RSS); `pytest -rs` runs `test_phase6_parity.py` with `0` skipped. |
 | **`T4.8`** | Execute approved `100k` & `1M` evaluation matrix (Benchmarker, clean commit, P-core pinned) | `MEASUREMENT-ONLY` | `results/phase6/*.json` | Clean tree (`git_dirty: false`); `3` reps (`100k`) / `5` reps (`1M`) after warmup; records matched-recall latency/QPS & real Peak RSS (`Sq8Only` streaming + isolated query RSS). |
 | **`T4.9`** | Plots (`scripts/plot_phase6.py`), README write-up, & `results/CLAIMS.md` audit | `MEASUREMENT-ONLY` | `scripts/plot_phase6.py`, `results/phase6/*.png`, `results/phase6/*.svg`, `README.md`, `results/CLAIMS.md` | 4 publication charts (`Recall vs p99`, `Recall vs QPS`, `RAM vs Recall`, `Rerank Ablation`); every README number mapped 1:1 to source JSON in `results/CLAIMS.md`. |
@@ -464,9 +464,9 @@ All tests enforce `#![forbid(unsafe_code)]`, run under `cargo test --release` an
 
 ---
 
-### 7.2 Gate G5 Decision Checklist (Dev Sign-Off Required Before Coding)
+### 7.2 Gate G5 Decision Checklist
 
-Implementers **must not** check these boxes or begin `T4.1` until Dev reviews and records Gate G5 decisions:
+Gate G5 sign-off criteria reviewed prior to `T4.1` (outcomes recorded in [`G5_DECISIONS.md`](./G5_DECISIONS.md)):
 
 1. **Scope Choice (Primary Gate G5 Decision)**:
    - [ ] **Option A (`SQ8 only`)**: Implement `T4.1–T4.3` + `T4.6–T4.9` (per-dim SQ8, Memory-First + Rerank, streaming RSS proof); skip PQ (`T4.4–T4.5`) to move directly to Phase 7 (FAISS comparison).

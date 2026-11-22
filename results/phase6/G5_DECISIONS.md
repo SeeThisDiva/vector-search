@@ -1,6 +1,6 @@
 # Gate G5 Decisions — Approved Scope (`T4.1`–`T4.9`)
 
-**Date Recorded:** 2026-11-16 (Dev delegated optimal speed + full quality choices across [`results/phase6/DESIGN.md`](./DESIGN.md) §7.2)
+**Date Recorded:** 2026-11-16 (full speed and quality choices approved across [`results/phase6/DESIGN.md`](./DESIGN.md) §7.2)
 
 ## Approved Parameters
 

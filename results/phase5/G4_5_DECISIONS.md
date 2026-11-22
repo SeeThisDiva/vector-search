@@ -1,9 +1,9 @@
-# Gate G4.5 Decisions — Dev Sign-Off (`T3.8`–`T3.11`)
+# Gate G4.5 Decisions — Sign-Off (`T3.8`–`T3.11`)
 
 **Date Recorded:** 2026-11-15 (authorized prior to `T3.8`–`T3.11` execution)  
 **Context:** Response to [`results/phase5/PROPOSAL.md`](./PROPOSAL.md) (`T3.6` microbenchmark & `T3.7` 100k pilot).
 
-## Approved Decisions (Dev)
+## Approved Decisions
 
 1. **Execution Tier (`T3.9`):** **Option C** (`reps = 5` timed repetitions after 1 untimed warmup).
    - Record `num_queries` and `is_subquery_probe` on every arm.

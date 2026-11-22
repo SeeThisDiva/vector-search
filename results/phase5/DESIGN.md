@@ -39,10 +39,10 @@ Phase 5 establishes a mathematically principled, empirically validated filtered 
   - Dynamic index mutation under filtering (rebuilding graph edges per attribute value).
   - External disk-backed relational databases (attribute storage remains fully in-memory).
   - Multi-vector composite documents.
-  - PyO3 / Python bindings (optional, needs Dev approval; see Section 6.2).
-  - Adaptive strategy router (optional, needs Dev approval; see Section 4.4).
+  - PyO3 / Python bindings (optional, deferred; see Section 6.2).
+  - Adaptive strategy router (optional, deferred; see Section 4.4).
 
-### 1.4 Design Decisions for Dev (recommended defaults, pending G4 sign-off)
+### 1.4 Design Decisions (recommended defaults, pending G4 sign-off)
 
 | # | Question | Recommended decision |
 |:---:|:---|:---|
@@ -52,7 +52,7 @@ Phase 5 establishes a mathematically principled, empirically validated filtered 
 | 4 | Over-fetch factor $\gamma$ | Default from the confidence formula ($\delta = 0.001$), overridable per query via `overfetch_factor`, swept in at least one config. The formula holds only for independent metadata (Mode A). |
 | 5 | Bridge-hop cap $H_{\max}$ | Default $3 \cdot ef$ (reviewer's value, unmeasured). Query-time field of `FilteredSearchParams`, not `HnswConfig`. Sensitivity run at $\{1, 3, 10\} \cdot ef$ on one config. |
 | 6 | Over-fetch pool cap $K'_{\max}$ | Default 4,096 (hypothesis: about 7x the largest efSearch measured in Phase 4). Strategy 1 is benchmarked in two arms, capped (4,096) and uncapped ($K'_{\max} = N$). On reaching the cap with fewer than $k$ matches it returns partial results with flag `PostFilterCapReached`. |
-| 7 | Crossover definition | Compared at matched recall (Section 4.3). Proposed targets 0.95 (primary) and 0.99 (secondary). Dev decides. |
+| 7 | Crossover definition | Compared at matched recall (Section 4.3). Proposed targets 0.95 (primary) and 0.99 (secondary). Maintainer decides at Gate G4. |
 
 ---
 
@@ -408,18 +408,18 @@ No numeric $\sigma^*$ is stated in this document. The prediction is compared wit
    - Selectivity ladder (12 points):
      $$\sigma \in \{0.05\%, 0.1\%, 0.2\%, 0.5\%, 1.0\%, 2.0\%, 3.5\%, 5.0\%, 7.5\%, 10.0\%, 20.0\%, 50.0\%\}$$
    - Metadata modes: Independent (Mode A) and Cluster-Correlated (Mode B, $\kappa = 1.0$).
-   - Index config: required $(M=16, efC=100)$. Optional second config $(M=32, efC=200)$ if Dev approves the extra builds.
+   - Index config: required $(M=16, efC=100)$. Optional second config $(M=32, efC=200)$ if approved after pilot review.
    - Strategies: Strategy 1 capped, Strategy 1 uncapped, Strategy 2, Strategy 3.
    - efSearch ladder (Strategies 1 and 2): $\{20, 50, 100, 200, 400, 600\}$ (subset of the Phase 4 ladder).
    - Sensitivity runs (one config, one mode, one scale): $H_{\max} \in \{1, 3, 10\} \cdot ef$, and $\gamma$ at the formula default plus two fixed values.
 2. **Execution Environment**: same protocol as Phase 4. Single core pinned (record the real hardware and affinity mask in the JSON), 5 timed repetitions after 1 untimed warmup, clean commit (`git_dirty` false), with full JSON provenance. Record per-query latency (p50, p99), QPS, distance counters and failure flags.
-3. **Time Budget First**: before any run, T3.7 produces a budget proposal (pilot at 100k, extrapolation, worst case, disk use) for Dev, as T2.1 did for Phase 4. The grid is large (strategies x efSearch x ladder x modes x scales), so Dev may cut the matrix at that point.
-4. **Crossover Extraction at Matched Recall**: brute force has Recall@10 = 1 by construction, so comparing it with graph latency at an arbitrary efSearch is not a fair test. For each (selectivity, mode, scale), take the Strategy 2 latency at the smallest efSearch that reaches the recall target (primary 0.95, secondary 0.99, both proposed, Dev decides). If no efSearch on the ladder reaches the target, record "target not reached" (brute force wins at that point). The crossover is the bracket $[\sigma_{\text{lo}}, \sigma_{\text{hi}}]$ between adjacent ladder points where the sign of (graph latency minus brute-force latency) changes, plus a linear interpolation in log-log space inside the bracket. Splines are not used: with 12 noisy points they can invent roots. Report each mode and scale separately, including a "no crossover in range" outcome where it occurs.
+3. **Time Budget First**: before any run, T3.7 produces a budget proposal (pilot at 100k, extrapolation, worst case, disk use), as T2.1 did for Phase 4, so the matrix can be scoped before running.
+4. **Crossover Extraction at Matched Recall**: brute force has Recall@10 = 1 by construction, so comparing it with graph latency at an arbitrary efSearch is not a fair test. For each (selectivity, mode, scale), take the Strategy 2 latency at the smallest efSearch that reaches the recall target (primary 0.95, secondary 0.99, proposed for Gate G4). If no efSearch on the ladder reaches the target, record "target not reached" (brute force wins at that point). The crossover is the bracket $[\sigma_{\text{lo}}, \sigma_{\text{hi}}]$ between adjacent ladder points where the sign of (graph latency minus brute-force latency) changes, plus a linear interpolation in log-log space inside the bracket. Splines are not used: with 12 noisy points they can invent roots. Report each mode and scale separately, including a "no crossover in range" outcome where it occurs.
 
 ---
 
-### 4.4 Optional, Deferred: Adaptive Hybrid Dispatcher (needs Dev approval)
-Outside the M3 brief, and only meaningful after the crossover is measured (T3.11). If Dev approves it later, the dispatcher below is a starting point. It is not part of the G4 criteria:
+### 4.4 Optional, Deferred: Adaptive Hybrid Dispatcher
+Outside the M3 brief, and only meaningful after the crossover is measured (T3.11). If adopted later, the dispatcher below is a starting point. It is not part of the G4 criteria:
 
 ```rust
 pub struct AdaptiveFilterRouter {
@@ -822,18 +822,18 @@ PyO3 bindings are removed from M3. The library takes no new default dependencies
 | **T3.4** | Strategy 1: post-filter with over-fetch | `PRESERVING` | `src/hnsw.rs` | Widening loop per Section 3.1 with cap and flag; states whether the existing search path allocates; graph fingerprint and unfiltered results unchanged. |
 | **T3.5** | Strategy 2: in-traversal filtering | `PRESERVING` | `src/hnsw.rs` | Matches Algorithm 3 including the hop budget; flags set correctly; fingerprint equal and unfiltered results bit-identical; truncation rate reported (not required to be zero). |
 | **T3.6** | Strategy 3 + cost microbenchmark | `PRESERVING` | `src/exact_knn.rs`, `src/hnsw.rs`, `src/bin/phase5.rs` | Results equal `FilteredExactKnn`; microbenchmark JSON gives $t_{word}$, $t_{dist}$, $t_{heap}$; no throughput target. |
-| **T3.7** | Matrix and time-budget proposal (no runs) | `MEASUREMENT-ONLY` | `results/phase5/PROPOSAL.md` | Pilot at 100k, extrapolated run time, worst case, disk use, metadata and ground-truth generation cost, default `eval_limit`. For Dev approval (proposed gate G4.5, Dev decides whether to fold it into G4). |
+| **T3.7** | Matrix and time-budget proposal (no runs) | `MEASUREMENT-ONLY` | `results/phase5/PROPOSAL.md` | Pilot at 100k, extrapolated run time, worst case, disk use, metadata and ground-truth generation cost, default `eval_limit` (proposed gate G4.5). |
 | **T3.8** | Phase 5 benchmark runner CLI | `MEASUREMENT-ONLY` | `src/bin/phase5.rs`, `src/benchmark.rs`, `Cargo.toml` | Resumable grid runner like phase4; one JSON per point with provenance, flags, counters; Section 4.3 matrix incl. sensitivity runs; 10k smoke mode. |
 | **T3.9** | Run the approved matrix | `MEASUREMENT-ONLY` | `results/phase5/*.json` | Clean commit, `git_dirty` false, no concurrent load; every point has provenance. |
 | **T3.10**| Plots (`plot_phase5.py`) | `MEASUREMENT-ONLY` | `scripts/plot_phase5.py` | Recall@10 vs selectivity, latency vs selectivity, failure rate vs selectivity, matched-recall latency vs selectivity with the crossover bracket; captions with hardware, scale and repetitions. |
 | **T3.11**| Crossover analysis, README, CLAIMS | `MEASUREMENT-ONLY` | `results/CLAIMS.md` (Section 11), `README.md` | Every number maps to a source JSON; predicted vs measured crossover compared and any mismatch reported. |
-| Optional | Adaptive router; PyO3 bindings | `PRESERVING` | (needs Dev approval) | Not part of M3 unless Dev adds them after G4. |
+| Optional | Adaptive router; PyO3 bindings | `PRESERVING` | (deferred) | Out of scope for M3 unless approved after G4. |
 
 ---
 
 ### 7.2 Gate G4 Sign-Off Criteria (Prerequisites to Coding)
 
-Prior to committing implementation code for Milestone M3, Dev must inspect and sign off on this design specification against the following acceptance criteria:
+Prior to committing implementation code for Milestone M3, this design specification is checked against the following acceptance criteria:
 
 1. **Deterministic Metadata Invariant**:
    - [ ] Independent and Cluster-Correlated synthetic metadata generation algorithms are formally specified with fixed seeds and exact count calibration.
@@ -849,7 +849,7 @@ Prior to committing implementation code for Milestone M3, Dev must inspect and s
    - [ ] `#![forbid(unsafe_code)]` and `std`-only invariants are preserved.
    - [ ] `FilteredSearchScratch` is preallocated for the largest query; code paths that allocate are listed explicitly.
    - [ ] Canonical `(distance, id)` tie-breaking ensures 100% deterministic, platform-independent ground truth.
-5. **Open Decisions for Dev**:
+5. **Open Decisions**:
    - [ ] Decisions in Section 1.4 confirmed or changed.
    - [ ] Recall targets for the matched-recall crossover (proposed 0.95 and 0.99).
    - [ ] Default `eval_limit` (to be proposed in T3.7).

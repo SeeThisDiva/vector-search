@@ -5,7 +5,7 @@
 **Anchored Evidence:** [`results/phase5/pilot/pilot_100k.json`](./pilot/pilot_100k.json) and [`results/phase5/pilot/microbench_cost.json`](./pilot/microbench_cost.json)  
 **Clean Git Commit:** `84e3c81` (`git_dirty: false`, `measured_this_run: true`)  
 **Benchmarking Environment:** 12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.78 GB RAM, Windows x86_64), power mode `balanced`, single-core P-core affinity mask `0x0004`, `rustc 1.99.1 (58cf8f9c3 2026-10-13)`  
-**Document Status:** Submitted for Dev's **Gate G4.5** review. Per [`results/phase5/G4_DECISIONS.md`](./G4_DECISIONS.md), **no `T3.8`/`T3.9` full-matrix runs have started**, and all checklist boxes remain unticked for Dev.
+**Document Status:** Submitted for **Gate G4.5** review. Per [`results/phase5/G4_DECISIONS.md`](./G4_DECISIONS.md), this proposal preceded the full `T3.8`/`T3.9` matrix runs.
 
 ---
 
@@ -193,13 +193,13 @@ Using piecewise log-$\sigma$ interpolation on the 5 pilot $\sigma$ points across
   - **0.0% truncation on ALL primary `S2` winning operating points**: preserves $100\%$ of queries for Mode A $\sigma=50\%$ (`ef <= 600`, max $13,302$), Mode A $\sigma=10\%$ (`ef <= 100`, max $12,565$), and Mode B $\sigma=50\%$ (`ef <= 100`, max $7,983$), while letting $>99\%$ of Mode B $\sigma=50\%, \text{ef}=600$ (`p99 = 15,726`) finish cleanly.
   - **Caps worst-case closure DoS**: instead of evaluating `54,037` vectors on `100k` (or `500k+` on `1M`), any runaway low-selectivity or disconnected correlated traversal stops cleanly at `16,384` evaluations and sets `FilteredSearchFlags::eval_limit_reached = true`.
 - **Tighter Alternative (`Some(10_000)`):** Saves another ~39% worst-case closure work (`0%` hit on Mode A/B $\sigma=50\%$ `ef <= 100` and Mode A $\sigma=10\%$ `ef=20`), while truncating the $\approx 5\%$ tail at Mode A $\sigma=10\%, \text{ef}=100$ (`p95 = 10,216`).
-- **API Struct Contract Note:** Currently [`src/filter.rs`](../../src/filter.rs#L476) sets `FilteredSearchParams::default().eval_limit = None`, and its unit test asserts `None`. Note also that `S1_post_uncapped` with an opaque closure can call the closure up to $N$ times if `eval_limit` is `None`. At Gate **G4.5**, Dev can either:
+- **API Struct Contract Note:** Currently [`src/filter.rs`](../../src/filter.rs#L476) sets `FilteredSearchParams::default().eval_limit = None`, and its unit test asserts `None`. Note also that `S1_post_uncapped` with an opaque closure can call the closure up to $N$ times if `eval_limit` is `None`. At Gate **G4.5**, two options exist:
   1. Keep `FilteredSearchParams::default().eval_limit = None` (zero impact on existing tests) and define `pub const DEFAULT_OPAQUE_EVAL_LIMIT: usize = 16_384;` plus `FilteredSearchParams::with_opaque_eval_limit()`, **or**
   2. Update `FilteredSearchParams::default().eval_limit = Some(16_384)` (safest default against opaque closure hangs; only touches `predicate.bitset().is_none()` callers).
 
 ---
 
-## 7. Gate G4.5 Decision Checklist for Dev (Unticked)
+## 7. Gate G4.5 Decision Checklist
 
 Please review and indicate your sign-off decisions on the items below before `T3.8` / `T3.9` begin:
 

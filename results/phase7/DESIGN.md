@@ -75,7 +75,7 @@ Inspected directly from the local Python environment (`Python 3.13.5`, `MSC v.19
 | **OpenMP Default vs Pinned** | `faiss.omp_get_max_threads()` defaults to `16`; `faiss.omp_set_num_threads(1)` reduces it to `1` | Must explicitly call `faiss.omp_set_num_threads(1)` **before** index build and single-thread search |
 | **Rust Codegen Comparison** | `rustc 1.99.1 (58cf8f9c3 2026-10-13)`, `opt-level = 3`, `lto = "thin"`, `codegen-units = 1`, no `.cargo/config.toml` | Default Windows x86_64 target (host triple was not recorded in the result JSONs; current builds use `x86_64-pc-windows-gnu`; baseline SSE2 + LLVM auto-vectorization over 8-way unrolled `as_chunks::<8>()` in `src/distance.rs`, `#![forbid(unsafe_code)]`) |
 
-**Implication for Gate G6:** Stock `faiss-cpu 1.15.1` (`SIMDLevel_NONE`) vs default-target Rust (host triple was not recorded in the result JSONs; current builds use `x86_64-pc-windows-gnu`) is actually a **fair baseline-SIMD comparison** (neither binary uses AVX2). However, if Dev also wants to measure what hand-written C++ AVX2 achieves vs safe Rust auto-vectorization (`-C target-cpu=native`), we list an optional **AVX2 Addendum Arm** in Section 8 for Gate G6 sign-off (requiring either a source/conda-forge AVX2 FAISS build or confirming stock PyPI `faiss-cpu 1.15.1` is sufficient).
+**Implication for Gate G6:** Stock `faiss-cpu 1.15.1` (`SIMDLevel_NONE`) vs default-target Rust (host triple was not recorded in the result JSONs; current builds use `x86_64-pc-windows-gnu`) is actually a **fair baseline-SIMD comparison** (neither binary uses AVX2). Measuring hand-written C++ AVX2 vs safe Rust auto-vectorization (`-C target-cpu=native`) is listed as an optional **AVX2 Addendum Arm** in Section 8 for Gate G6 sign-off (requiring either a source/conda-forge AVX2 FAISS build or confirming stock PyPI `faiss-cpu 1.15.1` is sufficient).
 
 ### 2.4 `faiss.IndexHNSWFlat` Structural & Sanity Probe (`siftsmall` 10k & Synthetic 100k)
 
@@ -130,7 +130,7 @@ We align directly with the **4 Pareto-frontier configurations** established in P
 | **C4** *(Gate G6 opt)* | `48` | `96` | `400` | Accuracy-saturated dense graph | `2,827.980` | `402.42` |
 | **C2-nkp** *(Sensitivity)* | `16` | `32` | `100` | Rust `--no-keep-pruned-shrink` (`keep_pruned_shrink = false`) to isolate shrink-backfill effect vs FAISS | `415.076` *(Phase 3.5)* | `148.91` |
 
-- **Gate G6 Scope Choice:** Benchmarking `{C1, C2, C3, C2-nkp}` at `100k` and `1M` avoids the ~47-minute Rust `C4` (`M=48, efC=400`) 1M rebuild (or reuses Phase 4's clean `1M` numbers if `src/hnsw.rs` is untouched), while adding `C4` gives full 4-point parity with Phase 4. Dev confirms `{C1, C2, C3}` vs `{C1, C2, C3, C4}` at Gate G6.
+- **Gate G6 Scope Choice:** Benchmarking `{C1, C2, C3, C2-nkp}` at `100k` and `1M` avoids the ~47-minute Rust `C4` (`M=48, efC=400`) 1M rebuild (or reuses Phase 4's clean `1M` numbers if `src/hnsw.rs` is untouched), while adding `C4` gives full 4-point parity with Phase 4; `{C1, C2, C3}` vs `{C1, C2, C3, C4}` is decided at Gate G6.
 - **`efSearch` Ladder (both engines, both scales)**: `[10, 20, 30, 40, 50, 70, 100, 150, 200, 300, 400, 600]` (identical 12-point Phase 4 ladder).
 - **Seed & RNG**: Rust uses deterministic `seed = 42` (`Xoshiro256**`). FAISS uses explicit `idx.hnsw.rng = faiss.RandomGenerator(42)` for reproducible FAISS builds across runs (not comparable edge-for-edge with Rust's PRNG, see Section 6).
 
@@ -223,9 +223,9 @@ No implementation or benchmark execution begins before **Gate G6** sign-off.
 
 ---
 
-## 8. Gate G6 Decision Checklist (For Dev Sign-Off)
+## 8. Gate G6 Decision Checklist
 
-> **To be reviewed and decided by Dev before any M5 / Phase 7 code or benchmark runs begin.**
+> **Reviewed and decided prior to M5 / Phase 7 code and benchmark runs (outcomes recorded in [`G6_DECISIONS.md`](./G6_DECISIONS.md)).**
 
 1. **Configuration Scope at `100k` and `1M`**:
    - [ ] **Option A (Recommended — Core Frontier + `keep_pruned` Control):** `{ (M=8, efC=100), (M=16, efC=100), (M=32, efC=200), (M=16, efC=100, keep_pruned_shrink=false) }`. Covers low-memory, standard baseline, high-recall frontier, and shrink-backfill isolation without a ~47-minute `M=48, efC=400` 1M rebuild.
@@ -240,4 +240,4 @@ No implementation or benchmark execution begins before **Gate G6** sign-off.
 5. **Re-Run Rust on Clean Phase 7 Commit vs Reuse Phase 4 JSON**:
    - [ ] **Recommended:** Re-run Rust Mode 1 (`search_batch_parallel(..., 1)`) + Mode 2 (`search_batch_timed_with_tracker`) on the exact same clean Phase 7 commit and power/thermal session as FAISS (`Best Performance` power scheme, OneDrive paused), and cross-check that graph fingerprints and recalls remain bit-for-bit identical to Phase 4 (`0x44044886c62bca5e` for `1M M=16, efC=100`).
 6. **Pre-Flight Environment Controls**:
-   - [ ] Confirm Dev will switch Windows power plan from `Balanced` to **Best Performance** (AC plugged in) and pause OneDrive sync (or execute from a non-OneDrive local path) prior to `T5.4`/`T5.5` final measurements.
+   - [ ] Switch Windows power plan from `Balanced` to **Best Performance** (AC plugged in) and pause OneDrive sync (or execute from a non-OneDrive local path) prior to `T5.4`/`T5.5` final measurements.
