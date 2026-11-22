@@ -159,7 +159,7 @@ python -m pytest tests/ -rs --cov=src && ruff check . && mypy --config-file mypy
 
 ## Verified Benchmark Highlights (Phases 1–7)
 
-All timed benchmarks ran in `--release` (`opt-level = 3, lto = "thin", codegen-units = 1`) on `12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)` with `git_dirty: false`. Every value below maps to a source JSON path in [`results/CLAIMS.md`](results/CLAIMS.md).
+All timed benchmarks ran in `--release` (`opt-level = 3, lto = "thin", codegen-units = 1`) on `12th Gen Intel(R) Core(TM) i7-12650H (16 logical cores, 15.8 GB RAM, windows/x86_64)`. Phase 4 to 7 reports (and `results/phase3/phase2_report.json`) record `git_commit` and `git_dirty: false`; Phase 3 and Phase 3.5 reports predate those provenance fields and are traced to their commits in [`results/CLAIMS.md`](results/CLAIMS.md). Every value below maps to a source JSON path in [`results/CLAIMS.md`](results/CLAIMS.md).
 
 Numbers generated at the commit recorded in each result JSON; HEAD re-verified at 8f7649c, 231 tests pass, C2@100k p50 within 3.2%.
 

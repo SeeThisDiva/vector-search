@@ -81,7 +81,7 @@ Source report: `results/phase3/phase2_report.json` regenerated on clean commit `
 
 ## 4. Phase 3 SIFT1M Search Sweep Claims (`SIFT1M` 1,000,000 x 128-d, $M=16$, $efC=100$, $k=10$, 5-Run Sweep)
 
-Documented in [`README.md` §Phase 3 & 3.5](../README.md#phase-3--35-scale-to-1m-vectors-sift1m). Source report: `results/phase3/phase3_report.json` (`78e8fcb`).
+Documented in [`README.md` §Phase 3 & 3.5](../README.md#phase-3--35-scale-to-1m-vectors-sift1m). Source report: `results/phase3/phase3_report.json` (predates `git_commit`/`git_dirty` fields; finalized in `78e8fcb` from `366f185` and committed under `results/phase3/` in `d6473cb`).
 
 | `efSearch` | Metric | Documented Value (`README.md`) | Doc + Line | JSON Key Path | Actual JSON Value | Generating Commit | Verification Status |
 |:---:|---|---|---|---|---|---|---|
@@ -125,7 +125,7 @@ Documented in [`README.md` §Phase 3 & 3.5](../README.md#phase-3--35-scale-to-1m
 
 ## 5. Phase 3 SIFT1M Build Time & Memory Footprint Claims
 
-Documented in [`README.md` §Phase 3 & 3.5](../README.md#phase-3--35-scale-to-1m-vectors-sift1m). Source reports: `results/phase3/phase3_report.json`, `results/phase3_5/baseline_1m_report.json`, and `results/phase3_5/exp_no_keep_pruned_shrink_1m.json`.
+Documented in [`README.md` §Phase 3 & 3.5](../README.md#phase-3--35-scale-to-1m-vectors-sift1m). Source reports: `results/phase3/phase3_report.json` (predates provenance fields; finalized in `78e8fcb`, committed under `results/phase3/` in `d6473cb`), `results/phase3_5/baseline_1m_report.json` (predates provenance fields; generated on `170b9d7`, committed in `f1ef245`), and `results/phase3_5/exp_no_keep_pruned_shrink_1m.json` (predates provenance fields; committed in `366f185`).
 
 | Metric Name | Documented Value (`README.md`) | Doc + Line | Report JSON Path | JSON Key Path | Actual JSON Value | Generating Commit | Verification Status |
 |---|---|---|---|---|---|---|---|
@@ -154,7 +154,7 @@ Documented in [`README.md` §Phase 3 & 3.5](../README.md#phase-3--35-scale-to-1m
 
 ## 6. Multi-Scale Baseline Profile Claims (Isolated Process per Scale)
 
-Documented in [`README.md` §Phase 3 & 3.5](../README.md#phase-3--35-scale-to-1m-vectors-sift1m). Source reports: `results/phase3/baseline_profile_report.json` and `results/phase3/phase3_report.json` (`multi_scale_baseline_summary`).
+Documented in [`README.md` §Phase 3 & 3.5](../README.md#phase-3--35-scale-to-1m-vectors-sift1m). Source reports: `results/phase3/baseline_profile_report.json` and `results/phase3/phase3_report.json` (`multi_scale_baseline_summary`) (both predate `git_commit`/`git_dirty` fields; generated at `78e8fcb`, committed in `d6473cb`).
 
 | Scale ($N$) | Metric | Documented Value (`README.md`) | Doc + Line | JSON Key Path | Actual JSON Value | Generating Commit | Verification Status |
 |:---:|---|---|---|---|---|---|---|
@@ -184,7 +184,7 @@ Documented in [`README.md` §Phase 3 & 3.5](../README.md#phase-3--35-scale-to-1m
 
 ## 7. Phase 3 Ground-Truth & Invariant Verification Claims
 
-Documented in [`README.md` §Phase 3 & 3.5](../README.md#phase-3--35-scale-to-1m-vectors-sift1m). Source report: `results/phase3/phase3_report.json`.
+Documented in [`README.md` §Phase 3 & 3.5](../README.md#phase-3--35-scale-to-1m-vectors-sift1m). Source reports: `results/phase3/phase3_report.json` and `results/phase3/baseline_profile_report.json` (predate `git_commit`/`git_dirty` fields; generated at `78e8fcb`, committed in `d6473cb`).
 
 | Claim / Note Statement | Doc + Line | Source JSON Path | JSON Key Path | Actual JSON Value | Generating Commit | Verification Method / Rationale |
 |---|---|---|---|---|---|---|
@@ -204,7 +204,7 @@ Documented in [`README.md` §Phase 3 & 3.5](../README.md#phase-3--35-scale-to-1m
 
 ## 8. Phase 3.5 Profiling Counters Reference (SIFT1M 1M Build)
 
-Documented in `results/phase3_5/LOG.md` and `results/phase3_5/baseline_1m_report.json` from safe `--features instrument` profiling:
+Documented in `results/phase3_5/LOG.md` and `results/phase3_5/baseline_1m_report.json` (predates `git_commit`/`git_dirty` fields; generated on `170b9d7`, committed in `f1ef245`) from safe `--features instrument` profiling:
 
 | Metric Name | Documented Value | Source Report JSON | JSON Key Path | Actual JSON Value | Generating Commit |
 |---|---|---|---|---|---|
