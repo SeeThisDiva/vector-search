@@ -71,7 +71,7 @@
   "dataset": {
     "preset": "sift1m",
     "source_kind": "authentic_sift1m",
-    "source_description": "Texmex sift1m (C:\\Users\\Dev Gupta\\OneDrive\\Documents\\Project\\vector search\\data\\sift1m\\sift_base.fvecs)",
+    "source_description": "Texmex sift1m (data/sift1m/sift_base.fvecs)",
     "is_authentic_sift": true,
     "scale_vectors": 100000,
     "num_base": 100000,
