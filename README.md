@@ -165,7 +165,7 @@ Numbers generated at the commit recorded in each result JSON; HEAD re-verified a
 
 ### Phases 1–2: Exact Baseline & 10k HNSW (`siftsmall`)
 
-- **Phase 1 Exact Brute-Force `ExactKnn`** (`10,000` base $\times$ `128`-d `float32`, `100` queries, $k=10$): **`~3,640+ QPS`**, `p50 = 0.250 ms`, `p95 = 0.379 ms`, `p99 = 0.520 ms`; `Recall@10(GT, GT) = 100.00% (1.000000)` self-recall; **`100.00%`** (`1000/1000`) official Texmex alignment; **`100.00%`** (`100%` ID alignment) vs `faiss.IndexFlatL2`.
+- **Phase 1 Exact Brute-Force `ExactKnn`** (`10,000` base $\times$ `128`-d `float32`, `100` queries, $k=10$): **`4,033.2 QPS`**, `p50 = 0.244 ms`, `p95 = 0.264 ms`, `p99 = 0.317 ms`; `Recall@10(GT, GT) = 100.00% (1.000000)` self-recall; **`100.00%`** (`1000/1000`) official Texmex alignment; **`100.00%`** (`100%` ID alignment) vs `faiss.IndexFlatL2`.
 - **Phase 2 `HnswIndex`** (`M=16`, `efConstruction=100`, $k=10$, `seed = 42`, acceptance target `Recall@10 >= 0.98` at `< 0.05 ms` mean latency met at `efSearch=20`; `results/phase3/phase2_report.json`):
 
 | `efSearch` | `10` | `20` | `50` | `100` | `200` |
