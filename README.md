@@ -1,5 +1,7 @@
 # Vector Search: HNSW from Scratch in Safe Rust
 
+[![CI](https://github.com/SeeThisDiva/vector-search/actions/workflows/ci.yml/badge.svg)](https://github.com/SeeThisDiva/vector-search/actions/workflows/ci.yml)
+
 A `#![forbid(unsafe_code)]`, `std`-only Rust HNSW approximate nearest neighbor library and benchmark suite cross-verified against FAISS (`IndexFlatL2`, `IndexHNSWFlat`) and INRIA Texmex SIFT ground truth.
 
 ![SIFT1M Recall@10 vs Single-Thread Latency Pareto Frontier and Matched C2 Build/RSS](results/hero_recall_vs_latency.png)
@@ -26,6 +28,7 @@ Commands below come directly from the repository Quickstart and CI gate (pass `-
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings && cargo clippy --all-targets --features instrument -- -D warnings
 cargo test --release && cargo test --release --features instrument --test challenge_m1_p35_tests --test rust_phase3_tests --test rust_filtered_counters_tests
+cargo build --release --bin phase1 --bin filtered_exact_knn --bin phase5 --bin phase6
 python -m pytest tests/ -rs --cov=src && ruff check . && mypy --config-file mypy.ini src tests scripts
 
 # Download siftsmall and run Phases 1-2
@@ -277,7 +280,7 @@ Compares safe Rust `HnswIndex` against `faiss-cpu 1.15.1` `IndexHNSWFlat(128, M,
 │   ├── quantized/             # Isolated `CompactHnswGraph`, `HnswSq8Index` (Way A/B), `HnswPqIndex` (ADC/SDC)
 │   ├── benchmark/, phase4/, phase5/, phase6/, main.rs, bin/  # Modularized phase runners & CLI binaries
 │   └── hnsw_phase1/           # Python reference implementation & FAISS parity helpers
-├── scripts/                   # `benchmark_faiss.py`, `plot_phase{4..7}.py` & shared `plot_common.py`/`_sys_env.py`/`_metrics.py`
+├── scripts/                   # `benchmark_faiss.py`, `plot_hero.py`, `plot_filter_collapse.py`, `plot_phase{4..7}.py` & shared helpers
 ├── tests/                     # 18 Rust integration suites (`common/`) + 6 Python pytest suites (`helpers.py`)
 ├── docs/                      # `HNSW_ALGORITHM.md` (math & pseudocode) + `dev/` (handoff & plan docs)
 ├── results/                   # `README.md` index, `CLAIMS.md` ledger, `phase3/`..`phase7/` JSONs, findings & charts
