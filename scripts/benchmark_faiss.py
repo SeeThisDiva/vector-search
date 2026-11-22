@@ -256,6 +256,15 @@ def _resolve_config_id(m: int, ef_construction: int) -> str:
     return CONFIG_ID_MAP.get((m, ef_construction), f"M{m}_efC{ef_construction}")
 
 
+def _display_path(path: Path | str) -> str:
+    """Return a repository-relative POSIX path when inside the repo root."""
+    p = Path(path)
+    try:
+        return p.resolve().relative_to(_REPO_ROOT.resolve()).as_posix()
+    except ValueError:
+        return p.name or str(p)
+
+
 def _load_dataset_arrays(
     *,
     dataset: str,
@@ -282,8 +291,9 @@ def _load_dataset_arrays(
         )
         if gt_path is not None:
             gt = read_ivecs_prefix(gt_path, max_rows=num_query)
-            gt_source = f"custom_ivecs ({gt_path})"
-            resolved_gt_path: str | None = str(gt_path)
+            display_gt = _display_path(gt_path)
+            gt_source = f"custom_ivecs ({display_gt})"
+            resolved_gt_path: str | None = display_gt
         else:
             gt = _compute_exact_l2_gt_faiss(base, query, k=k)
             gt_source = f"computed_faiss_index_flat_l2 (synthetic N={num_base}, Q={num_query}, k={k})"
@@ -326,16 +336,17 @@ def _load_dataset_arrays(
 
     if gt_path is not None:
         gt = read_ivecs_prefix(gt_path, max_rows=num_query)
-        gt_source = f"custom_ivecs ({gt_path})"
-        resolved_gt_path = str(gt_path)
+        display_gt = _display_path(gt_path)
+        gt_source = f"custom_ivecs ({display_gt})"
+        resolved_gt_path = display_gt
     elif dataset == "siftsmall" and num_base == 10_000 and default_gt.is_file():
         gt = read_ivecs_prefix(default_gt, max_rows=num_query)
         gt_source = "official_texmex_siftsmall_groundtruth_ivecs"
-        resolved_gt_path = str(default_gt)
+        resolved_gt_path = _display_path(default_gt)
     elif dataset == "sift1m" and num_base == 1_000_000 and default_gt.is_file():
         gt = read_ivecs_prefix(default_gt, max_rows=num_query)
         gt_source = "official_texmex_sift1m_groundtruth_ivecs"
-        resolved_gt_path = str(default_gt)
+        resolved_gt_path = _display_path(default_gt)
     elif (
         dataset == "sift1m"
         and num_base == 100_000
@@ -343,8 +354,9 @@ def _load_dataset_arrays(
     ):
         cached_100k_gt = _REPO_ROOT / "data" / "gt_100000_k100.ivecs"
         gt = read_ivecs_prefix(cached_100k_gt, max_rows=num_query)
-        gt_source = f"cached_exact_knn_prefix_ivecs ({cached_100k_gt})"
-        resolved_gt_path = str(cached_100k_gt)
+        display_cached_gt = _display_path(cached_100k_gt)
+        gt_source = f"cached_exact_knn_prefix_ivecs ({display_cached_gt})"
+        resolved_gt_path = display_cached_gt
     else:
         gt = _compute_exact_l2_gt_faiss(base, query, k=k)
         gt_source = f"computed_faiss_index_flat_l2 (N={num_base}, Q={num_query}, k={k})"
@@ -354,7 +366,7 @@ def _load_dataset_arrays(
     dataset_meta = {
         "preset": dataset,
         "source_kind": f"authentic_{dataset}" if is_authentic else "custom_fvecs",
-        "source_description": f"Texmex {dataset} ({base_path})",
+        "source_description": f"Texmex {dataset} ({_display_path(base_path)})",
         "is_authentic_sift": is_authentic,
         "scale_vectors": num_base,
         "num_base": num_base,
