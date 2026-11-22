@@ -443,8 +443,7 @@ def _plot_matched_c2_side_panels(
         xlim_scale=1.24,
     )
 
-    rss_saved = faiss_c2.peak_rss_mb - rust_c2.peak_rss_mb
-    rss_pct = 100.0 * rss_saved / faiss_c2.peak_rss_mb
+    rss_gap = faiss_c2.peak_rss_mb - rust_c2.peak_rss_mb
     _plot_side_bars(
         axes_side[1],
         labels=labels,
@@ -455,7 +454,7 @@ def _plot_matched_c2_side_panels(
         title="Isolated Peak RSS (PeakWorkingSet64)",
         xlabel="Peak working set [MiB]",
         xlim_scale=1.62,
-        annotation=f"Rust saves {rss_saved:.1f} MiB\n(-{rss_pct:.1f}%)",
+        annotation=f"Gap: {rss_gap:.2f} MiB\n(~1 base-matrix copy)",
     )
 
     _plot_side_bars(
