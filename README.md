@@ -145,7 +145,7 @@ fn main() -> vector_search::error::Result<()> {
 
 ### Verification & CI Gate
 
-Mirrors [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (`231` default Rust tests + `22` `--features instrument` tests + `56` Python tests, `0` skipped; `siftsmall` Rust tests skip if `data/siftsmall/` has not been downloaded via `phase1`):
+Mirrors [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (`231` default Rust tests + `22` `--features instrument` tests + `57` Python tests, `0` skipped; `siftsmall` Rust tests skip if `data/siftsmall/` has not been downloaded via `phase1`):
 
 ```bash
 cargo fmt --all -- --check
@@ -280,8 +280,8 @@ Compares safe Rust `HnswIndex` against `faiss-cpu 1.15.1` `IndexHNSWFlat(128, M,
 │   ├── quantized/             # Isolated `CompactHnswGraph`, `HnswSq8Index` (Way A/B), `HnswPqIndex` (ADC/SDC)
 │   ├── benchmark/, phase4/, phase5/, phase6/, main.rs, bin/  # Modularized phase runners & CLI binaries
 │   └── hnsw_phase1/           # Python reference implementation & FAISS parity helpers
-├── scripts/                   # `benchmark_faiss.py`, `plot_hero.py`, `plot_filter_collapse.py`, `plot_phase{4..7}.py` & shared helpers
-├── tests/                     # 18 Rust integration suites (`common/`) + 6 Python pytest suites (`helpers.py`)
+├── scripts/                   # `benchmark_faiss.py`, `check_claims.py`, `plot_hero.py`, `plot_filter_collapse.py`, `plot_phase{4..7}.py` & shared helpers
+├── tests/                     # 18 Rust integration suites (`common/`) + 7 Python pytest suites (`helpers.py`)
 ├── docs/                      # `HNSW_ALGORITHM.md` (math & pseudocode)
 ├── results/                   # `README.md` index, `CLAIMS.md` ledger, `phase3/`..`phase7/` JSONs, findings & charts
 ├── data/                      # Gitignored SIFT corpora, cached prefix GT & bitsets
