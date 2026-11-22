@@ -6,6 +6,9 @@ description = "From-scratch HNSW Approximate Nearest Neighbor Search (unfiltered
 license = "MIT"
 rust-version = "1.88"
 readme = "README.md"
+repository = "https://github.com/SeeThisDiva/vector-search"
+keywords = ["hnsw", "vector-search", "ann", "nearest-neighbors", "quantization"]
+categories = ["algorithms", "science"]
 
 [lib]
 name = "vector_search"
