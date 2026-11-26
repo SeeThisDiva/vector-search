@@ -205,7 +205,10 @@ pub fn generate_synthetic_sift(
     let cluster_std = scale_factor * 0.15;
 
     // 1. Cluster centroids on scaled hypersphere
-    let mut centroids = vec![0.0_f32; clusters * dim];
+    let centroid_elems = clusters.checked_mul(dim).ok_or_else(|| {
+        VectorSearchError::InvalidArgument("num_clusters * dim overflows usize".to_string())
+    })?;
+    let mut centroids = vec![0.0_f32; centroid_elems];
     for c in 0..clusters {
         let start = c * dim;
         let slice = &mut centroids[start..start + dim];
@@ -437,6 +440,16 @@ fn candidate_sift_dirs(preset: SiftPreset, cache_dir: &Path) -> Vec<(PathBuf, &'
     }
 }
 
+fn expected_preset_file_bytes(preset: SiftPreset) -> (u64, u64, u64) {
+    let expected_base_bytes =
+        (preset.expected_num_base() as u64) * (4 + 4 * (preset.expected_dim() as u64));
+    let expected_query_bytes =
+        (preset.expected_num_query() as u64) * (4 + 4 * (preset.expected_dim() as u64));
+    let expected_gt_bytes =
+        (preset.expected_num_query() as u64) * (4 + 4 * (preset.expected_gt_k() as u64));
+    (expected_base_bytes, expected_query_bytes, expected_gt_bytes)
+}
+
 fn try_load_cached_sift_bundle(
     preset: SiftPreset,
     cache_dir: &Path,
@@ -445,12 +458,8 @@ fn try_load_cached_sift_bundle(
     load_ground_truth: bool,
     t0: Instant,
 ) -> Option<LoadedDataset> {
-    let expected_base_bytes =
-        (preset.expected_num_base() as u64) * (4 + 4 * (preset.expected_dim() as u64));
-    let expected_query_bytes =
-        (preset.expected_num_query() as u64) * (4 + 4 * (preset.expected_dim() as u64));
-    let expected_gt_bytes =
-        (preset.expected_num_query() as u64) * (4 + 4 * (preset.expected_gt_k() as u64));
+    let (expected_base_bytes, expected_query_bytes, expected_gt_bytes) =
+        expected_preset_file_bytes(preset);
 
     for (dir, prefix) in candidate_sift_dirs(preset, cache_dir) {
         let base_path = dir.join(format!("{prefix}_base.fvecs"));
@@ -581,21 +590,38 @@ fn download_sift_preset(preset: SiftPreset, cache_dir: &Path) -> Result<()> {
             let target_dir = cache_dir.join("sift1m");
             fs::create_dir_all(&target_dir)?;
 
+            let (expected_base_bytes, expected_query_bytes, expected_gt_bytes) =
+                expected_preset_file_bytes(SiftPreset::Sift1M);
             let direct_files = [
-                (SIFT1M_BASE_URL, target_dir.join("sift_base.fvecs"), 900),
-                (SIFT1M_QUERY_URL, target_dir.join("sift_query.fvecs"), 180),
+                (
+                    SIFT1M_BASE_URL,
+                    target_dir.join("sift_base.fvecs"),
+                    900,
+                    expected_base_bytes,
+                ),
+                (
+                    SIFT1M_QUERY_URL,
+                    target_dir.join("sift_query.fvecs"),
+                    180,
+                    expected_query_bytes,
+                ),
                 (
                     SIFT1M_GT_URL,
                     target_dir.join("sift_groundtruth.ivecs"),
                     180,
+                    expected_gt_bytes,
                 ),
             ];
 
             let mut direct_ok = true;
             let mut errors = Vec::new();
-            for (url, dest, timeout_s) in &direct_files {
+            for (url, dest, timeout_s, expected_bytes) in &direct_files {
                 if dest.is_file() {
-                    continue;
+                    let actual_bytes = fs::metadata(dest).map(|m| m.len()).unwrap_or(0);
+                    if actual_bytes == *expected_bytes {
+                        continue;
+                    }
+                    let _ = fs::remove_file(dest);
                 }
                 let part = dest.with_extension("part");
                 let _ = fs::remove_file(&part);

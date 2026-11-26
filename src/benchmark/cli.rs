@@ -292,6 +292,7 @@ pub fn run_phase3_cli(args: &[String]) -> Result<()> {
     let mut internal_profile_scale: Option<usize> = None;
     let mut generate_golden = false;
     let mut measure_baseline = false;
+    let mut phase3_5_dir = PathBuf::from("results/phase3_5");
     let mut json_out: Option<PathBuf> = None;
     let mut show_help = false;
 
@@ -419,6 +420,9 @@ pub fn run_phase3_cli(args: &[String]) -> Result<()> {
                 measure_baseline = true;
                 i += 1;
             }
+            "--phase3-5-dir" => {
+                phase3_5_dir = PathBuf::from(next_str(args, &mut i, "--phase3-5-dir")?);
+            }
             unknown => {
                 return Err(VectorSearchError::InvalidArgument(format!(
                     "Unrecognized CLI flag '{unknown}'"
@@ -471,19 +475,18 @@ OPTIONS:
     --repro-check              Verify bit-exact reproducibility across independent builds
     --no-repro-check           Skip reproducibility check
     --repro-vectors <N>        Vector slice size for reproducibility check (default: 10000)
+    --phase3-5-dir <DIR>       Output directory for --generate-golden / --measure-baseline (default: results/phase3_5)
     -h, --help                 Print this help message"
         );
         return Ok(());
     }
 
     if generate_golden {
-        let golden_dir = PathBuf::from("results/phase3_5");
-        return generate_golden_fixtures(&data_cache_dir, &golden_dir);
+        return generate_golden_fixtures(&data_cache_dir, &phase3_5_dir);
     }
 
     if measure_baseline {
-        let baseline_dir = PathBuf::from("results/phase3_5");
-        return run_phase3_5_baseline_measurement(&data_cache_dir, &baseline_dir);
+        return run_phase3_5_baseline_measurement(&data_cache_dir, &phase3_5_dir);
     }
 
     let dataset_mode = resolve_cli_dataset_mode(

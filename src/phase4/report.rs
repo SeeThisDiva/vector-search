@@ -10,8 +10,9 @@ use crate::dataset::DatasetSource;
 use crate::distance::Metric;
 use crate::hardware::{current_utc_rfc3339, HardwareInfo};
 use crate::json_util::{
-    escape_json, extract_json_array_slice, extract_json_f64_field, extract_json_string_field,
-    extract_json_u64_field, opt_path_json, split_top_level_json_objects,
+    escape_json, extract_json_array_slice, extract_json_bool_field, extract_json_f64_field,
+    extract_json_string_field, extract_json_u64_field, extract_json_usize_field, opt_path_json,
+    split_top_level_json_objects,
 };
 use crate::recall::RepeatedSweepSummary;
 
@@ -26,7 +27,9 @@ pub fn can_resume_existing_report(
     source_kind: &str,
     scale_vectors: usize,
     num_query: usize,
+    dim: usize,
     k: usize,
+    metric: Metric,
     sweep_runs: usize,
     ef_search_list: &[usize],
     current_git_dirty: bool,
@@ -42,23 +45,59 @@ pub fn can_resume_existing_report(
         Ok(c) => c,
         Err(_) => return false,
     };
-    if !current_git_dirty && content.contains("\"git_dirty\": true") {
+    if !content.trim_end().ends_with('}') {
         return false;
     }
-    content.contains("\"measured_this_run\": true")
-        && content.contains(&format!("\"git_commit\": \"{expected_commit}\""))
-        && content.contains(&format!("\"source_kind\": \"{source_kind}\""))
-        && content.contains(&format!("\"scale_vectors\": {scale_vectors}"))
-        && content.contains(&format!("\"num_query\": {num_query}"))
-        && content.contains(&format!("\"k\": {k}"))
-        && content.contains(&format!("\"sweep_runs\": {sweep_runs}"))
-        && content.contains(&format!("\"m\": {}", idx_cfg.m))
-        && content.contains(&format!("\"ef_construction\": {}", idx_cfg.ef_construction))
-        && content.contains(&format!("\"seed\": {}", idx_cfg.seed))
-        && ef_search_list
-            .iter()
-            .all(|ef| content.contains(&format!("\"ef_search\": {ef},")))
-        && content.matches("\"ef_search\":").count() == ef_search_list.len()
+    if !current_git_dirty && extract_json_bool_field(&content, "git_dirty") == Some(true) {
+        return false;
+    }
+    let expected_m_max = idx_cfg.m_max.unwrap_or(idx_cfg.m);
+    let expected_m_max0 = idx_cfg
+        .m_max0
+        .unwrap_or_else(|| idx_cfg.m.saturating_mul(2));
+    let keep_pruned_shrink_matches = match idx_cfg.keep_pruned_shrink {
+        Some(v) => extract_json_bool_field(&content, "keep_pruned_shrink") == Some(v),
+        None => {
+            extract_json_bool_field(&content, "keep_pruned_shrink").is_none()
+                && content.contains("\"keep_pruned_shrink\": null")
+        }
+    };
+    if !(extract_json_bool_field(&content, "measured_this_run") == Some(true)
+        && extract_json_string_field(&content, "git_commit").as_deref() == Some(expected_commit)
+        && extract_json_string_field(&content, "source_kind").as_deref() == Some(source_kind)
+        && extract_json_usize_field(&content, "scale_vectors") == Some(scale_vectors)
+        && extract_json_usize_field(&content, "num_query") == Some(num_query)
+        && extract_json_usize_field(&content, "dim") == Some(dim)
+        && extract_json_usize_field(&content, "k") == Some(k)
+        && extract_json_string_field(&content, "metric").as_deref() == Some(&metric.to_string())
+        && extract_json_usize_field(&content, "sweep_runs") == Some(sweep_runs)
+        && extract_json_usize_field(&content, "m") == Some(idx_cfg.m)
+        && extract_json_usize_field(&content, "m_max") == Some(expected_m_max)
+        && extract_json_usize_field(&content, "m_max0") == Some(expected_m_max0)
+        && extract_json_usize_field(&content, "ef_construction") == Some(idx_cfg.ef_construction)
+        && extract_json_bool_field(&content, "keep_pruned") == Some(idx_cfg.keep_pruned)
+        && keep_pruned_shrink_matches
+        && extract_json_u64_field(&content, "seed") == Some(idx_cfg.seed))
+    {
+        return false;
+    }
+
+    let Some(sweep_slice) = extract_json_array_slice(&content, "ef_search_sweep") else {
+        return false;
+    };
+    let sweep_objs = split_top_level_json_objects(sweep_slice);
+    if sweep_objs.len() != ef_search_list.len() {
+        return false;
+    }
+    for (&expected_ef, obj) in ef_search_list.iter().zip(sweep_objs.iter()) {
+        if extract_json_usize_field(obj, "ef_search") != Some(expected_ef)
+            || extract_json_f64_field(obj, "recall_at_k").is_none()
+            || extract_json_f64_field(obj, "qps").is_none()
+        {
+            return false;
+        }
+    }
+    true
 }
 
 /// Single efSearch evaluation step within an index report.

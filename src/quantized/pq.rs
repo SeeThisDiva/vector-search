@@ -956,8 +956,9 @@ fn sample_train_indices(
 
 /// Safe, bounds-check-free 8-way unrolled PQ Asymmetric Distance Computation (`ADC`) kernel.
 ///
-/// Sums `adc_table[m * 256 + usize::from(code[m])]` across all `M_pq` subspaces and clamps
-/// negative zero/rounding artifacts to `0.0`.
+/// Sums `adc_table[m * 256 + usize::from(code[m])]` across all `M_pq` subspaces and canonicalizes
+/// `-0.0` to `+0.0`. L2 tables store non-negative squared residuals (`>= 0.0`), while
+/// `Metric::InnerProduct` tables store `-dot(q_m, c_{m,k})`, which may be negative.
 ///
 /// # Panics
 /// Panics if `adc_table.len()` is not `code.len() * 256`.
@@ -965,7 +966,7 @@ fn sample_train_indices(
 #[must_use]
 pub fn pq_adc_distance(adc_table: &[f32], code: &[u8]) -> f32 {
     let sum = pq_adc_sum_raw(adc_table, code);
-    if sum <= 0.0 {
+    if sum == 0.0 {
         0.0
     } else {
         sum
@@ -975,13 +976,16 @@ pub fn pq_adc_distance(adc_table: &[f32], code: &[u8]) -> f32 {
 /// Safe, bounds-check-free 8-way unrolled PQ Symmetric Distance Computation (`SDC`) kernel
 /// over a precomputed `[m_pq * 256 * 256]` inter-centroid lookup table.
 ///
+/// Returns the raw table sum with `-0.0` canonicalized to `+0.0` (non-negative for L2 tables;
+/// signed `-dot` for `Metric::InnerProduct` tables).
+///
 /// # Panics
 /// Panics if `sdc_table.len() != code_a.len() * 65_536` or `code_a.len() != code_b.len()`.
 #[inline]
 #[must_use]
 pub fn pq_sdc_distance(sdc_table: &[f32], code_a: &[u8], code_b: &[u8]) -> f32 {
     let sum = pq_sdc_sum_raw(sdc_table, code_a, code_b);
-    if sum <= 0.0 {
+    if sum == 0.0 {
         0.0
     } else {
         sum

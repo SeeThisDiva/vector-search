@@ -84,7 +84,7 @@ impl HnswConfig {
     /// Maximum outgoing edges per node at layer 0.
     #[must_use]
     pub fn effective_m_max0(&self) -> usize {
-        self.m_max0.unwrap_or(2 * self.m)
+        self.m_max0.unwrap_or_else(|| self.m.saturating_mul(2))
     }
 
     /// Layer scale factor used for level sampling.
@@ -107,15 +107,29 @@ impl HnswConfig {
                 "m must be at least 2".to_string(),
             ));
         }
-        if self.effective_m_max() < self.m {
+        let m_max = self.effective_m_max();
+        if m_max < self.m {
             return Err(VectorSearchError::InvalidArgument(
                 "m_max must be >= m".to_string(),
             ));
         }
-        if self.effective_m_max0() < self.m {
+        if m_max >= u32::MAX as usize {
+            return Err(VectorSearchError::InvalidArgument(format!(
+                "m_max ({m_max}) must be < u32::MAX ({})",
+                u32::MAX
+            )));
+        }
+        let m_max0 = self.effective_m_max0();
+        if m_max0 < self.m {
             return Err(VectorSearchError::InvalidArgument(
                 "m_max0 must be >= m".to_string(),
             ));
+        }
+        if m_max0 >= u32::MAX as usize {
+            return Err(VectorSearchError::InvalidArgument(format!(
+                "m_max0 ({m_max0}) must be < u32::MAX ({})",
+                u32::MAX
+            )));
         }
         if self.ef_construction < self.m {
             return Err(VectorSearchError::InvalidArgument(
@@ -832,7 +846,9 @@ impl<'a> HnswIndex<'a> {
         lc: usize,
         tracker: &mut VisitedTracker,
     ) -> BinaryHeap<Candidate> {
-        let cap = ef + self.config.effective_m_max0();
+        let cap = ef
+            .min(self.node_meta.len())
+            .saturating_add(self.config.effective_m_max0());
         let mut c = BinaryHeap::<Reverse<Candidate>>::with_capacity(cap);
         let mut w = BinaryHeap::<Candidate>::with_capacity(cap);
         self.search_layer_with_scratch(query, ep, ef, lc, tracker, &mut c, &mut w);
@@ -1095,6 +1111,9 @@ impl<'a> HnswIndex<'a> {
     /// unreachable placeholder nodes and re-inserting an id would leave dangling edges, so both
     /// are rejected with `InvalidArgument` instead of silently corrupting the graph.
     pub fn insert(&mut self, q_id: usize) -> Result<()> {
+        if self.node_meta.is_empty() {
+            self.config.validate()?;
+        }
         if q_id > u32::MAX as usize {
             return Err(VectorSearchError::InvalidArgument(format!(
                 "Vector id {q_id} exceeds u32::MAX ({})",
@@ -1112,6 +1131,11 @@ impl<'a> HnswIndex<'a> {
                 "Vector id {q_id} must be inserted in order; next expected id is {}",
                 self.node_meta.len()
             )));
+        }
+        if self.matrix.cols() == 0 {
+            return Err(VectorSearchError::InvalidArgument(
+                "matrix must have at least 1 column".to_string(),
+            ));
         }
 
         let q_vec = self.matrix.row(q_id);
@@ -1357,7 +1381,7 @@ impl<'a> HnswIndex<'a> {
         self.search_knn_with_tracker_inner::<false>(query, k, ef_search, tracker, None, None)
     }
 
-    pub(super) fn search_knn_with_tracker_inner<const COLLECT_COUNTERS: bool>(
+    pub(super) fn search_knn_raw_inner<const COLLECT_COUNTERS: bool>(
         &self,
         query: &[f32],
         k: usize,
@@ -1365,15 +1389,15 @@ impl<'a> HnswIndex<'a> {
         tracker: &mut VisitedTracker,
         predicate_bitset: Option<&crate::filter::DenseBitset>,
         mut counters: Option<&mut FilteredSearchCounters>,
-    ) -> Result<Vec<(f32, usize)>> {
+    ) -> Result<Vec<Candidate>> {
         self.validate_query_slice(query, query.len(), k)?;
 
         let Some(curr_ep) = self.enter_point else {
             return Ok(Vec::new());
         };
 
-        let effective_ef = ef_search.max(k);
-        let cap0 = effective_ef + self.config.effective_m_max0();
+        let effective_ef = ef_search.max(k).min(self.node_meta.len());
+        let cap0 = effective_ef.saturating_add(self.config.effective_m_max0());
         let mut c0 = BinaryHeap::<Reverse<Candidate>>::with_capacity(cap0);
         let mut w = BinaryHeap::<Candidate>::with_capacity(cap0);
 
@@ -1402,7 +1426,28 @@ impl<'a> HnswIndex<'a> {
         );
 
         // Phase 3: Extract top-K elements ordered ascending by (distance, id)
-        let sorted = w.into_sorted_vec();
+        let mut sorted = w.into_sorted_vec();
+        sorted.truncate(k);
+        Ok(sorted)
+    }
+
+    pub(super) fn search_knn_with_tracker_inner<const COLLECT_COUNTERS: bool>(
+        &self,
+        query: &[f32],
+        k: usize,
+        ef_search: usize,
+        tracker: &mut VisitedTracker,
+        predicate_bitset: Option<&crate::filter::DenseBitset>,
+        counters: Option<&mut FilteredSearchCounters>,
+    ) -> Result<Vec<(f32, usize)>> {
+        let sorted = self.search_knn_raw_inner::<COLLECT_COUNTERS>(
+            query,
+            k,
+            ef_search,
+            tracker,
+            predicate_bitset,
+            counters,
+        )?;
         Ok(self.format_candidates(&sorted, k))
     }
 
@@ -1413,6 +1458,9 @@ impl<'a> HnswIndex<'a> {
     }
 
     /// Batch sequential query execution recording latency statistics.
+    ///
+    /// If fewer than `effective_k = min(k, num_vectors)` nodes are reachable for a query,
+    /// trailing slots in that row are padded with `(id = -1, distance = f32::INFINITY)`.
     pub fn search_batch_timed(
         &mut self,
         queries: &RowMatrix<f32>,
@@ -1427,6 +1475,9 @@ impl<'a> HnswIndex<'a> {
 
     /// Read-only batch sequential query execution recording latency statistics using an
     /// externally-supplied [`VisitedTracker`].
+    ///
+    /// If fewer than `effective_k = min(k, num_vectors)` nodes are reachable for a query,
+    /// trailing slots in that row are padded with `(id = -1, distance = f32::INFINITY)`.
     pub fn search_batch_timed_with_tracker(
         &self,
         queries: &RowMatrix<f32>,
@@ -1458,9 +1509,14 @@ impl<'a> HnswIndex<'a> {
             let q_ms = q_start.elapsed().as_secs_f64() * 1000.0;
             latencies_ms.push(q_ms);
 
+            let hit_count = hits.len();
             for (dist, id) in hits {
                 all_indices.push(id as i32);
                 all_distances.push(dist);
+            }
+            for _ in hit_count..effective_k {
+                all_indices.push(-1_i32);
+                all_distances.push(f32::INFINITY);
             }
         }
         let total_elapsed_s = batch_start.elapsed().as_secs_f64();
@@ -1477,6 +1533,9 @@ impl<'a> HnswIndex<'a> {
     }
 
     /// Batch sequential query execution.
+    ///
+    /// If fewer than `effective_k = min(k, num_vectors)` nodes are reachable for a query,
+    /// trailing slots in that row are padded with `(id = -1, distance = f32::INFINITY)`.
     pub fn search_batch(
         &mut self,
         queries: &RowMatrix<f32>,
@@ -1488,6 +1547,9 @@ impl<'a> HnswIndex<'a> {
     }
 
     /// Scoped multi-threaded batch search with per-worker visited trackers.
+    ///
+    /// If fewer than `effective_k = min(k, num_vectors)` nodes are reachable for a query,
+    /// trailing slots in that row are padded with `(id = -1, distance = f32::INFINITY)`.
     pub fn search_batch_parallel(
         &self,
         queries: &RowMatrix<f32>,
@@ -1523,9 +1585,14 @@ impl<'a> HnswIndex<'a> {
             let mut all_distances = Vec::with_capacity(num_queries * effective_k);
             for q_row in queries.iter_rows() {
                 let hits = self.search_knn_with_tracker(q_row, k, ef_search, &mut tracker)?;
+                let hit_count = hits.len();
                 for (dist, id) in hits {
                     all_indices.push(id as i32);
                     all_distances.push(dist);
+                }
+                for _ in hit_count..effective_k {
+                    all_indices.push(-1_i32);
+                    all_distances.push(f32::INFINITY);
                 }
             }
             return Ok(KnnSearchResult {
@@ -1534,8 +1601,8 @@ impl<'a> HnswIndex<'a> {
             });
         }
 
-        let mut all_indices = vec![0_i32; num_queries * effective_k];
-        let mut all_distances = vec![0.0_f32; num_queries * effective_k];
+        let mut all_indices = vec![-1_i32; num_queries * effective_k];
+        let mut all_distances = vec![f32::INFINITY; num_queries * effective_k];
         let chunk_size = num_queries.div_ceil(workers);
 
         std::thread::scope(|s| {

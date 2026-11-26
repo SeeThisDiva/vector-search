@@ -345,52 +345,53 @@ impl<'a> HnswIndex<'a> {
                     true
                 };
 
-                let used_scratch_heaps =
-                    if let Some((frontier, matched_res, raw_cands)) = heap_bufs.as_mut() {
-                        if frontier.capacity() >= total
-                            && matched_res.capacity() > current_ef
-                            && raw_cands.capacity() >= current_ef
-                        {
-                            let ep = self.enter_point.expect("enter_point checked non-empty");
-                            let pred_bitset = predicate.bitset();
-                            let curr_ep = self.search_top_layers_greedy::<COLLECT_COUNTERS>(
-                                query,
-                                ep,
-                                tracker,
-                                frontier,
-                                matched_res,
-                                pred_bitset,
-                                counters.as_deref_mut(),
-                            );
-                            self.search_layer_with_scratch_inner::<COLLECT_COUNTERS>(
-                                query,
-                                curr_ep,
-                                current_ef,
-                                0,
-                                tracker,
-                                frontier,
-                                matched_res,
-                                pred_bitset,
-                                counters.as_deref_mut(),
-                            );
-                            drain_heap_asc(matched_res, raw_cands);
-                            let take_k = k_prime.min(raw_cands.len());
-                            for cand in &raw_cands[..take_k] {
-                                let d = self.format_output_distance(cand.distance);
-                                if !try_push_candidate(d, cand.id, &mut eval_limit_reached) {
-                                    break;
-                                }
+                let used_scratch_heaps = if let Some((frontier, matched_res, raw_cands)) =
+                    heap_bufs.as_mut()
+                {
+                    if frontier.capacity() >= total
+                        && matched_res.capacity() > current_ef
+                        && raw_cands.capacity() >= current_ef
+                    {
+                        let ep = self.enter_point.expect("enter_point checked non-empty");
+                        let pred_bitset = predicate.bitset();
+                        let curr_ep = self.search_top_layers_greedy::<COLLECT_COUNTERS>(
+                            query,
+                            ep,
+                            tracker,
+                            frontier,
+                            matched_res,
+                            pred_bitset,
+                            counters.as_deref_mut(),
+                        );
+                        self.search_layer_with_scratch_inner::<COLLECT_COUNTERS>(
+                            query,
+                            curr_ep,
+                            current_ef,
+                            0,
+                            tracker,
+                            frontier,
+                            matched_res,
+                            pred_bitset,
+                            counters.as_deref_mut(),
+                        );
+                        drain_heap_asc(matched_res, raw_cands);
+                        let take_k = k_prime.min(raw_cands.len());
+                        for cand in &raw_cands[..take_k] {
+                            if !try_push_candidate(cand.distance, cand.id, &mut eval_limit_reached)
+                            {
+                                break;
                             }
-                            true
-                        } else {
-                            false
                         }
+                        true
                     } else {
                         false
-                    };
+                    }
+                } else {
+                    false
+                };
 
                 if !used_scratch_heaps {
-                    let candidates = self.search_knn_with_tracker_inner::<COLLECT_COUNTERS>(
+                    let candidates = self.search_knn_raw_inner::<COLLECT_COUNTERS>(
                         query,
                         k_prime,
                         current_ef,
@@ -398,8 +399,8 @@ impl<'a> HnswIndex<'a> {
                         predicate.bitset(),
                         counters.as_deref_mut(),
                     )?;
-                    for (d, id) in candidates {
-                        if !try_push_candidate(d, id, &mut eval_limit_reached) {
+                    for cand in candidates {
+                        if !try_push_candidate(cand.distance, cand.id, &mut eval_limit_reached) {
                             break;
                         }
                     }
@@ -410,8 +411,12 @@ impl<'a> HnswIndex<'a> {
 
             if best_matches.len() >= k {
                 best_matches.truncate(k);
+                let results = best_matches
+                    .iter()
+                    .map(|&(key, id)| (self.format_output_distance(key), id))
+                    .collect();
                 return Ok(FilteredSearchOutput {
-                    results: best_matches.clone(),
+                    results,
                     flags: FilteredSearchFlags {
                         post_filter_cap_reached: false,
                         eval_limit_reached,
@@ -437,8 +442,12 @@ impl<'a> HnswIndex<'a> {
                     fallback_out.flags.used_bruteforce_fallback = true;
                     return Ok(fallback_out);
                 }
+                let results = best_matches
+                    .iter()
+                    .map(|&(key, id)| (self.format_output_distance(key), id))
+                    .collect();
                 return Ok(FilteredSearchOutput {
-                    results: best_matches.clone(),
+                    results,
                     flags: FilteredSearchFlags {
                         post_filter_cap_reached: !eval_limit_reached && k_prime == k_max,
                         eval_limit_reached,
@@ -816,8 +825,10 @@ impl<'a> HnswIndex<'a> {
             });
         }
 
-        let effective_ef = params.ef_search.max(k);
-        let h_max = params.max_bridge_hops.unwrap_or(3 * effective_ef);
+        let effective_ef = params.ef_search.max(k).min(self.node_meta.len());
+        let h_max = params
+            .max_bridge_hops
+            .unwrap_or_else(|| effective_ef.saturating_mul(3));
 
         if let Some((frontier, matched_results, raw_candidates)) = scratch_bufs.as_ref() {
             if frontier.capacity() < self.node_meta.len()
@@ -831,7 +842,7 @@ impl<'a> HnswIndex<'a> {
             }
         }
 
-        let cap = effective_ef + self.config.effective_m_max0();
+        let cap = effective_ef.saturating_add(self.config.effective_m_max0());
         let mut local_c = BinaryHeap::<Reverse<Candidate>>::new();
         let mut local_w = BinaryHeap::<Candidate>::new();
         let mut local_raw = Vec::<Candidate>::new();
@@ -1048,7 +1059,7 @@ impl<'a> HnswIndex<'a> {
             drain_heap_asc(matched_results, raw_candidates);
             self.format_candidates(raw_candidates, raw_candidates.len())
         } else {
-            let mut heap = BinaryHeap::<Candidate>::with_capacity(k);
+            let mut heap = BinaryHeap::<Candidate>::with_capacity(k.min(num_base));
             self.fill_pre_filter_heap_inner::<COLLECT_COUNTERS>(
                 query, k, num_base, bitset, tracker, &mut heap, counters,
             );

@@ -82,6 +82,26 @@ pub fn run_phase5_matrix(config: &Phase5MatrixConfig) -> Result<Phase5Summary> {
         "authentic_sift1m"
     };
 
+    let expected_dim = if config.synthetic {
+        config.synthetic_dim
+    } else {
+        crate::dataset::SiftPreset::Sift1M.expected_dim()
+    };
+    let expected_num_query_total = if config.synthetic {
+        config.synthetic_queries.unwrap_or(100)
+    } else {
+        let preset = if config.scale <= 10_000 {
+            crate::dataset::SiftPreset::SiftSmall
+        } else {
+            crate::dataset::SiftPreset::Sift1M
+        };
+        config
+            .synthetic_queries
+            .map_or(preset.expected_num_query(), |q| {
+                q.min(preset.expected_num_query())
+            })
+    };
+
     // Check which cells can already be cleanly resumed before loading matrices/building HNSW.
     let mut cell_records: Vec<Phase5CellRecord> = Vec::new();
     let mut pending_coords: Vec<(MetadataMode, f64)> = Vec::new();
@@ -103,6 +123,10 @@ pub fn run_phase5_matrix(config: &Phase5MatrixConfig) -> Result<Phase5Summary> {
                         sigma,
                         config.k,
                         config.reps,
+                        config.attr_seed,
+                        config.clust_seed,
+                        expected_dim,
+                        expected_num_query_total,
                     )
                 {
                     let content = fs::read_to_string(&cell_path)?;

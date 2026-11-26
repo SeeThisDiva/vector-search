@@ -53,6 +53,10 @@ pub fn can_resume_phase5_cell(
     sigma: f64,
     k: usize,
     reps: usize,
+    attr_seed: u64,
+    clust_seed: u64,
+    dim: usize,
+    num_query_total: usize,
 ) -> bool {
     if expected_commit == "unknown" || !cell_path.is_file() {
         return false;
@@ -64,7 +68,11 @@ pub fn can_resume_phase5_cell(
         return false;
     }
     let expected_s1_uncapped = should_evaluate_s1_uncapped(sigma);
-    content.contains("\"phase\": 5")
+    let expected_clust_seed = match mode {
+        MetadataMode::Independent => 0_u64,
+        MetadataMode::Correlated => clust_seed,
+    };
+    if !(content.contains("\"phase\": 5")
         && content.contains("\"measured_this_run\": true")
         && content.contains(&format!("\"git_commit\": \"{expected_commit}\""))
         && content.contains(&format!("\"dataset_source_kind\": \"{source_kind}\""))
@@ -73,12 +81,22 @@ pub fn can_resume_phase5_cell(
         && content.contains(&format!("\"sigma_slug\": \"{}\"", sigma_slug(sigma)))
         && content.contains(&format!("\"k\": {k}"))
         && content.contains(&format!("\"reps\": {reps}"))
+        && extract_json_u64_field(&content, "attr_seed") == Some(attr_seed)
+        && extract_json_u64_field(&content, "clust_seed") == Some(expected_clust_seed)
+        && extract_json_u64_field(&content, "dim") == Some(dim as u64)
+        && extract_json_u64_field(&content, "num_query_total") == Some(num_query_total as u64)
         && content.contains(&format!("\"pred_gen_version\": {PRED_GEN_VERSION}"))
         && content.contains(&format!("\"gt_gen_version\": {GT_GEN_VERSION}"))
         && content.contains(&format!(
             "\"s1_uncapped_evaluated\": {expected_s1_uncapped}"
-        ))
-        && parse_phase5_cell_json(&content, &cell_report_filename(scale, mode, sigma)).is_ok()
+        )))
+    {
+        return false;
+    }
+    matches!(
+        parse_phase5_cell_json(&content, &cell_report_filename(scale, mode, sigma)),
+        Ok(ref record) if !record.arms.is_empty()
+    )
 }
 
 /// Parses a `Phase5CellRecord` from a written per-cell JSON file (zero external crates).

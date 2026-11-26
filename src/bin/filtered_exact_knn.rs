@@ -339,7 +339,14 @@ fn run() -> Result<()> {
                 b
             }
         } else {
-            read_bitset(filter_p)?
+            let loaded_bitset = read_bitset(filter_p)?;
+            if loaded_bitset.len() != n {
+                return Err(VectorSearchError::InvalidArgument(format!(
+                    "Filter bitset length ({}) does not match base vector count ({n})",
+                    loaded_bitset.len()
+                )));
+            }
+            loaded_bitset
         }
     } else {
         println!(
@@ -401,10 +408,12 @@ fn run() -> Result<()> {
     if q > 0 && effective_k > 0 {
         self_recall = compute_recall_at_k(&batch_res.indices, &batch_res.indices, effective_k)?;
         println!("Self-Parity:      Recall@{effective_k}(GT, GT) = {self_recall:.6}");
-        assert!(
-            (self_recall - 1.0).abs() < f64::EPSILON,
-            "Self-parity invariant failed: expected 1.0, got {self_recall}"
-        );
+        if (self_recall - 1.0).abs() >= f64::EPSILON {
+            return Err(VectorSearchError::SelfVerificationFailed {
+                k: effective_k,
+                actual_recall: self_recall,
+            });
+        }
     }
 
     // 5. Write outputs

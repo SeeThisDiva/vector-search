@@ -667,6 +667,12 @@ impl FilteredExactKnn {
 
         for q_row in queries.iter_rows() {
             let hits = self.search_filtered_validated(q_row, effective_k, predicate);
+            if hits.len() != effective_k {
+                return Err(VectorSearchError::InvalidArgument(format!(
+                    "predicate count_matching() ({effective_k}) is inconsistent with matches() ({})",
+                    hits.len()
+                )));
+            }
             for (dist, id) in hits {
                 all_indices.push(id as i32);
                 all_distances.push(dist);
@@ -717,10 +723,11 @@ impl FilteredExactKnn {
         let chunk_queries = num_queries.div_ceil(workers);
         let idx_chunk_len = chunk_queries * effective_k;
 
-        thread::scope(|s| {
+        let thread_result: Result<()> = thread::scope(|s| {
             let mut idx_rest = all_indices.as_mut_slice();
             let mut dist_rest = all_distances.as_mut_slice();
             let mut q_offset = 0;
+            let mut handles = Vec::with_capacity(workers);
 
             while q_offset < num_queries {
                 let take_q = chunk_queries.min(num_queries - q_offset);
@@ -733,19 +740,41 @@ impl FilteredExactKnn {
                 let start_q = q_offset;
                 q_offset += take_q;
 
-                s.spawn(move || {
+                handles.push(s.spawn(move || -> Result<()> {
                     for local_i in 0..take_q {
                         let q_row = queries.row(start_q + local_i);
                         let hits = self.search_filtered_validated(q_row, effective_k, predicate);
+                        if hits.len() != effective_k {
+                            return Err(VectorSearchError::InvalidArgument(format!(
+                                "predicate count_matching() ({effective_k}) is inconsistent with matches() ({})",
+                                hits.len()
+                            )));
+                        }
                         let out_base = local_i * effective_k;
                         for (j, (dist, id)) in hits.into_iter().enumerate() {
                             idx_slice[out_base + j] = id as i32;
                             dist_slice[out_base + j] = dist;
                         }
                     }
-                });
+                    Ok(())
+                }));
             }
+
+            let mut first_err: Option<VectorSearchError> = None;
+            for h in handles {
+                let res = h.join().expect("FilteredExactKnn worker thread panicked");
+                if let Err(err) = res {
+                    if first_err.is_none() {
+                        first_err = Some(err);
+                    }
+                }
+            }
+            if let Some(err) = first_err {
+                return Err(err);
+            }
+            Ok(())
         });
+        thread_result?;
 
         Ok(KnnSearchResult {
             indices: RowMatrix::new(num_queries, effective_k, all_indices)?,

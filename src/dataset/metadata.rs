@@ -236,8 +236,13 @@ fn generate_mode_b_bitset_core(
                         min_to_active = d;
                     }
                 }
-                if min_to_active < best_dist {
-                    best_dist = min_to_active;
+                let key = if min_to_active.is_nan() {
+                    f32::INFINITY
+                } else {
+                    min_to_active
+                };
+                if best_c.is_none() || key < best_dist {
+                    best_dist = key;
                     best_c = Some(c_cand);
                 }
             }

@@ -301,8 +301,12 @@ impl FilterPredicate for DenseBitset {
     }
 
     #[inline]
-    fn count_matching(&self, _total: usize) -> Option<usize> {
-        Some(self.count_ones())
+    fn count_matching(&self, total: usize) -> Option<usize> {
+        if total >= self.len {
+            Some(self.count_ones())
+        } else {
+            Some(self.iter_ones().take_while(|&id| id < total).count())
+        }
     }
 }
 

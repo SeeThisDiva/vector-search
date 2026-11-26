@@ -93,6 +93,20 @@ pub fn write_file_with_parents(path: &Path, contents: impl AsRef<[u8]>) -> Resul
     Ok(())
 }
 
+/// Parses 4 hex digits from `chars` into a `u16`.
+fn parse_hex4(chars: &mut std::str::CharIndices<'_>) -> Option<u16> {
+    let mut hex = [0_u8; 4];
+    for slot in &mut hex {
+        let (_, h) = chars.next()?;
+        if !h.is_ascii_hexdigit() {
+            return None;
+        }
+        *slot = h as u8;
+    }
+    let hex_str = std::str::from_utf8(&hex).ok()?;
+    u16::from_str_radix(hex_str, 16).ok()
+}
+
 /// Parses a JSON string literal starting immediately after the opening `"` at byte index 0,
 /// returning `(decoded_string, byte_index_after_closing_quote)`.
 fn parse_json_string_at_quote(after_open_quote: &str) -> Option<(String, usize)> {
@@ -113,22 +127,27 @@ fn parse_json_string_at_quote(after_open_quote: &str) -> Option<(String, usize)>
                     'r' => out.push('\r'),
                     't' => out.push('\t'),
                     'u' => {
-                        let mut hex = [0_u8; 4];
-                        for slot in &mut hex {
-                            let (_, h) = chars.next()?;
-                            if !h.is_ascii_hexdigit() {
+                        let code = parse_hex4(&mut chars)?;
+                        if (0xD800..=0xDBFF).contains(&code) {
+                            let (_, backslash) = chars.next()?;
+                            let (_, u_ch) = chars.next()?;
+                            if backslash != '\\' || u_ch != 'u' {
                                 return None;
                             }
-                            *slot = h as u8;
-                        }
-                        let hex_str = std::str::from_utf8(&hex).ok()?;
-                        if let Ok(code) = u32::from_str_radix(hex_str, 16) {
-                            if let Some(ch) = char::from_u32(code) {
-                                out.push(ch);
+                            let low = parse_hex4(&mut chars)?;
+                            if !(0xDC00..=0xDFFF).contains(&low) {
+                                return None;
                             }
+                            let cp = 0x10000
+                                + (((u32::from(code) - 0xD800) << 10) | (u32::from(low) - 0xDC00));
+                            out.push(char::from_u32(cp)?);
+                        } else if (0xDC00..=0xDFFF).contains(&code) {
+                            return None;
+                        } else {
+                            out.push(char::from_u32(u32::from(code))?);
                         }
                     }
-                    other => out.push(other),
+                    _ => return None,
                 }
             }
             _ => out.push(c),
@@ -137,8 +156,11 @@ fn parse_json_string_at_quote(after_open_quote: &str) -> Option<(String, usize)>
     None
 }
 
-/// Finds the start of the JSON value for `key` while skipping string literal values
-/// so `"key":` sequences inside escaped string values never trigger false matches.
+/// Finds the start of the JSON value for `key` using first-match-anywhere semantics while
+/// skipping string literal contents so `"key":` inside escaped strings never triggers false matches.
+///
+/// Note: Intentionally does not track `{}`/`[]` nesting depth because benchmark callers (e.g.,
+/// `golden.rs`) query nested fields such as `"m"` and `"graph_fingerprint"` directly by key name.
 fn find_key_value_start<'a>(content: &'a str, key: &str) -> Option<&'a str> {
     let bytes = content.as_bytes();
     let mut i = 0_usize;

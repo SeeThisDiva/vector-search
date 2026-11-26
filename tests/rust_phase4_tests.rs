@@ -315,7 +315,9 @@ fn test_phase4_resumable_sweep_skips_matching_commit_and_rebuilds_mismatched() {
         "synthetic",
         200,
         10,
+        16,
         10,
+        crate::Metric::L2Squared,
         1,
         &cfg.grid.ef_search_list,
         false, // current runner is clean

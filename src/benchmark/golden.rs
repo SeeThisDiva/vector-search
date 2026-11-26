@@ -477,6 +477,8 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
     let git_commit = prov.git_commit;
     let git_dirty = prov.git_dirty;
     let rustc_version = prov.rustc_version;
+    let power_mode = prov.power_mode;
+    let processor_affinity_mask = prov.processor_affinity_mask;
     let rss_method = peak_rss_measurement_method(false);
 
     for &scale in &[10_000_usize, 100_000_usize] {
@@ -547,7 +549,9 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
         let graph_fingerprint = index.graph_fingerprint();
         let max_layer = index.max_layer();
         let entry_point = index.entry_point().unwrap_or(0);
-        let peak_rss_mb = get_peak_rss_mb().unwrap_or(0.0);
+        let peak_rss_opt = get_peak_rss_mb();
+        let is_peak_rss_os_measured = peak_rss_opt.is_some();
+        let peak_rss_mb = peak_rss_opt.unwrap_or(0.0);
         let peak_rss_bytes = (peak_rss_mb * 1024.0 * 1024.0) as usize;
         let graph_memory_bytes = index.memory_bytes();
         let graph_only_memory_bytes = index.graph_only_memory_bytes();
@@ -555,7 +559,8 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
         let bytes_per_vector = index.bytes_per_vector();
         let graph_bytes_per_vector = bytes_per_vector;
         let graph_only_bytes_per_vector = index.graph_only_bytes_per_vector();
-        let raw_vector_bytes_per_vector = 512.0;
+        let dim = base.cols();
+        let raw_vector_bytes_per_vector = (dim * std::mem::size_of::<f32>()) as f64;
         let total_bytes_per_vector = raw_vector_bytes_per_vector + bytes_per_vector;
         let graph_components = index.graph_components();
 
@@ -639,8 +644,8 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
     \"cpu_model\": \"{}\",\n\
     \"logical_cores\": {},\n\
     \"total_ram_gb\": {:.2},\n\
-    \"power_mode\": \"best_performance\",\n\
-    \"processor_affinity_mask\": \"0x0004\"\n\
+    \"power_mode\": \"{}\",\n\
+    \"processor_affinity_mask\": \"{}\"\n\
   }},\n\
   \"dataset\": {{\n\
     \"preset\": \"sift1m\",\n\
@@ -650,7 +655,7 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
     \"base_path\": \"{}\",\n\
     \"query_path\": \"{}\",\n\
     \"scale_vectors\": {},\n\
-    \"dim\": 128,\n\
+    \"dim\": {},\n\
     \"metric\": \"l2\"\n\
   }},\n\
   \"hnsw_config\": {{\n\
@@ -676,7 +681,7 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
     \"peak_rss_mb\": {:.2},\n\
     \"peak_rss_bytes\": {},\n\
     \"peak_rss_measurement_method\": \"{}\",\n\
-    \"is_peak_rss_os_measured\": true,\n\
+    \"is_peak_rss_os_measured\": {},\n\
     \"raw_vector_bytes_per_vector\": {:.2},\n\
     \"graph_bytes_per_vector\": {:.2},\n\
     \"graph_only_bytes_per_vector\": {:.2},\n\
@@ -706,8 +711,8 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
     \"golden_fixture_file\": \"{}\"\n\
   }},\n\
   \"verification_status\": {{\n\
-    \"reproducibility_checked\": true,\n\
-    \"reproducibility_verified\": true,\n\
+    \"reproducibility_checked\": false,\n\
+    \"reproducibility_verified\": false,\n\
     \"golden_fingerprint_matched\": {},\n\
     \"golden_query_results_matched\": {},\n\
     \"forbid_unsafe_code_enforced\": true,\n\
@@ -722,10 +727,13 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
             escape_json(&hw.cpu_model),
             hw.logical_cores,
             hw.total_ram_gb.unwrap_or(0.0),
+            escape_json(&power_mode),
+            escape_json(&processor_affinity_mask),
             escape_json(&data_dir.display().to_string()),
             escape_json(&base_path.display().to_string()),
             escape_json(&query_path.display().to_string()),
             scale,
+            dim,
             scale,
             build_times[0],
             build_times[1],
@@ -739,6 +747,7 @@ pub fn run_phase3_5_baseline_measurement(data_dir: &Path, output_dir: &Path) -> 
             peak_rss_mb,
             peak_rss_bytes,
             escape_json(&rss_method),
+            is_peak_rss_os_measured,
             raw_vector_bytes_per_vector,
             graph_bytes_per_vector,
             graph_only_bytes_per_vector,
