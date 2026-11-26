@@ -334,21 +334,33 @@ def _load_dataset_arrays(
             f"Dimension mismatch: base has dim={actual_dim}, query has dim={query.shape[1]}"
         )
 
+    is_default_corpus = base_fvecs is None and query_fvecs is None
     if gt_path is not None:
         gt = read_ivecs_prefix(gt_path, max_rows=num_query)
         display_gt = _display_path(gt_path)
         gt_source = f"custom_ivecs ({display_gt})"
         resolved_gt_path = display_gt
-    elif dataset == "siftsmall" and num_base == 10_000 and default_gt.is_file():
+    elif (
+        is_default_corpus
+        and dataset == "siftsmall"
+        and num_base == 10_000
+        and default_gt.is_file()
+    ):
         gt = read_ivecs_prefix(default_gt, max_rows=num_query)
         gt_source = "official_texmex_siftsmall_groundtruth_ivecs"
         resolved_gt_path = _display_path(default_gt)
-    elif dataset == "sift1m" and num_base == 1_000_000 and default_gt.is_file():
+    elif (
+        is_default_corpus
+        and dataset == "sift1m"
+        and num_base == 1_000_000
+        and default_gt.is_file()
+    ):
         gt = read_ivecs_prefix(default_gt, max_rows=num_query)
         gt_source = "official_texmex_sift1m_groundtruth_ivecs"
         resolved_gt_path = _display_path(default_gt)
     elif (
-        dataset == "sift1m"
+        is_default_corpus
+        and dataset == "sift1m"
         and num_base == 100_000
         and (_REPO_ROOT / "data" / "gt_100000_k100.ivecs").is_file()
     ):

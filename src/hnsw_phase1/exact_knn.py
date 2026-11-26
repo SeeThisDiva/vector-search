@@ -55,6 +55,10 @@ class ExactKNN:
             raise ValueError(f"base_vectors must be a 2D array, got shape {arr.shape}")
         if arr.shape[0] == 0:
             raise ValueError("base_vectors cannot be empty")
+        if arr.shape[1] == 0:
+            raise ValueError("base_vectors must have at least 1 column (dim > 0)")
+        if not np.all(np.isfinite(arr)):
+            raise ValueError("base_vectors contains non-finite values (NaN/Inf)")
 
         self.base_vectors = arr
         self.num_base, self.dim = arr.shape
@@ -107,8 +111,12 @@ class ExactKNN:
             raise ValueError(
                 f"Dimension mismatch: queries have dim={q_dim}, base vectors have dim={self.dim}"
             )
+        if not np.all(np.isfinite(q_arr)):
+            raise ValueError("query_vectors contains non-finite values (NaN/Inf)")
         if k <= 0:
             raise ValueError(f"k must be positive, got {k}")
+        if batch_size <= 0:
+            raise ValueError(f"batch_size must be positive, got {batch_size}")
 
         effective_k = min(k, self.num_base)
 

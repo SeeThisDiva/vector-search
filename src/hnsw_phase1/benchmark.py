@@ -112,7 +112,8 @@ def run_phase1_benchmark(
     faiss_parity = False
     faiss_max_dist_diff = 0.0
     faiss_index_matches = 0
-    total_elements = num_query * k
+    effective_k = int(gt_indices.shape[1])
+    total_elements = num_query * effective_k
 
     try:
         import faiss
@@ -121,6 +122,8 @@ def run_phase1_benchmark(
         index = faiss.IndexFlatL2(dim)
         index.add(base_vectors)
         faiss_dists, faiss_indices = index.search(query_vectors, k)
+        faiss_dists = faiss_dists[:, :effective_k]
+        faiss_indices = faiss_indices[:, :effective_k]
 
         # Check index ID alignment
         faiss_index_matches = int(np.sum(faiss_indices == gt_indices))
